@@ -4,10 +4,13 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/poyrazK/cloudDNS/internal/adapters/api"
 	"github.com/poyrazK/cloudDNS/internal/adapters/repository"
+	"github.com/poyrazK/cloudDNS/internal/core/services"
 	"github.com/poyrazK/cloudDNS/internal/dns/server"
 )
 
@@ -29,10 +32,24 @@ func main() {
 	}
 
 	repo := repository.NewPostgresRepository(db)
+	dnsSvc := services.NewDNSService(repo)
 
+	// Start DNS Server
 	// Listen on 10053 for development (since 53 requires root)
-	srv := server.NewServer("127.0.0.1:10053", repo)
-	if err := srv.Run(); err != nil {
-		log.Fatalf("Server failed: %v", err)
+	dnsServer := server.NewServer("127.0.0.1:10053", repo)
+	go func() {
+		if err := dnsServer.Run(); err != nil {
+			log.Fatalf("DNS Server failed: %v", err)
+		}
+	}()
+
+	// Start Management API
+	apiHandler := api.NewAPIHandler(dnsSvc)
+	mux := http.NewServeMux()
+	apiHandler.RegisterRoutes(mux)
+
+	fmt.Println("Management API listening on :8080...")
+	if err := http.ListenAndServe(":8080", mux); err != nil {
+		log.Fatalf("HTTP Server failed: %v", err)
 	}
 }

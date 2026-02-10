@@ -53,6 +53,51 @@ func (r *PostgresRepository) GetRecords(ctx context.Context, name string, qType 
 	return records, nil
 }
 
+func (r *PostgresRepository) CreateZone(ctx context.Context, zone *domain.Zone) error {
+	query := `INSERT INTO dns_zones (id, tenant_id, name, vpc_id, description, created_at, updated_at) 
+			  VALUES ($1, $2, $3, $4, $5, $6, $7)`
+	_, err := r.db.ExecContext(ctx, query, zone.ID, zone.TenantID, zone.Name, zone.VPCID, zone.Description, zone.CreatedAt, zone.UpdatedAt)
+	return err
+}
+
+func (r *PostgresRepository) CreateRecord(ctx context.Context, record *domain.Record) error {
+	query := `INSERT INTO dns_records (id, zone_id, name, type, content, ttl, priority, created_at, updated_at) 
+			  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
+	_, err := r.db.ExecContext(ctx, query, record.ID, record.ZoneID, record.Name, record.Type, record.Content, record.TTL, record.Priority, record.CreatedAt, record.UpdatedAt)
+	return err
+}
+
+func (r *PostgresRepository) ListZones(ctx context.Context, tenantID string) ([]domain.Zone, error) {
+	query := `SELECT id, tenant_id, name, vpc_id, description, created_at, updated_at FROM dns_zones WHERE tenant_id = $1`
+	rows, err := r.db.QueryContext(ctx, query, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var zones []domain.Zone
+	for rows.Next() {
+		var z domain.Zone
+		if err := rows.Scan(&z.ID, &z.TenantID, &z.Name, &z.VPCID, &z.Description, &z.CreatedAt, &z.UpdatedAt); err != nil {
+			return nil, err
+		}
+		zones = append(zones, z)
+	}
+	return zones, nil
+}
+
+func (r *PostgresRepository) DeleteZone(ctx context.Context, zoneID string, tenantID string) error {
+	query := `DELETE FROM dns_zones WHERE id = $1 AND tenant_id = $2`
+	_, err := r.db.ExecContext(ctx, query, zoneID, tenantID)
+	return err
+}
+
+func (r *PostgresRepository) DeleteRecord(ctx context.Context, recordID string, zoneID string) error {
+	query := `DELETE FROM dns_records WHERE id = $1 AND zone_id = $2`
+	_, err := r.db.ExecContext(ctx, query, recordID, zoneID)
+	return err
+}
+
 // ConvertDomainToPacketRecord is a helper to bridge domain model and wire format
 func ConvertDomainToPacketRecord(rec domain.Record) (packet.DnsRecord, error) {
 	pRec := packet.DnsRecord{

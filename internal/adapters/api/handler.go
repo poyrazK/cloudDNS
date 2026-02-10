@@ -1,0 +1,81 @@
+package api
+
+import (
+	"encoding/json"
+	"net/http"
+
+	"github.com/poyrazK/cloudDNS/internal/core/domain"
+	"github.com/poyrazK/cloudDNS/internal/core/ports"
+)
+
+type APIHandler struct {
+	svc ports.DNSService
+}
+
+func NewAPIHandler(svc ports.DNSService) *APIHandler {
+	return &APIHandler{svc: svc}
+}
+
+func (h *APIHandler) RegisterRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("POST /zones", h.CreateZone)
+	mux.HandleFunc("GET /zones", h.ListZones)
+	mux.HandleFunc("POST /zones/{id}/records", h.CreateRecord)
+}
+
+func (h *APIHandler) CreateZone(w http.ResponseWriter, r *http.Request) {
+	var zone domain.Zone
+	if err := json.NewDecoder(r.Body).Decode(&zone); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// In a real app, we would get TenantID from Auth context
+	if zone.TenantID == "" {
+		zone.TenantID = "default-tenant"
+	}
+
+	if err := h.svc.CreateZone(r.Context(), &zone); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(zone)
+}
+
+func (h *APIHandler) ListZones(w http.ResponseWriter, r *http.Request) {
+	tenantID := r.URL.Query().Get("tenant_id")
+	if tenantID == "" {
+		tenantID = "default-tenant"
+	}
+
+	zones, err := h.svc.ListZones(r.Context(), tenantID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(zones)
+}
+
+func (h *APIHandler) CreateRecord(w http.ResponseWriter, r *http.Request) {
+	zoneID := r.PathValue("id")
+	var record domain.Record
+	if err := json.NewDecoder(r.Body).Decode(&record); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	record.ZoneID = zoneID
+
+	if err := h.svc.CreateRecord(r.Context(), &record); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(record)
+}
