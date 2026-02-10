@@ -18,6 +18,10 @@ func NewBytePacketBuffer() *BytePacketBuffer {
 	}
 }
 
+func (b *BytePacketBuffer) Load(data []byte) {
+	copy(b.Buf, data)
+}
+
 // Position returns the current cursor position
 func (b *BytePacketBuffer) Position() int {
 	return b.Pos
@@ -57,35 +61,23 @@ func (b *BytePacketBuffer) ReadRange(start int, length int) ([]byte, error) {
 
 // Readu16 reads 2 bytes as uint16 (Big Endian)
 func (b *BytePacketBuffer) Readu16() (uint16, error) {
-	b1, err := b.Read()
-	if err != nil {
-		return 0, err
+	if b.Pos+2 > 512 {
+		return 0, errors.New("end of buffer")
 	}
-	b2, err := b.Read()
-	if err != nil {
-		return 0, err
-	}
+	b1, _ := b.Read()
+	b2, _ := b.Read()
 	return uint16(b1)<<8 | uint16(b2), nil
 }
 
 // Readu32 reads 4 bytes as uint32 (Big Endian)
 func (b *BytePacketBuffer) Readu32() (uint32, error) {
-	b1, err := b.Read()
-	if err != nil {
-		return 0, err
+	if b.Pos+4 > 512 {
+		return 0, errors.New("end of buffer")
 	}
-	b2, err := b.Read()
-	if err != nil {
-		return 0, err
-	}
-	b3, err := b.Read()
-	if err != nil {
-		return 0, err
-	}
-	b4, err := b.Read()
-	if err != nil {
-		return 0, err
-	}
+	b1, _ := b.Read()
+	b2, _ := b.Read()
+	b3, _ := b.Read()
+	b4, _ := b.Read()
 	return uint32(b1)<<24 | uint32(b2)<<16 | uint32(b3)<<8 | uint32(b4), nil
 }
 

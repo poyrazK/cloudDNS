@@ -173,3 +173,76 @@ func TestWorkerPoolProcessing(t *testing.T) {
 		t.Errorf("Expected task to be consumed by worker")
 	}
 }
+
+func TestHandlePacketNXDOMAIN(t *testing.T) {
+	repo := &mockServerRepo{}
+	srv := NewServer("127.0.0.1:0", repo)
+
+	req := packet.NewDnsPacket()
+	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "missing.test", QType: packet.A})
+	reqBuf := packet.NewBytePacketBuffer()
+	req.Write(reqBuf)
+
+	var capturedResp []byte
+	srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], func(resp []byte) error {
+		capturedResp = resp
+		return nil
+	})
+
+	resPacket := packet.NewDnsPacket()
+	pBuf := packet.NewBytePacketBuffer()
+	copy(pBuf.Buf, capturedResp)
+	resPacket.FromBuffer(pBuf)
+
+	if resPacket.Header.ResCode != 3 {
+		t.Errorf("Expected NXDOMAIN (3), got %d", resPacket.Header.ResCode)
+	}
+}
+
+func TestHandlePacketNoQuestions(t *testing.T) {
+	repo := &mockServerRepo{}
+	srv := NewServer("127.0.0.1:0", repo)
+
+	req := packet.NewDnsPacket()
+	reqBuf := packet.NewBytePacketBuffer()
+	req.Write(reqBuf)
+
+	var capturedResp []byte
+	srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], func(resp []byte) error {
+		capturedResp = resp
+		return nil
+	})
+
+	resPacket := packet.NewDnsPacket()
+	pBuf := packet.NewBytePacketBuffer()
+	copy(pBuf.Buf, capturedResp)
+	resPacket.FromBuffer(pBuf)
+
+	if resPacket.Header.ResCode != 4 {
+		t.Errorf("Expected FORMERR (4) for no questions, got %d", resPacket.Header.ResCode)
+	}
+}
+
+func TestHandlePacketEDNS(t *testing.T) {
+	repo := &mockServerRepo{}
+	srv := NewServer("127.0.0.1:0", repo)
+
+	req := packet.NewDnsPacket()
+	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "test.com", QType: packet.A})
+	// Add OPT record
+	req.Resources = append(req.Resources, packet.DnsRecord{
+		Type:           packet.OPT,
+		UDPPayloadSize: 4096,
+	})
+	
+	reqBuf := packet.NewBytePacketBuffer()
+	req.Write(reqBuf)
+
+	err := srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], func(resp []byte) error {
+		return nil
+	})
+	
+	if err != nil {
+		t.Errorf("HandlePacket failed with EDNS: %v", err)
+	}
+}

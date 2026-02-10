@@ -43,6 +43,9 @@ func NewDnsHeader() *DnsHeader {
 }
 
 func (h *DnsHeader) Read(buffer *BytePacketBuffer) error {
+	if buffer.Position()+12 > 512 {
+		return errors.New("end of buffer")
+	}
 	var err error
 	h.ID, err = buffer.Readu16()
 	if err != nil {
@@ -315,11 +318,15 @@ func NewDnsPacket() *DnsPacket {
 }
 
 func (p *DnsPacket) FromBuffer(buffer *BytePacketBuffer) error {
-	if err := p.Header.Read(buffer); err != nil { return err }
+	if err := p.Header.Read(buffer); err != nil {
+		return err
+	}
 
 	for i := 0; i < int(p.Header.Questions); i++ {
 		var q DnsQuestion
-		if err := q.Read(buffer); err != nil { return err }
+		if err := q.Read(buffer); err != nil {
+			return err
+		}
 		p.Questions = append(p.Questions, q)
 	}
 

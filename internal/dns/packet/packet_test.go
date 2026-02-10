@@ -182,3 +182,69 @@ func TestReadWriteU32(t *testing.T) {
 		t.Errorf("Expected %x, got %x", val, read)
 	}
 }
+
+func TestLabelLengthLimit(t *testing.T) {
+	buffer := NewBytePacketBuffer()
+	// 63 characters is the limit for a single label
+	longLabel := "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabc"
+	err := buffer.WriteName(longLabel + ".com")
+	if err != nil {
+		t.Fatalf("Should allow 63 char label: %v", err)
+	}
+
+	tooLongLabel := longLabel + "d"
+	err = buffer.WriteName(tooLongLabel + ".com")
+	if err == nil {
+		t.Errorf("Should NOT allow 64 char label")
+	}
+}
+
+func TestEmptyName(t *testing.T) {
+	buffer := NewBytePacketBuffer()
+	err := buffer.WriteName("")
+	if err != nil {
+		t.Fatalf("Failed to write empty name")
+	}
+	// Position should be 1 (just the null terminator)
+	if buffer.Position() != 1 {
+		t.Errorf("Expected pos 1 for empty name, got %d", buffer.Position())
+	}
+
+	buffer.Seek(0)
+	name, _ := buffer.ReadName()
+	if name != "" {
+		t.Errorf("Expected empty string, got %s", name)
+	}
+}
+
+func TestMalformedPacketRead(t *testing.T) {
+	// A real DNS header is 12 bytes. If we only have 2 bytes, it should fail.
+	buffer := NewBytePacketBuffer()
+	buffer.Write(1)
+	buffer.Write(2)
+	// We need a way to tell the buffer that its "logical" end is at index 2
+	// For now, let's just seek to a position where Readu16 will hit 512
+	buffer.Seek(511)
+
+	p := NewDnsPacket()
+	err := p.FromBuffer(buffer)
+	if err == nil {
+		t.Errorf("Should have failed to read header from end of buffer")
+	}
+}
+
+func TestInvalidQueryType(t *testing.T) {
+	buffer := NewBytePacketBuffer()
+	q := DnsQuestion{Name: "test.com", QType: 9999}
+	err := q.Write(buffer)
+	if err != nil {
+		t.Fatalf("Failed to write question with unknown type: %v", err)
+	}
+
+	buffer.Seek(0)
+	parsed := DnsQuestion{}
+	parsed.Read(buffer)
+	if parsed.QType != 9999 {
+		t.Errorf("Expected QType 9999, got %d", parsed.QType)
+	}
+}
