@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net"
+	"strings"
 
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
 	"github.com/poyrazK/cloudDNS/internal/dns/packet"
@@ -119,6 +120,23 @@ func ConvertDomainToPacketRecord(rec domain.Record) (packet.DnsRecord, error) {
 	case domain.TypeNS:
 		pRec.Type = packet.NS
 		pRec.Host = rec.Content
+	case domain.TypeTXT:
+		pRec.Type = packet.TXT
+		pRec.Txt = rec.Content
+	case domain.TypeSOA:
+		pRec.Type = packet.SOA
+		// SOA content is usually stored as a space-separated string in the DB
+		// "ns1.example.com. admin.example.com. 2023101001 3600 600 1209600 3600"
+		parts := strings.Fields(rec.Content)
+		if len(parts) >= 7 {
+			pRec.MName = parts[0]
+			pRec.RName = parts[1]
+			fmt.Sscanf(parts[2], "%d", &pRec.Serial)
+			fmt.Sscanf(parts[3], "%d", &pRec.Refresh)
+			fmt.Sscanf(parts[4], "%d", &pRec.Retry)
+			fmt.Sscanf(parts[5], "%d", &pRec.Expire)
+			fmt.Sscanf(parts[6], "%d", &pRec.Minimum)
+		}
 	default:
 		return pRec, fmt.Errorf("unsupported record type: %s", rec.Type)
 	}

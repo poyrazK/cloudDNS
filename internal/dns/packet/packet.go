@@ -13,6 +13,8 @@ const (
 	NS      QueryType = 2
 	CNAME   QueryType = 5
 	MX      QueryType = 15
+	TXT     QueryType = 16
+	SOA     QueryType = 6
 	AAAA    QueryType = 28
 )
 
@@ -144,9 +146,17 @@ type DnsRecord struct {
 	Class    uint16
 	TTL      uint32
 	Data     []byte
-	IP       net.IP // Helper for A/AAAA
-	Host     string // Helper for CNAME/MX
-	Priority uint16 // Helper for MX
+	IP       net.IP   // Helper for A/AAAA
+	Host     string   // Helper for CNAME/NS/MX
+	Priority uint16   // Helper for MX
+	Txt      string   // Helper for TXT
+	MName    string   // SOA primary name server
+	RName    string   // SOA mailbox for responsible person
+	Serial   uint32   // SOA serial number
+	Refresh  uint32   // SOA refresh interval
+	Retry    uint32   // SOA retry interval
+	Expire   uint32   // SOA expire limit
+	Minimum  uint32   // SOA minimum TTL
 }
 
 func (r *DnsRecord) Read(buffer *BytePacketBuffer) error {
@@ -213,8 +223,6 @@ func (r *DnsRecord) Write(buffer *BytePacketBuffer) (int, error) {
 		}
 	case CNAME, NS:
 		// We need to calculate length AFTER writing name... 
-		// For simplicity in this scratch version, we'll reserve 2 bytes for length, 
-		// write name, then jump back
 		lenPos := buffer.Position()
 		if err := buffer.Writeu16(0); err != nil { return 0, err } // Placeholder
 		
@@ -223,6 +231,30 @@ func (r *DnsRecord) Write(buffer *BytePacketBuffer) (int, error) {
 		currPos := buffer.Position()
 		dataLen := currPos - (lenPos + 2)
 		
+		buffer.Seek(lenPos)
+		buffer.Writeu16(uint16(dataLen))
+		buffer.Seek(currPos)
+	case TXT:
+		if len(r.Txt) > 255 { return 0, errors.New("TXT record too long") }
+		if err := buffer.Writeu16(uint16(len(r.Txt) + 1)); err != nil { return 0, err } // +1 for len byte
+		if err := buffer.Write(byte(len(r.Txt))); err != nil { return 0, err }
+		for i := 0; i < len(r.Txt); i++ {
+			if err := buffer.Write(r.Txt[i]); err != nil { return 0, err }
+		}
+	case SOA:
+		lenPos := buffer.Position()
+		if err := buffer.Writeu16(0); err != nil { return 0, err } // Placeholder
+
+		if err := buffer.WriteName(r.MName); err != nil { return 0, err }
+		if err := buffer.WriteName(r.RName); err != nil { return 0, err }
+		if err := buffer.Writeu32(r.Serial); err != nil { return 0, err }
+		if err := buffer.Writeu32(r.Refresh); err != nil { return 0, err }
+		if err := buffer.Writeu32(r.Retry); err != nil { return 0, err }
+		if err := buffer.Writeu32(r.Expire); err != nil { return 0, err }
+		if err := buffer.Writeu32(r.Minimum); err != nil { return 0, err }
+
+		currPos := buffer.Position()
+		dataLen := currPos - (lenPos + 2)
 		buffer.Seek(lenPos)
 		buffer.Writeu16(uint16(dataLen))
 		buffer.Seek(currPos)
