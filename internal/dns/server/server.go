@@ -1,17 +1,22 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"github.com/poyrazK/cloudDNS/internal/dns/packet"
+	"github.com/poyrazK/cloudDNS/internal/core/ports"
+	"github.com/poyrazK/cloudDNS/internal/core/domain"
+	"github.com/poyrazK/cloudDNS/internal/adapters/repository"
 )
 
 type Server struct {
 	Addr string
+	Repo ports.DNSRepository
 }
 
-func NewServer(addr string) *Server {
-	return &Server{Addr: addr}
+func NewServer(addr string, repo ports.DNSRepository) *Server {
+	return &Server{Addr: addr, Repo: repo}
 }
 
 func (s *Server) Run() error {
@@ -59,26 +64,35 @@ func (s *Server) handlePacket(pc net.PacketConn, addr net.Addr, data []byte) {
 	response.Header.AuthoritativeAnswer = true
 	response.Header.ResCode = 0 // NOERROR by default
 
-	// 3. Simple Logic (Echo Question + Hardcoded Answer for now)
+	// 3. Resolve using Repository
 	if len(request.Questions) > 0 {
 		q := request.Questions[0]
 		response.Questions = append(response.Questions, q)
 		
 		fmt.Printf("Query: %s %d FROM %s\n", q.Name, q.QType, addr)
 
-		if q.QType == packet.A {
-			// Hardcoded match for test.clouddns.internal
-			if q.Name == "test.clouddns.internal" {
-				response.Answers = append(response.Answers, packet.DnsRecord{
-					Name: q.Name,
-					Type: packet.A,
-					Class: 1, // IN
-					TTL: 300,
-					IP: net.ParseIP("1.2.3.4"),
-				})
-			} else {
-				response.Header.ResCode = 3 // NXDOMAIN
+		// Map packet.QueryType to domain.RecordType
+		var domainType domain.RecordType
+		switch q.QType {
+		case packet.A: domainType = domain.TypeA
+		case packet.AAAA: domainType = domain.TypeAAAA
+		case packet.CNAME: domainType = domain.TypeCNAME
+		case packet.NS: domainType = domain.TypeNS
+		}
+
+		records, err := s.Repo.GetRecords(context.Background(), q.Name, domainType)
+		if err != nil {
+			fmt.Printf("Repository error: %v\n", err)
+			response.Header.ResCode = 2 // SERVFAIL
+		} else if len(records) > 0 {
+			for _, rec := range records {
+				pRec, err := repository.ConvertDomainToPacketRecord(rec)
+				if err == nil {
+					response.Answers = append(response.Answers, pRec)
+				}
 			}
+		} else {
+			response.Header.ResCode = 3 // NXDOMAIN
 		}
 	} else {
 		response.Header.ResCode = 4 // FORMERR
