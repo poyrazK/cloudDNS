@@ -16,6 +16,7 @@ const (
 	TXT     QueryType = 16
 	SOA     QueryType = 6
 	AAAA    QueryType = 28
+	OPT     QueryType = 41
 )
 
 type DnsHeader struct {
@@ -157,6 +158,11 @@ type DnsRecord struct {
 	Retry    uint32   // SOA retry interval
 	Expire   uint32   // SOA expire limit
 	Minimum  uint32   // SOA minimum TTL
+	// EDNS fields
+	UDPPayloadSize uint16
+	ExtendedRcode  uint8
+	EDNSVersion    uint8
+	Z              uint16
 }
 
 func (r *DnsRecord) Read(buffer *BytePacketBuffer) error {
@@ -196,6 +202,13 @@ func (r *DnsRecord) Read(buffer *BytePacketBuffer) error {
 		if err != nil { return err }
 		r.Host, err = buffer.ReadName()
 		if err != nil { return err }
+	case OPT:
+		r.UDPPayloadSize = r.Class
+		r.ExtendedRcode = uint8(r.TTL >> 24)
+		r.EDNSVersion = uint8((r.TTL >> 16) & 0xFF)
+		r.Z = uint16(r.TTL & 0xFFFF)
+		// Skip data for now
+		buffer.Step(int(dataLen))
 	default:
 		buffer.Step(int(dataLen))
 	}
@@ -204,6 +217,20 @@ func (r *DnsRecord) Read(buffer *BytePacketBuffer) error {
 
 func (r *DnsRecord) Write(buffer *BytePacketBuffer) (int, error) {
 	startPos := buffer.Position()
+	if r.Type == OPT {
+		// OPT record uses name "" (root)
+		if err := buffer.Write(0); err != nil { return 0, err }
+		if err := buffer.Writeu16(uint16(r.Type)); err != nil { return 0, err }
+		if err := buffer.Writeu16(r.UDPPayloadSize); err != nil { return 0, err }
+		
+		ttl := uint32(r.ExtendedRcode) << 24
+		ttl |= uint32(r.EDNSVersion) << 16
+		ttl |= uint32(r.Z)
+		if err := buffer.Writeu32(ttl); err != nil { return 0, err }
+		if err := buffer.Writeu16(0); err != nil { return 0, err } // No options for now
+		return buffer.Position() - startPos, nil
+	}
+	
 	if err := buffer.WriteName(r.Name); err != nil { return 0, err }
 	if err := buffer.Writeu16(uint16(r.Type)); err != nil { return 0, err }
 	if err := buffer.Writeu16(r.Class); err != nil { return 0, err }

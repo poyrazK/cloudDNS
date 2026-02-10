@@ -128,6 +128,15 @@ func (s *Server) handlePacket(data []byte, sendFn func([]byte) error) error {
 		return err
 	}
 
+	// Extract EDNS info if present
+	var clientUDPPayloadSize uint16 = 512
+	for _, res := range request.Resources {
+		if res.Type == packet.OPT {
+			clientUDPPayloadSize = res.UDPPayloadSize
+			fmt.Printf("EDNS(0) detected: payload size %d\n", clientUDPPayloadSize)
+		}
+	}
+
 	// 2. Check Cache
 	if len(request.Questions) > 0 {
 		q := request.Questions[0]
