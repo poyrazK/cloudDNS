@@ -19,17 +19,22 @@ func NewPostgresRepository(db *sql.DB) *PostgresRepository {
 	return &PostgresRepository{db: db}
 }
 
-func (r *PostgresRepository) GetRecords(ctx context.Context, name string, qType domain.RecordType) ([]domain.Record, error) {
-	query := `SELECT id, zone_id, name, type, content, ttl, priority FROM dns_records WHERE name = $1`
+func (r *PostgresRepository) GetRecords(ctx context.Context, name string, qType domain.RecordType, clientIP string) ([]domain.Record, error) {
+	// For Split-Horizon, we query records where:
+	// 1. The name and type match.
+	// 2. The network is either NULL (global) OR the clientIP matches the CIDR.
+	// (Using PostgreSQL cidr/inet matching logic)
+	query := `SELECT id, zone_id, name, type, content, ttl, priority, network FROM dns_records 
+	          WHERE name = $1 AND (network IS NULL OR network >> $2)`
 	
 	var rows *sql.Rows
 	var err error
 
 	if qType != "" {
-		query += " AND type = $2"
-		rows, err = r.db.QueryContext(ctx, query, name, string(qType))
+		query += " AND type = $3"
+		rows, err = r.db.QueryContext(ctx, query, name, clientIP, string(qType))
 	} else {
-		rows, err = r.db.QueryContext(ctx, query, name)
+		rows, err = r.db.QueryContext(ctx, query, name, clientIP)
 	}
 
 	if err != nil {
@@ -41,7 +46,7 @@ func (r *PostgresRepository) GetRecords(ctx context.Context, name string, qType 
 	for rows.Next() {
 		var rec domain.Record
 		var priority sql.NullInt32
-		if err := rows.Scan(&rec.ID, &rec.ZoneID, &rec.Name, &rec.Type, &rec.Content, &rec.TTL, &priority); err != nil {
+		if err := rows.Scan(&rec.ID, &rec.ZoneID, &rec.Name, &rec.Type, &rec.Content, &rec.TTL, &priority, &rec.Network); err != nil {
 			return nil, err
 		}
 		if priority.Valid {

@@ -34,6 +34,7 @@ type Record struct {
 	Content   string     `json:"content"`
 	TTL       int        `json:"ttl"`
 	Priority  *int       `json:"priority,omitempty"`
+	Network   *string    `json:"network,omitempty"` // CIDR or Scope (e.g., "10.0.0.0/8" or "public")
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
 }

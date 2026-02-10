@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 
@@ -34,9 +35,11 @@ func main() {
 	repo := repository.NewPostgresRepository(db)
 	dnsSvc := services.NewDNSService(repo)
 
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+
 	// Start DNS Server
 	// Listen on 10053 for development (since 53 requires root)
-	dnsServer := server.NewServer("127.0.0.1:10053", repo)
+	dnsServer := server.NewServer("127.0.0.1:10053", repo, logger)
 	go func() {
 		if err := dnsServer.Run(); err != nil {
 			log.Fatalf("DNS Server failed: %v", err)

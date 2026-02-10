@@ -24,7 +24,7 @@ func TestEndToEndDNS(t *testing.T) {
 	apiAddr := "127.0.0.1:18080"
 
 	// 2. Start DNS Server
-	dnsSrv := NewServer(dnsAddr, repo)
+	dnsSrv := NewServer(dnsAddr, repo, nil)
 	go dnsSrv.Run()
 
 	// 3. Start Management API

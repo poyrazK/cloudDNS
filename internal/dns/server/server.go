@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"time"
 	"github.com/poyrazK/cloudDNS/internal/dns/packet"
@@ -17,6 +18,7 @@ type Server struct {
 	Cache       *DNSCache
 	WorkerCount int
 	udpQueue    chan udpTask
+	Logger      *slog.Logger
 }
 
 type udpTask struct {
@@ -25,13 +27,17 @@ type udpTask struct {
 	conn net.PacketConn
 }
 
-func NewServer(addr string, repo ports.DNSRepository) *Server {
+func NewServer(addr string, repo ports.DNSRepository, logger *slog.Logger) *Server {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &Server{
 		Addr:        addr,
 		Repo:        repo,
 		Cache:       NewDNSCache(),
-		WorkerCount: 10, // Default 10 workers
+		WorkerCount: 10,
 		udpQueue:    make(chan udpTask, 1000),
+		Logger:      logger,
 	}
 }
 
@@ -98,8 +104,7 @@ func (s *Server) udpWorker() {
 }
 
 func (s *Server) handleUDPConnection(pc net.PacketConn, addr net.Addr, data []byte) {
-	fmt.Printf("Received %d bytes via UDP from %s\n", len(data), addr)
-	s.handlePacket(data, func(resp []byte) error {
+	s.handlePacket(data, addr, func(resp []byte) error {
 		_, err := pc.WriteTo(resp, addr)
 		return err
 	})
@@ -125,9 +130,7 @@ func (s *Server) handleTCPConnection(conn net.Conn) {
 			return
 		}
 
-		fmt.Printf("Received %d bytes via TCP from %s\n", len(data), conn.RemoteAddr())
-
-		err = s.handlePacket(data, func(resp []byte) error {
+		err = s.handlePacket(data, conn.RemoteAddr(), func(resp []byte) error {
 			resLen := uint16(len(resp))
 			fullResp := append([]byte{byte(resLen >> 8), byte(resLen & 0xFF)}, resp...)
 			_, err := conn.Write(fullResp)
@@ -135,29 +138,43 @@ func (s *Server) handleTCPConnection(conn net.Conn) {
 		})
 
 		if err != nil {
-			fmt.Printf("TCP processing error: %v\n", err)
+			s.Logger.Error("TCP processing error", "error", err)
 			return
 		}
 	}
 }
 
-func (s *Server) handlePacket(data []byte, sendFn func([]byte) error) error {
+func (s *Server) handlePacket(data []byte, srcAddr net.Addr, sendFn func([]byte) error) error {
+	start := time.Now()
+	// Extract IP for Split-Horizon
+	clientIP, _, _ := net.SplitHostPort(srcAddr.String())
 	// 1. Parse Request
 	reqBuffer := packet.NewBytePacketBuffer()
 	copy(reqBuffer.Buf, data)
 
 	request := packet.NewDnsPacket()
 	if err := request.FromBuffer(reqBuffer); err != nil {
-		fmt.Printf("Failed to parse packet: %s\n", err)
+		s.Logger.Error("failed to parse packet", "error", err)
 		return err
 	}
 
+	var queryName string
+	var queryType packet.QueryType
+	if len(request.Questions) > 0 {
+		queryName = request.Questions[0].Name
+		queryType = request.Questions[0].QType
+	}
+
 	// Extract EDNS info if present
-	var clientUDPPayloadSize uint16 = 512
+	var maxUDPSize uint16 = 512
+	hasEDNS := false
 	for _, res := range request.Resources {
 		if res.Type == packet.OPT {
-			clientUDPPayloadSize = res.UDPPayloadSize
-			fmt.Printf("EDNS(0) detected: payload size %d\n", clientUDPPayloadSize)
+			maxUDPSize = res.UDPPayloadSize
+			hasEDNS = true
+			if maxUDPSize < 512 {
+				maxUDPSize = 512
+			}
 		}
 	}
 
@@ -166,13 +183,19 @@ func (s *Server) handlePacket(data []byte, sendFn func([]byte) error) error {
 		q := request.Questions[0]
 		cacheKey := fmt.Sprintf("%s:%d", q.Name, q.QType)
 		if cachedData, found := s.Cache.Get(cacheKey); found {
-			fmt.Printf("Cache hit for %s, rewriting ID %d\n", cacheKey, request.Header.ID)
 			// Need to rewrite the transaction ID from the request into the cached response
 			if len(cachedData) >= 2 {
 				cachedData[0] = byte(request.Header.ID >> 8)
 				cachedData[1] = byte(request.Header.ID & 0xFF)
 			}
-			return sendFn(cachedData)
+			err := sendFn(cachedData)
+			s.Logger.Info("dns query",
+				"name", queryName,
+				"type", queryType,
+				"cache", "hit",
+				"latency", time.Since(start),
+			)
+			return err
 		}
 	}
 
@@ -186,13 +209,19 @@ func (s *Server) handlePacket(data []byte, sendFn func([]byte) error) error {
 	response.Header.AuthoritativeAnswer = true
 	response.Header.ResCode = 0
 
+	// Add OPT record to response if client sent one
+	if hasEDNS {
+		response.Resources = append(response.Resources, packet.DnsRecord{
+			Type:           packet.OPT,
+			UDPPayloadSize: 1232, // Signal that we support up to 1232 bytes
+		})
+	}
+
 	// 4. Resolve using Repository
 	var minTTL uint32 = 300
 	if len(request.Questions) > 0 {
 		q := request.Questions[0]
 		response.Questions = append(response.Questions, q)
-
-		fmt.Printf("Query: %s %d\n", q.Name, q.QType)
 
 		var domainType domain.RecordType
 		switch q.QType {
@@ -202,9 +231,9 @@ func (s *Server) handlePacket(data []byte, sendFn func([]byte) error) error {
 		case packet.NS: domainType = domain.TypeNS
 		}
 
-		records, err := s.Repo.GetRecords(context.Background(), q.Name, domainType)
+		records, err := s.Repo.GetRecords(context.Background(), q.Name, domainType, clientIP)
 		if err != nil {
-			fmt.Printf("Repository error: %v\n", err)
+			s.Logger.Error("repository error", "error", err, "name", q.Name)
 			response.Header.ResCode = 2 // SERVFAIL
 		} else if len(records) > 0 {
 			for i, rec := range records {
@@ -222,10 +251,11 @@ func (s *Server) handlePacket(data []byte, sendFn func([]byte) error) error {
 			if err == nil {
 				response.Answers = recursiveResp.Answers
 				response.Authorities = recursiveResp.Authorities
-				response.Resources = recursiveResp.Resources
+				// If recursive result had OPT, it might conflict with ours, 
+				// but for now we just append or trust our own.
 				response.Header.ResCode = recursiveResp.Header.ResCode
 			} else {
-				fmt.Printf("Recursive error: %v\n", err)
+				s.Logger.Error("recursive error", "error", err, "name", q.Name)
 				response.Header.ResCode = 2 // SERVFAIL
 			}
 		} else {
@@ -235,11 +265,23 @@ func (s *Server) handlePacket(data []byte, sendFn func([]byte) error) error {
 		response.Header.ResCode = 4 // FORMERR
 	}
 
-	// 5. Serialize Response
+	// 5. Serialize and Handle Truncation
 	resBuffer := packet.NewBytePacketBuffer()
 	if err := response.Write(resBuffer); err != nil {
-		fmt.Printf("Failed to serialize response: %s\n", err)
+		s.Logger.Error("serialization error", "error", err)
 		return err
+	}
+
+	// Check if we need to truncate (for UDP)
+	// Note: In a production DNS, you would remove records one by one until it fits.
+	// For this scratch implementation, we set TC bit if it exceeds limit.
+	if resBuffer.Position() > int(maxUDPSize) {
+		response.Header.TruncatedMessage = true
+		// Clear answers to fit basic header
+		response.Answers = nil
+		response.Authorities = nil
+		resBuffer = packet.NewBytePacketBuffer()
+		response.Write(resBuffer)
 	}
 
 	resData := resBuffer.Buf[:resBuffer.Position()]
@@ -254,5 +296,13 @@ func (s *Server) handlePacket(data []byte, sendFn func([]byte) error) error {
 	}
 
 	// 7. Send Back
-	return sendFn(resData)
+	err := sendFn(resData)
+	s.Logger.Info("dns query",
+		"name", queryName,
+		"type", queryType,
+		"rcode", response.Header.ResCode,
+		"cache", "miss",
+		"latency", time.Since(start),
+	)
+	return err
 }

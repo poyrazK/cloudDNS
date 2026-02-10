@@ -6,7 +6,7 @@ import (
 )
 
 type DNSRepository interface {
-	GetRecords(ctx context.Context, name string, qType domain.RecordType) ([]domain.Record, error)
+	GetRecords(ctx context.Context, name string, qType domain.RecordType, clientIP string) ([]domain.Record, error)
 	CreateZone(ctx context.Context, zone *domain.Zone) error
 	CreateRecord(ctx context.Context, record *domain.Record) error
 	ListZones(ctx context.Context, tenantID string) ([]domain.Zone, error)
@@ -17,6 +17,6 @@ type DNSRepository interface {
 type DNSService interface {
 	CreateZone(ctx context.Context, zone *domain.Zone) error
 	CreateRecord(ctx context.Context, record *domain.Record) error
-	Resolve(ctx context.Context, name string, qType domain.RecordType) ([]domain.Record, error)
+	Resolve(ctx context.Context, name string, qType domain.RecordType, clientIP string) ([]domain.Record, error)
 	ListZones(ctx context.Context, tenantID string) ([]domain.Zone, error)
 }

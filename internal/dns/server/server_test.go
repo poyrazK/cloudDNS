@@ -15,7 +15,7 @@ type mockServerRepo struct {
 	zones   []domain.Zone
 }
 
-func (m *mockServerRepo) GetRecords(ctx context.Context, name string, qType domain.RecordType) ([]domain.Record, error) {
+func (m *mockServerRepo) GetRecords(ctx context.Context, name string, qType domain.RecordType, clientIP string) ([]domain.Record, error) {
 	var res []domain.Record
 	for _, r := range m.records {
 		if r.Name == name && (qType == "" || r.Type == qType) {
@@ -57,7 +57,7 @@ func TestHandlePacketLocalHit(t *testing.T) {
 			{Name: "local.test", Type: domain.TypeA, Content: "1.1.1.1", TTL: 60},
 		},
 	}
-	srv := NewServer("127.0.0.1:0", repo)
+	srv := NewServer("127.0.0.1:0", repo, nil)
 
 	req := packet.NewDnsPacket()
 	req.Header.ID = 123
@@ -68,7 +68,7 @@ func TestHandlePacketLocalHit(t *testing.T) {
 	data := buffer.Buf[:buffer.Position()]
 
 	var capturedResp []byte
-	err := srv.handlePacket(data, func(resp []byte) error {
+	err := srv.handlePacket(data, &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
 		capturedResp = resp
 		return nil
 	})
@@ -92,7 +92,7 @@ func TestHandlePacketLocalHit(t *testing.T) {
 
 func TestHandlePacketCacheHit(t *testing.T) {
 	repo := &mockServerRepo{}
-	srv := NewServer("127.0.0.1:0", repo)
+	srv := NewServer("127.0.0.1:0", repo, nil)
 	
 	// Pre-populate cache
 	cacheKey := "cached.test:1" // A record
@@ -113,7 +113,7 @@ func TestHandlePacketCacheHit(t *testing.T) {
 	req.Write(reqBuf)
 
 	var capturedResp []byte
-	srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], func(resp []byte) error {
+	srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
 		capturedResp = resp
 		return nil
 	})
@@ -145,7 +145,7 @@ func TestWorkerPoolProcessing(t *testing.T) {
 			{Name: "worker.test", Type: domain.TypeA, Content: "3.3.3.3", TTL: 60},
 		},
 	}
-	srv := NewServer("127.0.0.1:0", repo)
+	srv := NewServer("127.0.0.1:0", repo, nil)
 	srv.WorkerCount = 1
 	
 	// Start one worker
@@ -176,7 +176,7 @@ func TestWorkerPoolProcessing(t *testing.T) {
 
 func TestHandlePacketNXDOMAIN(t *testing.T) {
 	repo := &mockServerRepo{}
-	srv := NewServer("127.0.0.1:0", repo)
+	srv := NewServer("127.0.0.1:0", repo, nil)
 
 	req := packet.NewDnsPacket()
 	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "missing.test", QType: packet.A})
@@ -184,7 +184,7 @@ func TestHandlePacketNXDOMAIN(t *testing.T) {
 	req.Write(reqBuf)
 
 	var capturedResp []byte
-	srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], func(resp []byte) error {
+	srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
 		capturedResp = resp
 		return nil
 	})
@@ -201,14 +201,14 @@ func TestHandlePacketNXDOMAIN(t *testing.T) {
 
 func TestHandlePacketNoQuestions(t *testing.T) {
 	repo := &mockServerRepo{}
-	srv := NewServer("127.0.0.1:0", repo)
+	srv := NewServer("127.0.0.1:0", repo, nil)
 
 	req := packet.NewDnsPacket()
 	reqBuf := packet.NewBytePacketBuffer()
 	req.Write(reqBuf)
 
 	var capturedResp []byte
-	srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], func(resp []byte) error {
+	srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
 		capturedResp = resp
 		return nil
 	})
@@ -225,7 +225,7 @@ func TestHandlePacketNoQuestions(t *testing.T) {
 
 func TestHandlePacketEDNS(t *testing.T) {
 	repo := &mockServerRepo{}
-	srv := NewServer("127.0.0.1:0", repo)
+	srv := NewServer("127.0.0.1:0", repo, nil)
 
 	req := packet.NewDnsPacket()
 	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "test.com", QType: packet.A})
@@ -238,7 +238,7 @@ func TestHandlePacketEDNS(t *testing.T) {
 	reqBuf := packet.NewBytePacketBuffer()
 	req.Write(reqBuf)
 
-	err := srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], func(resp []byte) error {
+	err := srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
 		return nil
 	})
 	

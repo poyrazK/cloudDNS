@@ -44,8 +44,8 @@ func (s *dnsService) CreateRecord(ctx context.Context, record *domain.Record) er
 	return s.repo.CreateRecord(ctx, record)
 }
 
-func (s *dnsService) Resolve(ctx context.Context, name string, qType domain.RecordType) ([]domain.Record, error) {
-	return s.repo.GetRecords(ctx, name, qType)
+func (s *dnsService) Resolve(ctx context.Context, name string, qType domain.RecordType, clientIP string) ([]domain.Record, error) {
+	return s.repo.GetRecords(ctx, name, qType, clientIP)
 }
 
 func (s *dnsService) ListZones(ctx context.Context, tenantID string) ([]domain.Zone, error) {

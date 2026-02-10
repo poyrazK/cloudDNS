@@ -12,7 +12,7 @@ type mockRepo struct {
 	records []domain.Record
 }
 
-func (m *mockRepo) GetRecords(ctx context.Context, name string, qType domain.RecordType) ([]domain.Record, error) {
+func (m *mockRepo) GetRecords(ctx context.Context, name string, qType domain.RecordType, clientIP string) ([]domain.Record, error) {
 	var res []domain.Record
 	for _, r := range m.records {
 		if r.Name == name && (qType == "" || r.Type == qType) {
