@@ -12,16 +12,26 @@ import (
 )
 
 type Server struct {
-	Addr  string
-	Repo  ports.DNSRepository
-	Cache *DNSCache
+	Addr        string
+	Repo        ports.DNSRepository
+	Cache       *DNSCache
+	WorkerCount int
+	udpQueue    chan udpTask
+}
+
+type udpTask struct {
+	addr net.Addr
+	data []byte
+	conn *net.UDPConn
 }
 
 func NewServer(addr string, repo ports.DNSRepository) *Server {
 	return &Server{
-		Addr:  addr,
-		Repo:  repo,
-		Cache: NewDNSCache(),
+		Addr:        addr,
+		Repo:        repo,
+		Cache:       NewDNSCache(),
+		WorkerCount: 10, // Default 10 workers
+		udpQueue:    make(chan udpTask, 1000),
 	}
 }
 
@@ -50,6 +60,11 @@ func (s *Server) Run() error {
 
 	fmt.Println("DNS Server successfully listening on", s.Addr, "(UDP and TCP)...")
 
+	// Start UDP Workers
+	for i := 0; i < s.WorkerCount; i++ {
+		go s.udpWorker()
+	}
+
 	go func() {
 		for {
 			conn, err := tcpListener.Accept()
@@ -69,7 +84,16 @@ func (s *Server) Run() error {
 			continue
 		}
 
-		go s.handleUDPConnection(udpConn, addr, buf[:n])
+		// Send to worker pool
+		data := make([]byte, n)
+		copy(data, buf[:n])
+		s.udpQueue <- udpTask{addr: addr, data: data, conn: udpConn}
+	}
+}
+
+func (s *Server) udpWorker() {
+	for task := range s.udpQueue {
+		s.handleUDPConnection(task.conn, task.addr, task.data)
 	}
 }
 
