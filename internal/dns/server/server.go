@@ -15,19 +15,21 @@ func NewServer(addr string) *Server {
 }
 
 func (s *Server) Run() error {
+	fmt.Printf("Attempting to listen on %s (UDP)...\n", s.Addr)
 	pc, err := net.ListenPacket("udp", s.Addr)
 	if err != nil {
+		fmt.Printf("Failed to listen: %v\n", err)
 		return err
 	}
 	defer pc.Close()
 
-	fmt.Printf("DNS Server listening on %s (UDP)...\n", s.Addr)
+	fmt.Println("DNS Server successfully listening on", s.Addr, "(UDP)...")
 
 	for {
 		buf := make([]byte, 512)
 		n, addr, err := pc.ReadFrom(buf)
 		if err != nil {
-			fmt.Printf("Read error: %s\n", err)
+			fmt.Println("Read error:", err)
 			continue
 		}
 
@@ -36,6 +38,7 @@ func (s *Server) Run() error {
 }
 
 func (s *Server) handlePacket(pc net.PacketConn, addr net.Addr, data []byte) {
+	fmt.Printf("Received %d bytes from %s\n", len(data), addr)
 	// 1. Parse Request
 	reqBuffer := packet.NewBytePacketBuffer()
 	copy(reqBuffer.Buf, data) // Copy data into buffer structure
