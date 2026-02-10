@@ -12,6 +12,7 @@ import (
 
 type mockServerRepo struct {
 	records []domain.Record
+	zones   []domain.Zone
 }
 
 func (m *mockServerRepo) GetRecords(ctx context.Context, name string, qType domain.RecordType) ([]domain.Record, error) {
@@ -24,10 +25,24 @@ func (m *mockServerRepo) GetRecords(ctx context.Context, name string, qType doma
 	return res, nil
 }
 
-func (m *mockServerRepo) CreateZone(ctx context.Context, zone *domain.Zone) error     { return nil }
-func (m *mockServerRepo) CreateRecord(ctx context.Context, record *domain.Record) error { return nil }
+func (m *mockServerRepo) CreateZone(ctx context.Context, zone *domain.Zone) error {
+	m.zones = append(m.zones, *zone)
+	return nil
+}
+
+func (m *mockServerRepo) CreateRecord(ctx context.Context, record *domain.Record) error {
+	m.records = append(m.records, *record)
+	return nil
+}
+
 func (m *mockServerRepo) ListZones(ctx context.Context, tenantID string) ([]domain.Zone, error) {
-	return nil, nil
+	var res []domain.Zone
+	for _, z := range m.zones {
+		if z.TenantID == tenantID {
+			res = append(res, z)
+		}
+	}
+	return res, nil
 }
 func (m *mockServerRepo) DeleteZone(ctx context.Context, zoneID string, tenantID string) error {
 	return nil
