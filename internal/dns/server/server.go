@@ -182,6 +182,18 @@ func (s *Server) handlePacket(data []byte, sendFn func([]byte) error) error {
 					}
 				}
 			}
+		} else if request.Header.RecursionDesired {
+			// RECURSIVE LOOKUP
+			recursiveResp, err := s.resolveRecursive(q.Name, q.QType)
+			if err == nil {
+				response.Answers = recursiveResp.Answers
+				response.Authorities = recursiveResp.Authorities
+				response.Resources = recursiveResp.Resources
+				response.Header.ResCode = recursiveResp.Header.ResCode
+			} else {
+				fmt.Printf("Recursive error: %v\n", err)
+				response.Header.ResCode = 2 // SERVFAIL
+			}
 		} else {
 			response.Header.ResCode = 3 // NXDOMAIN
 		}

@@ -188,10 +188,14 @@ func (r *DnsRecord) Read(buffer *BytePacketBuffer) error {
 		if err != nil { return err }
 		r.IP = net.IP(rawIP)
 		buffer.Step(16)
-	case CNAME, NS, MX:
-		// Complex handling needed for reading compressed names inside RDATA
-		// For now, just skip
-		buffer.Step(int(dataLen))
+	case NS, CNAME:
+		r.Host, err = buffer.ReadName()
+		if err != nil { return err }
+	case MX:
+		r.Priority, err = buffer.Readu16()
+		if err != nil { return err }
+		r.Host, err = buffer.ReadName()
+		if err != nil { return err }
 	default:
 		buffer.Step(int(dataLen))
 	}
@@ -298,7 +302,18 @@ func (p *DnsPacket) FromBuffer(buffer *BytePacketBuffer) error {
 		p.Answers = append(p.Answers, r)
 	}
 
-	// Authorities and Resources skipped for now for brevity of reading request
+	for i := 0; i < int(p.Header.AuthoritativeEntries); i++ {
+		var r DnsRecord
+		if err := r.Read(buffer); err != nil { return err }
+		p.Authorities = append(p.Authorities, r)
+	}
+
+	for i := 0; i < int(p.Header.ResourceEntries); i++ {
+		var r DnsRecord
+		if err := r.Read(buffer); err != nil { return err }
+		p.Resources = append(p.Resources, r)
+	}
+
 	return nil
 }
 
