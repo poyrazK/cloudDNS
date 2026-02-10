@@ -22,7 +22,7 @@ type Server struct {
 type udpTask struct {
 	addr net.Addr
 	data []byte
-	conn *net.UDPConn
+	conn net.PacketConn
 }
 
 func NewServer(addr string, repo ports.DNSRepository) *Server {
@@ -166,7 +166,8 @@ func (s *Server) handlePacket(data []byte, sendFn func([]byte) error) error {
 		q := request.Questions[0]
 		cacheKey := fmt.Sprintf("%s:%d", q.Name, q.QType)
 		if cachedData, found := s.Cache.Get(cacheKey); found {
-			fmt.Printf("Cache hit for %s\n", cacheKey)
+			fmt.Printf("Cache hit for %s, rewriting ID %d\n", cacheKey, request.Header.ID)
+			// Need to rewrite the transaction ID from the request into the cached response
 			if len(cachedData) >= 2 {
 				cachedData[0] = byte(request.Header.ID >> 8)
 				cachedData[1] = byte(request.Header.ID & 0xFF)

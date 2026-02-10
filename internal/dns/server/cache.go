@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"sync"
 	"time"
 )
@@ -41,6 +42,7 @@ func (c *DNSCache) Get(key string) ([]byte, bool) {
 }
 
 func (c *DNSCache) Set(key string, data []byte, ttl time.Duration) {
+	fmt.Printf("Cache SET: %s (TTL %v)\n", key, ttl)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
