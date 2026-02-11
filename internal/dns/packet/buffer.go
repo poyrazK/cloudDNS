@@ -3,6 +3,7 @@ package packet
 import (
 	"errors"
 	"strings"
+	"sync"
 )
 
 // BytePacketBuffer simplifies reading and writing the DNS packet buffer
@@ -13,6 +14,32 @@ type BytePacketBuffer struct {
 
 const MaxPacketSize = 65535
 
+var bufferPool = sync.Pool{
+	New: func() interface{} {
+		return &BytePacketBuffer{
+			Buf: make([]byte, MaxPacketSize),
+			Pos: 0,
+		}
+	},
+}
+
+// GetBuffer retrieves a buffer from the pool
+func GetBuffer() *BytePacketBuffer {
+	b := bufferPool.Get().(*BytePacketBuffer)
+	b.Reset()
+	return b
+}
+
+// PutBuffer returns a buffer to the pool
+func PutBuffer(b *BytePacketBuffer) {
+	bufferPool.Put(b)
+}
+
+func (b *BytePacketBuffer) Reset() {
+	b.Pos = 0
+	// No need to clear the whole buffer, as writes overwrite it
+}
+
 func NewBytePacketBuffer() *BytePacketBuffer {
 	return &BytePacketBuffer{
 		Buf: make([]byte, MaxPacketSize),
@@ -22,6 +49,7 @@ func NewBytePacketBuffer() *BytePacketBuffer {
 
 func (b *BytePacketBuffer) Load(data []byte) {
 	copy(b.Buf, data)
+	b.Pos = 0
 }
 
 // Position returns the current cursor position
@@ -66,8 +94,9 @@ func (b *BytePacketBuffer) Readu16() (uint16, error) {
 	if b.Pos+2 > MaxPacketSize {
 		return 0, errors.New("end of buffer")
 	}
-	b1, _ := b.Read()
-	b2, _ := b.Read()
+	b1 := b.Buf[b.Pos]
+	b2 := b.Buf[b.Pos+1]
+	b.Pos += 2
 	return uint16(b1)<<8 | uint16(b2), nil
 }
 
@@ -76,10 +105,11 @@ func (b *BytePacketBuffer) Readu32() (uint32, error) {
 	if b.Pos+4 > MaxPacketSize {
 		return 0, errors.New("end of buffer")
 	}
-	b1, _ := b.Read()
-	b2, _ := b.Read()
-	b3, _ := b.Read()
-	b4, _ := b.Read()
+	b1 := b.Buf[b.Pos]
+	b2 := b.Buf[b.Pos+1]
+	b3 := b.Buf[b.Pos+2]
+	b4 := b.Buf[b.Pos+3]
+	b.Pos += 4
 	return uint32(b1)<<24 | uint32(b2)<<16 | uint32(b3)<<8 | uint32(b4), nil
 }
 
@@ -133,11 +163,18 @@ func (b *BytePacketBuffer) ReadName() (string, error) {
 		lenInt := int(lenByte)
 		
 		out.WriteString(delimiter)
-		strBuffer, err := b.GetRange(pos, lenInt)
-		if err != nil {
-			return "", err
+		// Optimization: avoid GetRange allocation by using direct slice
+		if pos+lenInt > MaxPacketSize {
+			return "", errors.New("out of bounds")
 		}
-		out.WriteString(strings.ToLower(string(strBuffer)))
+		label := b.Buf[pos : pos+lenInt]
+		for _, char := range label {
+			if char >= 'A' && char <= 'Z' {
+				out.WriteByte(char + 32) // tolower
+			} else {
+				out.WriteByte(char)
+			}
+		}
 		
 		delimiter = "."
 		pos += lenInt
@@ -172,45 +209,67 @@ func (b *BytePacketBuffer) Write(val byte) error {
 
 // Writeu16 writes a uint16
 func (b *BytePacketBuffer) Writeu16(val uint16) error {
-	if err := b.Write(byte(val >> 8)); err != nil {
-		return err
+	if b.Pos+2 > MaxPacketSize {
+		return errors.New("end of buffer")
 	}
-	return b.Write(byte(val & 0xFF))
+	b.Buf[b.Pos] = byte(val >> 8)
+	b.Buf[b.Pos+1] = byte(val & 0xFF)
+	b.Pos += 2
+	return nil
 }
 
 // Writeu32 writes a uint32
 func (b *BytePacketBuffer) Writeu32(val uint32) error {
-	if err := b.Write(byte(val >> 24)); err != nil {
-		return err
+	if b.Pos+4 > MaxPacketSize {
+		return errors.New("end of buffer")
 	}
-	if err := b.Write(byte(val >> 16)); err != nil {
-		return err
-	}
-	if err := b.Write(byte(val >> 8)); err != nil {
-		return err
-	}
-	return b.Write(byte(val & 0xFF))
+	b.Buf[b.Pos] = byte(val >> 24)
+	b.Buf[b.Pos+1] = byte(val >> 16)
+	b.Buf[b.Pos+2] = byte(val >> 8)
+	b.Buf[b.Pos+3] = byte(val & 0xFF)
+	b.Pos += 4
+	return nil
 }
 
-// WriteName writes a domain name (simple version, no compression yet)
+// WriteName writes a domain name
 func (b *BytePacketBuffer) WriteName(name string) error {
-	parts := strings.Split(name, ".")
-	for _, part := range parts {
-		lenPart := len(part)
-		if lenPart > 63 {
+	// Optimization: manual label splitting to avoid strings.Split allocation
+	start := 0
+	for i := 0; i < len(name); i++ {
+		if name[i] == '.' {
+			label := name[start:i]
+			if len(label) > 63 {
+				return errors.New("label too long")
+			}
+			if len(label) > 0 {
+				if err := b.Write(byte(len(label))); err != nil {
+					return err
+				}
+				for j := 0; j < len(label); j++ {
+					if err := b.Write(label[j]); err != nil {
+						return err
+					}
+				}
+			}
+			start = i + 1
+		}
+	}
+	
+	// Handle trailing part if any
+	if start < len(name) {
+		label := name[start:]
+		if len(label) > 63 {
 			return errors.New("label too long")
 		}
-		if lenPart == 0 {
-			continue
-		}
-		if err := b.Write(byte(lenPart)); err != nil {
+		if err := b.Write(byte(len(label))); err != nil {
 			return err
 		}
-		for i := 0; i < lenPart; i++ {
-			if err := b.Write(part[i]); err != nil {
+		for j := 0; j < len(label); j++ {
+			if err := b.Write(label[j]); err != nil {
 				return err
 			}
 		}
 	}
+
 	return b.Write(0)
 }

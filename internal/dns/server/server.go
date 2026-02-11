@@ -174,8 +174,9 @@ func (s *Server) handlePacket(data []byte, srcAddr net.Addr, sendFn func([]byte)
 	}
 
 	// 1. Parse Request
-	reqBuffer := packet.NewBytePacketBuffer()
-	copy(reqBuffer.Buf, data)
+	reqBuffer := packet.GetBuffer()
+	defer packet.PutBuffer(reqBuffer)
+	reqBuffer.Load(data)
 
 	request := packet.NewDnsPacket()
 	if err := request.FromBuffer(reqBuffer); err != nil {
@@ -191,12 +192,10 @@ func (s *Server) handlePacket(data []byte, srcAddr net.Addr, sendFn func([]byte)
 			secret, exists := s.TsigKeys[lastRec.Name]
 			if !exists {
 				logger.Warn("unknown TSIG key", "key", lastRec.Name)
-				// Respond with NOTAUTH or similar
 			} else {
-				// Verify signature
 				if err := request.VerifyTSIG(data, lastRec.Name, secret); err != nil {
 					logger.Error("TSIG verification failed", "error", err, "key", lastRec.Name)
-					return err // Or send REFUSED
+					return err
 				}
 				authenticatedKey = lastRec.Name
 				logger.Info("authenticated DNS request", "key", authenticatedKey)
@@ -309,7 +308,9 @@ func (s *Server) handlePacket(data []byte, srcAddr net.Addr, sendFn func([]byte)
 	}
 
 	// 5. Serialize and Handle Truncation
-	resBuffer := packet.NewBytePacketBuffer()
+	resBuffer := packet.GetBuffer()
+	defer packet.PutBuffer(resBuffer)
+	
 	if err := response.Write(resBuffer); err != nil {
 		logger.Error("serialization failed", "error", err)
 		return err
@@ -326,7 +327,7 @@ func (s *Server) handlePacket(data []byte, srcAddr net.Addr, sendFn func([]byte)
 		response.Header.TruncatedMessage = true
 		response.Answers = nil
 		response.Authorities = nil
-		resBuffer = packet.NewBytePacketBuffer()
+		resBuffer.Reset()
 		response.Write(resBuffer)
 	}
 

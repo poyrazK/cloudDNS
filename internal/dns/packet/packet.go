@@ -44,7 +44,7 @@ func NewDnsHeader() *DnsHeader {
 }
 
 func (h *DnsHeader) Read(buffer *BytePacketBuffer) error {
-	if buffer.Position()+12 > 512 {
+	if buffer.Position()+12 > MaxPacketSize {
 		return errors.New("end of buffer")
 	}
 	var err error
@@ -289,7 +289,7 @@ func (r *DnsRecord) Write(buffer *BytePacketBuffer) (int, error) {
 		
 		// Write Options RDATA
 		lenPos := buffer.Position()
-		if err := buffer.Writeu16(0); err != nil { return 0, err } // Placeholder for RDLENGTH
+		if err := buffer.Writeu16(0); err != nil { return 0, err }
 
 		for _, opt := range r.Options {
 			buffer.Writeu16(opt.Code)
