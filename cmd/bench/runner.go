@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
+	"strconv"
 	"time"
 
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
@@ -35,6 +37,10 @@ func (m *mockRepo) GetAuditLogs(ctx context.Context, tenantID string) ([]domain.
 func (m *mockRepo) Ping(ctx context.Context) error { return nil }
 
 func main() {
+	count := flag.Int("n", 1000, "Total number of queries")
+	concurrency := flag.Int("c", 10, "Concurrency level")
+	flag.Parse()
+
 	addr := "127.0.0.1:10053"
 	// Silent logger for benchmark to avoid console spam
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
@@ -42,7 +48,7 @@ func main() {
 	repo := &mockRepo{}
 	srv := server.NewServer(addr, repo, logger)
 
-	fmt.Println("Starting CloudDNS Benchmark Server on", addr)
+	fmt.Printf("Starting CloudDNS Benchmark Server on %s\n", addr)
 	go func() {
 		if err := srv.Run(); err != nil {
 			fmt.Printf("Server error: %v\n", err)
@@ -50,11 +56,15 @@ func main() {
 	}()
 
 	// Give server a moment to start
-	time.Sleep(1 * time.Second)
+	time.Sleep(500 * time.Millisecond)
 
-	fmt.Println("Executing 10,000-Query Scaling Test (50 concurrency)...")
+	fmt.Printf("Executing Scaling Test: %d queries | %d concurrency\n", *count, *concurrency)
 	
-	cmd := exec.Command("go", "run", "cmd/bench/main.go", "-server", addr, "-n", "10000", "-c", "50")
+	cmd := exec.Command("go", "run", "cmd/bench/main.go", 
+		"-server", addr, 
+		"-n", strconv.Itoa(*count), 
+		"-c", strconv.Itoa(*concurrency))
+	
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	
