@@ -55,12 +55,49 @@ func (m *mockDNSService) DeleteRecord(ctx context.Context, id, zoneID string) er
 	return m.err
 }
 
+func (m *mockDNSService) HealthCheck(ctx context.Context) error {
+	return m.err
+}
+
 func TestRegisterRoutes(t *testing.T) {
 	svc := &mockDNSService{}
 	handler := NewAPIHandler(svc)
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
 	// No error means routes were registered correctly with new Go 1.22 patterns
+}
+
+func TestHealthCheck(t *testing.T) {
+	svc := &mockDNSService{}
+	handler := NewAPIHandler(svc)
+	
+	req := httptest.NewRequest("GET", "/health", nil)
+	w := httptest.NewRecorder()
+	
+	handler.HealthCheck(w, req)
+	
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+	
+	expected := `{"status":"UP"}`
+	if w.Body.String() != expected {
+		t.Errorf("Expected body %s, got %s", expected, w.Body.String())
+	}
+}
+
+func TestHealthCheck_Degraded(t *testing.T) {
+	svc := &mockDNSService{err: errors.New("db down")}
+	handler := NewAPIHandler(svc)
+	
+	req := httptest.NewRequest("GET", "/health", nil)
+	w := httptest.NewRecorder()
+	
+	handler.HealthCheck(w, req)
+	
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("Expected status 503, got %d", w.Code)
+	}
 }
 
 func TestCreateZone_BadRequest(t *testing.T) {

@@ -17,11 +17,23 @@ func NewAPIHandler(svc ports.DNSService) *APIHandler {
 }
 
 func (h *APIHandler) RegisterRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /health", h.HealthCheck)
 	mux.HandleFunc("POST /zones", h.CreateZone)
 	mux.HandleFunc("GET /zones", h.ListZones)
 	mux.HandleFunc("DELETE /zones/{id}", h.DeleteZone)
 	mux.HandleFunc("POST /zones/{id}/records", h.CreateRecord)
 	mux.HandleFunc("DELETE /zones/{zone_id}/records/{id}", h.DeleteRecord)
+}
+
+func (h *APIHandler) HealthCheck(w http.ResponseWriter, r *http.Request) {
+	if err := h.svc.HealthCheck(r.Context()); err != nil {
+		http.Error(w, "Degraded: "+err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"status":"UP"}`))
 }
 
 func (h *APIHandler) CreateZone(w http.ResponseWriter, r *http.Request) {

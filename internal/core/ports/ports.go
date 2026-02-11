@@ -15,6 +15,7 @@ type DNSRepository interface {
 	DeleteRecord(ctx context.Context, recordID string, zoneID string) error
 	SaveAuditLog(ctx context.Context, log *domain.AuditLog) error
 	GetAuditLogs(ctx context.Context, tenantID string) ([]domain.AuditLog, error)
+	Ping(ctx context.Context) error
 }
 
 type DNSService interface {
@@ -24,4 +25,5 @@ type DNSService interface {
 	ListZones(ctx context.Context, tenantID string) ([]domain.Zone, error)
 	DeleteZone(ctx context.Context, zoneID string, tenantID string) error
 	DeleteRecord(ctx context.Context, recordID string, zoneID string) error
+	HealthCheck(ctx context.Context) error
 }

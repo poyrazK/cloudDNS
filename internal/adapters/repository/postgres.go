@@ -158,6 +158,10 @@ func (r *PostgresRepository) GetAuditLogs(ctx context.Context, tenantID string) 
 	return logs, nil
 }
 
+func (r *PostgresRepository) Ping(ctx context.Context) error {
+	return r.db.PingContext(ctx)
+}
+
 // ConvertDomainToPacketRecord is a helper to bridge domain model and wire format
 func ConvertDomainToPacketRecord(rec domain.Record) (packet.DnsRecord, error) {
 	pRec := packet.DnsRecord{

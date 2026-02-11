@@ -65,6 +65,8 @@ func (m *mockServerRepo) GetAuditLogs(ctx context.Context, tenantID string) ([]d
 	return nil, nil
 }
 
+func (m *mockServerRepo) Ping(ctx context.Context) error { return nil }
+
 func TestHandlePacketLocalHit(t *testing.T) {
 	repo := &mockServerRepo{
 		records: []domain.Record{

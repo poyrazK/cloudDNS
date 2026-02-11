@@ -49,6 +49,7 @@ func (m *mockRepo) SaveAuditLog(ctx context.Context, log *domain.AuditLog) error
 func (m *mockRepo) GetAuditLogs(ctx context.Context, tenantID string) ([]domain.AuditLog, error) {
 	return nil, nil
 }
+func (m *mockRepo) Ping(ctx context.Context) error { return nil }
 
 func TestCreateZone(t *testing.T) {
 	repo := &mockRepo{}

@@ -118,3 +118,7 @@ func (s *dnsService) DeleteRecord(ctx context.Context, recordID string, zoneID s
 	s.audit(ctx, "unknown", "DELETE_RECORD", "RECORD", recordID, "Deleted record")
 	return nil
 }
+
+func (s *dnsService) HealthCheck(ctx context.Context) error {
+	return s.repo.Ping(ctx)
+}
