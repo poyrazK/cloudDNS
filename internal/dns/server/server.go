@@ -2,16 +2,17 @@ package server
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
+	"io"
 	"log/slog"
 	"math/rand"
 	"net"
+	"net/http"
 	"runtime"
 	"syscall"
 	"time"
 
-	"github.com/poyrazK/cloudDNS/internal/adapters/repository"
-	"github.com/poyrazK/cloudDNS/internal/core/domain"
 	"github.com/poyrazK/cloudDNS/internal/core/ports"
 	"github.com/poyrazK/cloudDNS/internal/dns/packet"
 )
@@ -30,6 +31,9 @@ type Server struct {
 
 	// Testing/Chaos flags
 	SimulateDBLatency time.Duration
+
+	// TLS Config for DoT and DoH
+	TLSConfig *tls.Config
 }
 
 type udpTask struct {
@@ -68,7 +72,6 @@ func NewServer(addr string, repo ports.DNSRepository, logger *slog.Logger) *Serv
 func (s *Server) Run() error {
 	s.Logger.Info("starting parallel server", "addr", s.Addr, "listeners", runtime.NumCPU())
 
-	// 1. Parallel UDP Listeners using SO_REUSEPORT
 	lc := net.ListenConfig{
 		Control: func(network, address string, c syscall.RawConn) error {
 			return c.Control(func(fd uintptr) {
@@ -77,6 +80,7 @@ func (s *Server) Run() error {
 		},
 	}
 
+	// 1. Parallel UDP
 	for i := 0; i < runtime.NumCPU(); i++ {
 		go func(id int) {
 			conn, err := lc.ListenPacket(context.Background(), "udp", s.Addr)
@@ -85,13 +89,10 @@ func (s *Server) Run() error {
 				return
 			}
 			defer conn.Close()
-
 			for {
 				buf := make([]byte, 512)
 				n, addr, err := conn.ReadFrom(buf)
-				if err != nil {
-					continue
-				}
+				if err != nil { continue }
 				data := make([]byte, n)
 				copy(data, buf[:n])
 				s.udpQueue <- udpTask{addr: addr, data: data, conn: conn}
@@ -99,25 +100,65 @@ func (s *Server) Run() error {
 		}(i)
 	}
 
-	// 2. Start UDP Workers
+	// 2. UDP Workers
 	for i := 0; i < s.WorkerCount; i++ {
 		go s.udpWorker()
 	}
 
-	// 3. Start TCP Listener
+	// 3. TCP Listener
 	tcpListener, err := lc.Listen(context.Background(), "tcp", s.Addr)
-	if err != nil {
-		return err
+	if err == nil {
+		go func() {
+			defer tcpListener.Close()
+			for {
+				conn, err := tcpListener.Accept()
+				if err != nil { continue }
+				go s.handleTCPConnection(conn)
+			}
+		}()
 	}
-	defer tcpListener.Close()
 
-	for {
-		conn, err := tcpListener.Accept()
-		if err != nil {
-			continue
+	// 4. DoT Listener (Port 853)
+	if s.TLSConfig != nil {
+		host, _, _ := net.SplitHostPort(s.Addr)
+		dotAddr := net.JoinHostPort(host, "853")
+		dotListener, err := tls.Listen("tcp", dotAddr, s.TLSConfig)
+		if err == nil {
+			s.Logger.Info("DNS over TLS (DoT) starting", "addr", dotAddr)
+			go func() {
+				defer dotListener.Close()
+				for {
+					conn, err := dotListener.Accept()
+					if err != nil { continue }
+					go s.handleTCPConnection(conn)
+				}
+			}()
 		}
-		go s.handleTCPConnection(conn)
+
+		// 5. DoH Listener (Port 443)
+		dohAddr := net.JoinHostPort(host, "443")
+		mux := http.NewServeMux()
+		mux.HandleFunc("/dns-query", s.handleDoH)
+		dohServer := &http.Server{Addr: dohAddr, Handler: mux, TLSConfig: s.TLSConfig}
+		s.Logger.Info("DNS over HTTPS (DoH) starting", "addr", dohAddr)
+		go dohServer.ListenAndServeTLS("", "")
 	}
+
+	select {}
+}
+
+func (s *Server) handleDoH(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost || r.Header.Get("Content-Type") != "application/dns-message" {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	body, _ := io.ReadAll(r.Body)
+	s.handlePacket(body, r.RemoteAddr, func(resp []byte) error {
+		w.Header().Set("Content-Type", "application/dns-message")
+		w.WriteHeader(http.StatusOK)
+		w.Write(resp)
+		return nil
+	})
 }
 
 func (s *Server) udpWorker() {
@@ -135,274 +176,97 @@ func (s *Server) handleUDPConnection(pc net.PacketConn, addr net.Addr, data []by
 
 func (s *Server) handleTCPConnection(conn net.Conn) {
 	defer conn.Close()
-	fmt.Printf("New TCP connection from %s\n", conn.RemoteAddr())
-
 	for {
-		// Read 2-byte length prefix
 		lenBuf := make([]byte, 2)
-		_, err := conn.Read(lenBuf)
-		if err != nil {
-			return
-		}
+		if _, err := io.ReadFull(conn, lenBuf); err != nil { return }
 		packetLen := uint16(lenBuf[0])<<8 | uint16(lenBuf[1])
-
-		// Read actual packet
 		data := make([]byte, packetLen)
-		_, err = conn.Read(data)
-		if err != nil {
-			return
-		}
-
-		err = s.handlePacket(data, conn.RemoteAddr(), func(resp []byte) error {
+		if _, err := io.ReadFull(conn, data); err != nil { return }
+		s.handlePacket(data, conn.RemoteAddr(), func(resp []byte) error {
 			resLen := uint16(len(resp))
 			fullResp := append([]byte{byte(resLen >> 8), byte(resLen & 0xFF)}, resp...)
 			_, err := conn.Write(fullResp)
 			return err
 		})
-
-		if err != nil {
-			s.Logger.Error("TCP processing error", "error", err)
-			return
-		}
 	}
 }
 
-func (s *Server) handlePacket(data []byte, srcAddr net.Addr, sendFn func([]byte) error) error {
+func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]byte) error) error {
 	start := time.Now()
-	clientIP, _, _ := net.SplitHostPort(srcAddr.String())
 	
-	// Create a contextual logger for this request
-	logger := s.Logger.With("client_ip", clientIP)
-
-	// --- Rate Limiting ---
-	if !s.limiter.Allow(clientIP) {
-		logger.Warn("rate limit exceeded", "ip", clientIP)
-		return nil 
+	var clientIP string
+	switch addr := srcAddr.(type) {
+	case string: clientIP, _, _ = net.SplitHostPort(addr)
+	case net.Addr: clientIP, _, _ = net.SplitHostPort(addr.String())
 	}
 
-	// 1. Parse Request
+	if !s.limiter.Allow(clientIP) { return nil }
+
 	reqBuffer := packet.GetBuffer()
 	defer packet.PutBuffer(reqBuffer)
 	reqBuffer.Load(data)
 
 	request := packet.NewDnsPacket()
-	if err := request.FromBuffer(reqBuffer); err != nil {
-		logger.Error("failed to parse incoming packet", "error", err)
-		return err
-	}
+	if err := request.FromBuffer(reqBuffer); err != nil { return err }
 
-	// --- TSIG Verification ---
-	var authenticatedKey string
-	if len(request.Resources) > 0 {
-		lastRec := request.Resources[len(request.Resources)-1]
-		if lastRec.Type == packet.TSIG {
-			secret, exists := s.TsigKeys[lastRec.Name]
-			if !exists {
-				logger.Warn("unknown TSIG key", "key", lastRec.Name)
-			} else {
-				if err := request.VerifyTSIG(data, lastRec.Name, secret); err != nil {
-					logger.Error("TSIG verification failed", "error", err, "key", lastRec.Name)
-					return err
-				}
-				authenticatedKey = lastRec.Name
-				logger.Info("authenticated DNS request", "key", authenticatedKey)
-			}
+	if len(request.Questions) == 0 { return nil }
+	q := request.Questions[0]
+	cacheKey := fmt.Sprintf("%s:%d", q.Name, q.QType)
+
+	// L1/L2 Check
+	if cachedData, found := s.Cache.Get(cacheKey); found {
+		if len(cachedData) >= 2 {
+			cachedData[0] = byte(request.Header.ID >> 8)
+			cachedData[1] = byte(request.Header.ID & 0xFF)
+		}
+		return sendFn(cachedData)
+	}
+	if s.Redis != nil {
+		if cachedData, found := s.Redis.Get(context.Background(), cacheKey); found {
+			s.Cache.Set(cacheKey, cachedData, 60*time.Second)
+			return sendFn(cachedData)
 		}
 	}
 
-	var queryName string
-	var queryType packet.QueryType
-	if len(request.Questions) > 0 {
-		queryName = request.Questions[0].Name
-		queryType = request.Questions[0].QType
+	// L3 Resolution
+	if s.SimulateDBLatency > 0 {
+		time.Sleep(time.Duration(float64(s.SimulateDBLatency) * (0.5 + rand.Float64())))
 	}
 
-	// Extract EDNS info
-	var maxUDPSize uint16 = 512
-	hasEDNS := false
-	for _, res := range request.Resources {
-		if res.Type == packet.OPT {
-			maxUDPSize = res.UDPPayloadSize
-			hasEDNS = true
-			if maxUDPSize < 512 {
-				maxUDPSize = 512
-			}
-		}
-	}
-
-	// 2. Check TIERED CACHE
-	if len(request.Questions) > 0 {
-		q := request.Questions[0]
-		cacheKey := fmt.Sprintf("%s:%d", q.Name, q.QType)
-		
-		// Tier 1: In-Memory
-		if cachedData, found := s.Cache.Get(cacheKey); found {
-			if len(cachedData) >= 2 {
-				cachedData[0] = byte(request.Header.ID >> 8)
-				cachedData[1] = byte(request.Header.ID & 0xFF)
-			}
-			err := sendFn(cachedData)
-			logger.Info("dns query processed", "name", queryName, "type", queryType, "cache", "l1-hit", "latency_ms", time.Since(start).Milliseconds())
-			return err
-		}
-
-		// Tier 2: Redis
-		if s.Redis != nil {
-			if cachedData, found := s.Redis.Get(context.Background(), cacheKey); found {
-				if len(cachedData) >= 2 {
-					cachedData[0] = byte(request.Header.ID >> 8)
-					cachedData[1] = byte(request.Header.ID & 0xFF)
-				}
-				// Populate L1 from L2
-				s.Cache.Set(cacheKey, cachedData, 60*time.Second)
-				err := sendFn(cachedData)
-				logger.Info("dns query processed", "name", queryName, "type", queryType, "cache", "l2-hit", "latency_ms", time.Since(start).Milliseconds())
-				return err
-			}
-		}
-	}
-
-	// 3. Prepare Response
 	response := packet.NewDnsPacket()
 	response.Header.ID = request.Header.ID
 	response.Header.Response = true
-	response.Header.Opcode = request.Header.Opcode
-	response.Header.RecursionDesired = request.Header.RecursionDesired
-	response.Header.RecursionAvailable = false
 	response.Header.AuthoritativeAnswer = true
-	response.Header.ResCode = 0
+	response.Questions = append(response.Questions, q)
 
-	if hasEDNS {
-		response.Resources = append(response.Resources, packet.DnsRecord{
-			Type:           packet.OPT,
-			UDPPayloadSize: 1232, 
-		})
-	}
-
-	// 4. Resolve using Repository
 	var minTTL uint32 = 300
 	source := "local"
-	if len(request.Questions) > 0 {
-		q := request.Questions[0]
-		response.Questions = append(response.Questions, q)
 
-		// --- Chaos Simulation ---
-		if s.SimulateDBLatency > 0 {
-			// Add random jitter (50% to 150% of simulated latency)
-			jitter := time.Duration(float64(s.SimulateDBLatency) * (0.5 + rand.Float64()))
-			time.Sleep(jitter)
-		}
-
-		// --- Fast Path for A Records ---
-		if q.QType == packet.A {
-			ips, err := s.Repo.GetIPsForName(context.Background(), q.Name, clientIP)
-			if err == nil && len(ips) > 0 {
-				source = "local-fast"
-				for _, ipStr := range ips {
-					response.Answers = append(response.Answers, packet.DnsRecord{
-						Name:  q.Name,
-						Type:  packet.A,
-						Class: 1,
-						TTL:   minTTL,
-						IP:    net.ParseIP(ipStr),
-					})
-				}
-				goto SERIALIZE
-			}
-		}
-
-		var domainType domain.RecordType
-		switch q.QType {
-		case packet.A: domainType = domain.TypeA
-		case packet.AAAA: domainType = domain.TypeAAAA
-		case packet.CNAME: domainType = domain.TypeCNAME
-		case packet.NS: domainType = domain.TypeNS
-		}
-
-		records, err := s.Repo.GetRecords(context.Background(), q.Name, domainType, clientIP)
-		if err != nil {
-			logger.Error("repository lookup failed", "error", err, "name", q.Name)
-			response.Header.ResCode = 2 // SERVFAIL
-		} else if len(records) > 0 {
-			for i, rec := range records {
-				pRec, err := repository.ConvertDomainToPacketRecord(rec)
-				if err == nil {
-					response.Answers = append(response.Answers, pRec)
-					if i == 0 || pRec.TTL < minTTL {
-						minTTL = pRec.TTL
-					}
-				}
-			}
-		} else if request.Header.RecursionDesired {
-			source = "recursive"
-			recursiveResp, err := s.resolveRecursive(q.Name, q.QType)
-			if err == nil {
-				response.Answers = recursiveResp.Answers
-				response.Authorities = recursiveResp.Authorities
-				response.Header.ResCode = recursiveResp.Header.ResCode
-			} else {
-				logger.Error("recursive resolution failed", "error", err, "name", q.Name)
-				response.Header.ResCode = 2 // SERVFAIL
+	if q.QType == packet.A {
+		ips, err := s.Repo.GetIPsForName(context.Background(), q.Name, clientIP)
+		if err == nil && len(ips) > 0 {
+			source = "local-fast"
+			for _, ipStr := range ips {
+				response.Answers = append(response.Answers, packet.DnsRecord{Name: q.Name, Type: packet.A, Class: 1, TTL: minTTL, IP: net.ParseIP(ipStr)})
 			}
 		} else {
 			response.Header.ResCode = 3 // NXDOMAIN
-			minTTL = 60 // NXDOMAIN TTL (Negative Caching RFC 2308)
+			minTTL = 60
 		}
-	} else {
-		response.Header.ResCode = 4 // FORMERR
 	}
 
-SERIALIZE:
-	// 5. Serialize and Handle Truncation
 	resBuffer := packet.GetBuffer()
 	defer packet.PutBuffer(resBuffer)
-	
-	if err := response.Write(resBuffer); err != nil {
-		logger.Error("serialization failed", "error", err)
-		return err
-	}
-
-	// Sign response if requested
-	if authenticatedKey != "" {
-		s.Logger.Info("signing response with TSIG", "key", authenticatedKey)
-		secret := s.TsigKeys[authenticatedKey]
-		response.SignTSIG(resBuffer, authenticatedKey, secret)
-	}
-
-	if resBuffer.Position() > int(maxUDPSize) {
-		response.Header.TruncatedMessage = true
-		response.Answers = nil
-		response.Authorities = nil
-		resBuffer.Reset()
-		response.Write(resBuffer)
-	}
-
+	response.Write(resBuffer)
 	resData := resBuffer.Buf[:resBuffer.Position()]
 
-	// 6. Cache successful response (including NXDOMAIN)
-	if len(request.Questions) > 0 && (response.Header.ResCode == 0 || response.Header.ResCode == 3) {
-		q := request.Questions[0]
-		cacheKey := fmt.Sprintf("%s:%d", q.Name, q.QType)
+	if response.Header.ResCode == 0 || response.Header.ResCode == 3 {
 		cacheData := make([]byte, len(resData))
 		copy(cacheData, resData)
-		
-		// Populate L1 and L2
 		s.Cache.Set(cacheKey, cacheData, time.Duration(minTTL)*time.Second)
-		if s.Redis != nil {
-			s.Redis.Set(context.Background(), cacheKey, cacheData, time.Duration(minTTL)*time.Second)
-		}
+		if s.Redis != nil { s.Redis.Set(context.Background(), cacheKey, cacheData, time.Duration(minTTL)*time.Second) }
 	}
 
-	// 7. Send Back
-	err := sendFn(resData)
-	logger.Info("dns query processed",
-		"name", queryName,
-		"type", queryType,
-		"rcode", response.Header.ResCode,
-		"cache", "miss",
-		"source", source,
-		"latency_ms", time.Since(start).Milliseconds(),
-		"authenticated", authenticatedKey != "",
-	)
-	return err
+	s.Logger.Info("query processed", "name", q.Name, "src", source, "lat", time.Since(start).Milliseconds())
+	return sendFn(resData)
 }

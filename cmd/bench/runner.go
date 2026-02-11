@@ -70,12 +70,13 @@ func main() {
 	schema, _ := os.ReadFile("internal/adapters/repository/schema.sql")
 	db.ExecContext(ctx, string(schema))
 
-	fmt.Println("Seeding 10,000,000 Real-World Records (This may take a moment)...")
+	fmt.Println("Seeding 10,000,000 Real-World Records (Fast Mode)...")
 	zoneID := uuid.New()
 	db.ExecContext(ctx, "INSERT INTO dns_zones (id, tenant_id, name) VALUES ($1, $2, $3)", zoneID, "bench", "root")
 	
+	tx, _ := db.BeginTx(ctx, nil)
 	totalRecords := 10000000
-	batchSize := 5000
+	batchSize := 10000
 	for i := 0; i < totalRecords; i += batchSize {
 		vals := []string{}
 		args := []interface{}{}
@@ -87,9 +88,10 @@ func main() {
 			args = append(args, uuid.New(), zoneID, name, "A", "1.2.3.4", 3600)
 		}
 		query := fmt.Sprintf("INSERT INTO dns_records (id, zone_id, name, type, content, ttl) VALUES %s", strings.Join(vals, ","))
-		db.ExecContext(ctx, query, args...)
+		tx.ExecContext(ctx, query, args...)
 		if i % 1000000 == 0 { fmt.Printf("Progress: %d%%\n", i/100000) }
 	}
+	tx.Commit()
 
 	// 3. Server with Chaos & Redis
 	addr := "127.0.0.1:10053"
