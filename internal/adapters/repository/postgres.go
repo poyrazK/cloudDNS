@@ -22,10 +22,10 @@ func NewPostgresRepository(db *sql.DB) *PostgresRepository {
 func (r *PostgresRepository) GetRecords(ctx context.Context, name string, qType domain.RecordType, clientIP string) ([]domain.Record, error) {
 	// For Split-Horizon, we query records where:
 	// 1. The name and type match.
-	// 2. The network is either NULL (global) OR the clientIP matches the CIDR.
-	// (Using PostgreSQL cidr/inet matching logic)
+	// 2. The clientIP is within the record's network CIDR OR the network is NULL (global).
+	// In Postgres, '$2::inet <<= network' checks if the network CIDR contains the client IP.
 	query := `SELECT id, zone_id, name, type, content, ttl, priority, network FROM dns_records 
-	          WHERE name = $1 AND (network IS NULL OR network >> $2)`
+	          WHERE name = $1 AND (network IS NULL OR $2::inet <<= network)`
 	
 	var rows *sql.Rows
 	var err error
@@ -95,9 +95,9 @@ func (r *PostgresRepository) CreateZoneWithRecords(ctx context.Context, zone *do
 }
 
 func (r *PostgresRepository) CreateRecord(ctx context.Context, record *domain.Record) error {
-	query := `INSERT INTO dns_records (id, zone_id, name, type, content, ttl, priority, created_at, updated_at) 
-			  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
-	_, err := r.db.ExecContext(ctx, query, record.ID, record.ZoneID, record.Name, record.Type, record.Content, record.TTL, record.Priority, record.CreatedAt, record.UpdatedAt)
+	query := `INSERT INTO dns_records (id, zone_id, name, type, content, ttl, priority, network, created_at, updated_at) 
+			  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
+	_, err := r.db.ExecContext(ctx, query, record.ID, record.ZoneID, record.Name, record.Type, record.Content, record.TTL, record.Priority, record.Network, record.CreatedAt, record.UpdatedAt)
 	return err
 }
 
