@@ -233,18 +233,58 @@ func TestMalformedPacketRead(t *testing.T) {
 	}
 }
 
-func TestInvalidQueryType(t *testing.T) {
+func TestMXRecordSerialization(t *testing.T) {
+	record := DnsRecord{
+		Name:     "test.com",
+		Type:     MX,
+		TTL:      300,
+		Priority: 10,
+		Host:     "mail.test.com",
+	}
+
 	buffer := NewBytePacketBuffer()
-	q := DnsQuestion{Name: "test.com", QType: 9999}
-	err := q.Write(buffer)
+	_, err := record.Write(buffer)
 	if err != nil {
-		t.Fatalf("Failed to write question with unknown type: %v", err)
+		t.Fatalf("Failed to write MX record: %v", err)
 	}
 
 	buffer.Seek(0)
-	parsed := DnsQuestion{}
-	parsed.Read(buffer)
-	if parsed.QType != 9999 {
-		t.Errorf("Expected QType 9999, got %d", parsed.QType)
+	parsed := DnsRecord{}
+	err = parsed.Read(buffer)
+	if err != nil {
+		t.Fatalf("Failed to read MX record: %v", err)
+	}
+
+	if parsed.Priority != 10 {
+		t.Errorf("Expected priority 10, got %d", parsed.Priority)
+	}
+	if parsed.Host != "mail.test.com" {
+		t.Errorf("Expected mail.test.com, got %s", parsed.Host)
+	}
+}
+
+func TestCNAMERecordSerialization(t *testing.T) {
+	record := DnsRecord{
+		Name: "alias.test.com",
+		Type: CNAME,
+		TTL:  300,
+		Host: "real.test.com",
+	}
+
+	buffer := NewBytePacketBuffer()
+	_, err := record.Write(buffer)
+	if err != nil {
+		t.Fatalf("Failed to write CNAME record: %v", err)
+	}
+
+	buffer.Seek(0)
+	parsed := DnsRecord{}
+	err = parsed.Read(buffer)
+	if err != nil {
+		t.Fatalf("Failed to read CNAME record: %v", err)
+	}
+
+	if parsed.Host != "real.test.com" {
+		t.Errorf("Expected real.test.com, got %s", parsed.Host)
 	}
 }

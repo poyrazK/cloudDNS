@@ -268,6 +268,18 @@ func (r *DnsRecord) Write(buffer *BytePacketBuffer) (int, error) {
 		buffer.Seek(lenPos)
 		buffer.Writeu16(uint16(dataLen))
 		buffer.Seek(currPos)
+	case MX:
+		lenPos := buffer.Position()
+		if err := buffer.Writeu16(0); err != nil { return 0, err } // Placeholder
+
+		if err := buffer.Writeu16(r.Priority); err != nil { return 0, err }
+		if err := buffer.WriteName(r.Host); err != nil { return 0, err }
+
+		currPos := buffer.Position()
+		dataLen := currPos - (lenPos + 2)
+		buffer.Seek(lenPos)
+		buffer.Writeu16(uint16(dataLen))
+		buffer.Seek(currPos)
 	case TXT:
 		if len(r.Txt) > 255 { return 0, errors.New("TXT record too long") }
 		if err := buffer.Writeu16(uint16(len(r.Txt) + 1)); err != nil { return 0, err } // +1 for len byte

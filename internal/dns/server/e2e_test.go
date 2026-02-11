@@ -108,4 +108,42 @@ func TestEndToEndDNS(t *testing.T) {
 	if resPacket.Answers[0].IP.String() != "9.9.9.9" {
 		t.Errorf("Expected IP 9.9.9.9, got %s", resPacket.Answers[0].IP.String())
 	}
+
+	// 8. Query via DNS (TCP)
+	tcpConn, err := net.Dial("tcp", dnsAddr)
+	if err != nil {
+		t.Fatalf("Failed to connect to DNS via TCP: %v", err)
+	}
+	defer tcpConn.Close()
+
+	// Prepend 2-byte length for TCP
+	tcpQBuf := make([]byte, qBuf.Position()+2)
+	tcpQBuf[0] = byte(qBuf.Position() >> 8)
+	tcpQBuf[1] = byte(qBuf.Position() & 0xFF)
+	copy(tcpQBuf[2:], qBuf.Buf[:qBuf.Position()])
+
+	_, err = tcpConn.Write(tcpQBuf)
+	if err != nil {
+		t.Fatalf("Failed to send DNS query via TCP: %v", err)
+	}
+
+	// Read length
+	tcpLenBuf := make([]byte, 2)
+	tcpConn.Read(tcpLenBuf)
+	tcpRespLen := uint16(tcpLenBuf[0])<<8 | uint16(tcpLenBuf[1])
+
+	tcpResBuf := make([]byte, tcpRespLen)
+	_, err = tcpConn.Read(tcpResBuf)
+	if err != nil {
+		t.Fatalf("Failed to read DNS response via TCP: %v", err)
+	}
+
+	resPacketTCP := packet.NewDnsPacket()
+	pBufTCP := packet.NewBytePacketBuffer()
+	copy(pBufTCP.Buf, tcpResBuf)
+	resPacketTCP.FromBuffer(pBufTCP)
+
+	if len(resPacketTCP.Answers) == 0 || resPacketTCP.Answers[0].IP.String() != "9.9.9.9" {
+		t.Errorf("TCP resolution failed")
+	}
 }
