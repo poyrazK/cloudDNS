@@ -5,47 +5,38 @@ A high-performance, authoritative and recursive DNS server built from scratch in
 ## 1. Core DNS Engine (Manual RFC 1035)
 Unlike standard implementations that use libraries, cloudDNS implements the binary wire format manually for maximum control and performance.
 *   **Manual Binary Parsing**: Custom bit-masking and byte-buffer management for DNS headers, questions, and records.
-*   **Supported Record Types**: 
-    *   `A` (IPv4) & `AAAA` (IPv6)
-    *   `CNAME` (Canonical Name)
-    *   `NS` (Name Server)
-    *   `MX` (Mail Exchange)
-    *   `SOA` (Start of Authority)
-    *   `TXT` (Text records)
-    *   `OPT` (EDNS pseudo-record)
+*   **Multi-Transport Support**: Parallel listeners for high-speed **UDP** and framed **TCP** transport.
 *   **Label Compression**: Full support for domain name pointers (offsets) during packet deserialization.
+*   **Supported Record Types**: `A`, `AAAA`, `CNAME`, `NS`, `MX`, `SOA`, `TXT`, `OPT` (EDNS), and `TSIG`.
 
-## 2. Multi-Transport Server
-*   **UDP Support**: High-speed resolution for standard queries.
-*   **TCP Support**: Full implementation of DNS-over-TCP with 2-byte length framing, essential for large responses.
-*   **Parallel Listeners**: Concurrent handling of both protocols on the same port.
-
-## 3. Advanced Resolution Logic
-*   **Recursive Resolver**: A "serious" iterative resolver that can walk the global internet hierarchy starting from root hints (`a.root-servers.net`) when a local record is missing.
-*   **Split-Horizon DNS**: Context-aware resolution. The server detects the client's source IP and filters records based on CIDR blocks (Private vs. Public views).
+## 2. Advanced Resolution Logic
+*   **Recursive Resolver**: A "serious" iterative resolver that walks the global internet hierarchy starting from root hints (`a.root-servers.net`) when a local record is missing.
+*   **Split-Horizon DNS**: Context-aware resolution. The server detects the client's source IP and filters records based on CIDR blocks (Private vs. Public views) using the PostgreSQL `<<=` operator.
+*   **Wildcard Matching**: Full support for `*.domain.com` patterns with iterative label stripping and response name rewriting.
 *   **EDNS(0) & Truncation**:
-    *   Negotiates UDP payload sizes with clients.
-    *   Automatically enforces truncation (`TC` bit) if a response exceeds the negotiated limit, forcing a safe TCP fallback.
+    *   Negotiates UDP payload sizes up to 65,535 bytes.
+    *   Automatically enforces truncation (`TC` bit) if a response exceeds the negotiated limit, forcing safe TCP fallback.
+    *   **Extended DNS Errors (RFC 8914)**: Support for granular error codes in OPT records.
+
+## 3. Security & Protection
+*   **Rate Limiting**: Built-in **Token Bucket** limiter. Protects the server from UDP floods and DDoS by enforcing per-IP query limits (Default: 100 qps/20 burst).
+*   **TSIG (Transaction Signatures)**: Support for HMAC-MD5 authenticated DNS transactions, ensuring requests and responses are signed and verified against shared secrets.
+*   **Atomic Transactions**: Zone creation is atomic; default `SOA` and `NS` records are generated and committed in a single PostgreSQL transaction.
 
 ## 4. High-Performance Architecture
-*   **UDP Worker Pool**: Uses a fixed pool of background workers and a task queue to handle traffic bursts without resource exhaustion.
-*   **In-Memory Packet Cache**: A thread-safe, TTL-aware cache that stores serialized binary responses to bypass database lookups for frequent queries.
+*   **UDP Worker Pool**: Fixed pool of background workers and a task queue to handle traffic bursts without resource exhaustion.
+*   **In-Memory Packet Cache**: Thread-safe, TTL-aware cache that stores serialized binary responses. Includes Transaction ID rewriting to allow sub-millisecond cache hits.
 *   **Hexagonal Architecture**: Strict separation between Domain logic, Ports (Interfaces), and Adapters (PostgreSQL, DNS, API).
-*   **Transactional Zone Creation**: Atomic initialization of zones with standard-compliant SOA and NS records.
-*   **Audit Trails**: Detailed change logging for every administrative action, enabling compliance and tracking of DNS metadata changes.
 
 ## 5. Management & Observability
-*   **RESTful Management API**: Provides standard HTTP endpoints for multi-tenant Zone and Record management.
-*   **PostgreSQL Persistence**: Uses a robust SQL backend for long-term storage of DNS metadata.
-*   **Structured JSON Logging**: Powered by `log/slog`. Every query is logged with:
-    *   Client IP & Transport (UDP/TCP)
-    *   Query Name & Type
-    *   Response Code (RCODE)
-    *   Cache Status (Hit/Miss)
-    *   Processing Latency (µs/ms)
+*   **RESTful Management API**: Multi-tenant CRUD endpoints for Zone and Record management.
+*   **Health Monitoring**: Dedicated `/health` endpoint verifying end-to-end connectivity including database status.
+*   **Audit Trails**: Persistent change logging for every administrative action, tracking "who changed what and when."
+*   **Structured JSON Logging**: Powered by `log/slog`. Every query is logged with client IP, latency (ms), cache status, and resolution source.
 
 ## 6. Stability & Verification
-*   **Comprehensive Test Suite**:
-    *   **Unit Tests**: Deep coverage of binary serialization and buffer edge cases.
-    *   **Integration Tests**: Verified concurrency and cache synchronization.
-    *   **E2E Tests**: Full "API-to-Wire" verification (Creating a record via REST and resolving it via real UDP).
+*   **Integration Testing**: Verified against real PostgreSQL instances using `testcontainers-go`.
+*   **High Test Coverage**: 
+    *   API: **91.7%**
+    *   Core Services: **79.4%**
+    *   DNS Protocol: **72.4%**
