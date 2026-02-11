@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"flag"
@@ -8,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"time"
 
@@ -20,53 +22,50 @@ import (
 	"github.com/poyrazK/cloudDNS/internal/dns/server"
 )
 
+type Result struct {
+	Throughput string
+	P50        string
+	P99        string
+	Success    string
+}
+
 func main() {
-	count := flag.Int("n", 10000, "Total number of queries")
-	concurrency := flag.Int("c", 100, "Concurrency level")
+	count := flag.Int("n", 100000, "Total number of queries")
+	concurrency := flag.Int("c", 200, "Concurrency level")
 	flag.Parse()
 
 	ctx := context.Background()
 
-	// 1. Start PostgreSQL
-	fmt.Println("Starting PostgreSQL Container...")
-	pgReq := testcontainers.ContainerRequest{
-		Image:        "postgres:16-alpine",
-		ExposedPorts: []string{"5432/tcp"},
-		Env: map[string]string{
-			"POSTGRES_USER":     "postgres",
-			"POSTGRES_PASSWORD": "password",
-			"POSTGRES_DB":       "clouddns",
-		},
-		WaitingFor: wait.ForListeningPort("5432/tcp"),
-	}
+	// 1. Start Containers
+	fmt.Println("Starting Infrastructure (Postgres + Redis)...")
 	pgContainer, _ := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: pgReq,
-		Started:          true,
+		ContainerRequest: testcontainers.ContainerRequest{
+			Image: "postgres:16-alpine", ExposedPorts: []string{"5432/tcp"},
+			Env: map[string]string{"POSTGRES_PASSWORD": "password", "POSTGRES_DB": "clouddns"},
+			WaitingFor: wait.ForListeningPort("5432/tcp"),
+		},
+		Started: true,
 	})
 	defer pgContainer.Terminate(ctx)
 
-	host, _ := pgContainer.Host(ctx)
-	pgPort, _ := pgContainer.MappedPort(ctx, "5432")
-	dbURL := fmt.Sprintf("postgres://postgres:password@%s:%s/clouddns?sslmode=disable", host, pgPort.Port())
-
-	// 2. Start Redis
-	fmt.Println("Starting Redis Container...")
-	redisReq := testcontainers.ContainerRequest{
-		Image:        "redis:7-alpine",
-		ExposedPorts: []string{"6379/tcp"},
-		WaitingFor:   wait.ForListeningPort("6379/tcp"),
-	}
 	redisContainer, _ := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: redisReq,
-		Started:          true,
+		ContainerRequest: testcontainers.ContainerRequest{
+			Image: "redis:7-alpine", ExposedPorts: []string{"6379/tcp"},
+			WaitingFor: wait.ForListeningPort("6379/tcp"),
+		},
+		Started: true,
 	})
 	defer redisContainer.Terminate(ctx)
 
-	redisHost, _ := redisContainer.Host(ctx)
+	host, _ := redisContainer.Host(ctx)
 	redisPort, _ := redisContainer.MappedPort(ctx, "6379")
-	redisAddr := fmt.Sprintf("%s:%s", redisHost, redisPort.Port())
+	redisAddr := fmt.Sprintf("%s:%s", host, redisPort.Port())
 
-	// 3. Setup Schema & Seed 10,000 Records
+	host, _ = pgContainer.Host(ctx)
+	pgPort, _ := pgContainer.MappedPort(ctx, "5432")
+	dbURL := fmt.Sprintf("postgres://postgres:password@%s:%s/clouddns?sslmode=disable", host, pgPort.Port())
+
+	// 2. Setup Data
 	db, _ := sql.Open("pgx", dbURL)
 	schema, _ := os.ReadFile("internal/adapters/repository/schema.sql")
 	db.ExecContext(ctx, string(schema))
@@ -80,7 +79,7 @@ func main() {
 	}
 	stmt.Close()
 
-	// 4. Start Server
+	// 3. Start Server
 	addr := "127.0.0.1:10053"
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	repo := repository.NewPostgresRepository(db)
@@ -90,28 +89,51 @@ func main() {
 
 	time.Sleep(1 * time.Second)
 
-	// 5. Phase 1: Cold Run (Postgres + Redis Population)
-	fmt.Println("\n--- PHASE 1: COLD RUN (Database Driven) ---")
-	runBench(addr, *count, *concurrency, true, 10000)
+	// 4. Run Phases
+	fmt.Printf("\nExecuting 100k Benchmark: Cold vs Warm\n")
+	
+	coldRes := runAndCapture(addr, *count, *concurrency, 10000, "COLD")
+	warmRes := runAndCapture(addr, *count, *concurrency, 10000, "WARM")
 
-	// 6. Phase 2: Warm Run (Redis Driven)
-	fmt.Println("\n--- PHASE 2: WARM RUN (Redis Driven) ---")
-	runBench(addr, *count, *concurrency, true, 10000)
-
-	fmt.Println("\nValidation Complete.")
+	// 5. Final Comparison Table
+	fmt.Println("\n==========================================================")
+	fmt.Println("          TIERED-CACHE PERFORMANCE COMPARISON             ")
+	fmt.Println("==========================================================")
+	fmt.Printf("%-15s | %-15s | %-15s\n", "Metric", "Cold (DB)", "Warm (Redis)")
+	fmt.Println("----------------------------------------------------------")
+	fmt.Printf("%-15s | %-15s | %-15s\n", "Throughput", coldRes.Throughput, warmRes.Throughput)
+	fmt.Printf("%-15s | %-15s | %-15s\n", "P50 Latency", coldRes.P50, warmRes.P50)
+	fmt.Printf("%-15s | %-15s | %-15s\n", "P99 Latency", coldRes.P99, warmRes.P99)
+	fmt.Printf("%-15s | %-15s | %-15s\n", "Reliability", coldRes.Success, warmRes.Success)
+	fmt.Println("==========================================================\n")
 }
 
-func runBench(addr string, n int, c int, random bool, rangeLimit int) {
-	args := []string{"run", "cmd/bench/main.go", "-server", addr, "-n", strconv.Itoa(n), "-c", strconv.Itoa(c)}
-	if random {
-		args = append(args, "-random")
-	}
-	if rangeLimit > 0 {
-		args = append(args, "-range", strconv.Itoa(rangeLimit))
-	}
-
+func runAndCapture(addr string, n int, c int, rangeLimit int, phase string) Result {
+	fmt.Printf("Running Phase: %s...\n", phase)
+	args := []string{"run", "cmd/bench/main.go", "-server", addr, "-n", strconv.Itoa(n), "-c", strconv.Itoa(c), "-random", "-range", strconv.Itoa(rangeLimit)}
+	
 	cmd := exec.Command("go", args...)
-	cmd.Stdout = os.Stdout
+	var out bytes.Buffer
+	cmd.Stdout = &out
 	cmd.Stderr = os.Stderr
 	cmd.Run()
+
+	output := out.String()
+	fmt.Print(output) // Still print details to console
+
+	return Result{
+		Throughput: extract(output, `Throughput:\s+([0-9.]+)`),
+		P50:        extract(output, `P50 \(Median\):\s+([0-9a-z.]+)`),
+		P99:        extract(output, `P99:\s+([0-9a-z.]+)`),
+		Success:    extract(output, `Reliability:\s+([0-9.]+)%`),
+	}
+}
+
+func extract(data string, pattern string) string {
+	re := regexp.MustCompile(pattern)
+	match := re.FindStringSubmatch(data)
+	if len(match) > 1 {
+		return match[1]
+	}
+	return "N/A"
 }
