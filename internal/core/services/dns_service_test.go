@@ -69,3 +69,37 @@ func TestCreateZone(t *testing.T) {
 		t.Errorf("Expected trailing dot, got %s", zone.Name)
 	}
 }
+
+func TestDeleteZone(t *testing.T) {
+	repo := &auditMockRepo{}
+	svc := NewDNSService(repo)
+
+	err := svc.DeleteZone(context.Background(), "z1", "t1")
+	if err != nil {
+		t.Fatalf("DeleteZone failed: %v", err)
+	}
+
+	if len(repo.logs) != 1 {
+		t.Fatalf("Expected 1 audit log, got %d", len(repo.logs))
+	}
+	if repo.logs[0].Action != "DELETE_ZONE" {
+		t.Errorf("Expected action DELETE_ZONE, got %s", repo.logs[0].Action)
+	}
+}
+
+func TestDeleteRecord(t *testing.T) {
+	repo := &auditMockRepo{}
+	svc := NewDNSService(repo)
+
+	err := svc.DeleteRecord(context.Background(), "r1", "z1")
+	if err != nil {
+		t.Fatalf("DeleteRecord failed: %v", err)
+	}
+
+	if len(repo.logs) != 1 {
+		t.Fatalf("Expected 1 audit log, got %d", len(repo.logs))
+	}
+	if repo.logs[0].Action != "DELETE_RECORD" {
+		t.Errorf("Expected action DELETE_RECORD, got %s", repo.logs[0].Action)
+	}
+}

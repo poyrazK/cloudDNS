@@ -102,3 +102,19 @@ func (s *dnsService) Resolve(ctx context.Context, name string, qType domain.Reco
 func (s *dnsService) ListZones(ctx context.Context, tenantID string) ([]domain.Zone, error) {
 	return s.repo.ListZones(ctx, tenantID)
 }
+
+func (s *dnsService) DeleteZone(ctx context.Context, zoneID string, tenantID string) error {
+	if err := s.repo.DeleteZone(ctx, zoneID, tenantID); err != nil {
+		return err
+	}
+	s.audit(ctx, tenantID, "DELETE_ZONE", "ZONE", zoneID, "Deleted zone")
+	return nil
+}
+
+func (s *dnsService) DeleteRecord(ctx context.Context, recordID string, zoneID string) error {
+	if err := s.repo.DeleteRecord(ctx, recordID, zoneID); err != nil {
+		return err
+	}
+	s.audit(ctx, "unknown", "DELETE_RECORD", "RECORD", recordID, "Deleted record")
+	return nil
+}
