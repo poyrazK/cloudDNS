@@ -39,6 +39,7 @@ func (m *mockRepo) Ping(ctx context.Context) error { return nil }
 func main() {
 	count := flag.Int("n", 1000, "Total number of queries")
 	concurrency := flag.Int("c", 10, "Concurrency level")
+	randomize := flag.Bool("random", false, "Randomize subdomains")
 	flag.Parse()
 
 	addr := "127.0.0.1:10053"
@@ -58,13 +59,18 @@ func main() {
 	// Give server a moment to start
 	time.Sleep(500 * time.Millisecond)
 
-	fmt.Printf("Executing Scaling Test: %d queries | %d concurrency\n", *count, *concurrency)
+	fmt.Printf("Executing Scaling Test: %d queries | %d concurrency | Random: %v\n", *count, *concurrency, *randomize)
 	
-	cmd := exec.Command("go", "run", "cmd/bench/main.go", 
+	args := []string{"run", "cmd/bench/main.go", 
 		"-server", addr, 
 		"-n", strconv.Itoa(*count), 
-		"-c", strconv.Itoa(*concurrency))
+		"-c", strconv.Itoa(*concurrency)}
 	
+	if *randomize {
+		args = append(args, "-random")
+	}
+
+	cmd := exec.Command("go", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	

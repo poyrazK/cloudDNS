@@ -322,6 +322,7 @@ func (s *Server) handlePacket(data []byte, srcAddr net.Addr, sendFn func([]byte)
 			}
 		} else {
 			response.Header.ResCode = 3 // NXDOMAIN
+			minTTL = 60 // NXDOMAIN TTL (Negative Caching RFC 2308)
 		}
 	} else {
 		response.Header.ResCode = 4 // FORMERR
@@ -354,7 +355,7 @@ SERIALIZE:
 
 	resData := resBuffer.Buf[:resBuffer.Position()]
 
-	// 6. Cache successful response
+	// 6. Cache successful response (including NXDOMAIN)
 	if len(request.Questions) > 0 && (response.Header.ResCode == 0 || response.Header.ResCode == 3) {
 		q := request.Questions[0]
 		cacheKey := fmt.Sprintf("%s:%d", q.Name, q.QType)

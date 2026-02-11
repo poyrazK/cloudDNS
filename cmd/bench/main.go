@@ -26,10 +26,11 @@ func main() {
 	domain := flag.String("domain", "test.com", "Domain to query")
 	concurrency := flag.Int("c", 10, "Number of concurrent workers")
 	count := flag.Int("n", 1000, "Total number of queries to send")
+	randomize := flag.Bool("random", false, "Randomize subdomains to force cache misses")
 	flag.Parse()
 
 	fmt.Printf("Starting Whole-Picture Scaling Test\n")
-	fmt.Printf("Configuration: %d queries | %d concurrency | Target: %s | Domain: %s\n", *count, *concurrency, *target, *domain)
+	fmt.Printf("Configuration: %d queries | %d concurrency | Target: %s | Randomize: %v\n", *count, *concurrency, *target, *randomize)
 
 	stats := Stats{
 		Latencies: make(chan time.Duration, *count),
@@ -42,10 +43,10 @@ func main() {
 	queriesPerWorker := *count / *concurrency
 
 	for i := 0; i < *concurrency; i++ {
-		go func() {
+		go func(workerID int) {
 			defer wg.Done()
-			runWorker(*target, *domain, queriesPerWorker, &stats)
-		}()
+			runWorker(*target, *domain, queriesPerWorker, workerID, *randomize, &stats)
+		}(i)
 	}
 
 	wg.Wait()
@@ -55,7 +56,7 @@ func main() {
 	printEnhancedReport(duration, &stats, *concurrency)
 }
 
-func runWorker(target string, domainName string, count int, stats *Stats) {
+func runWorker(target string, domainName string, count int, workerID int, randomize bool, stats *Stats) {
 	conn, err := net.Dial("udp", target)
 	if err != nil {
 		fmt.Printf("Connection error: %v\n", err)
@@ -63,17 +64,23 @@ func runWorker(target string, domainName string, count int, stats *Stats) {
 	}
 	defer conn.Close()
 
-	p := packet.NewDnsPacket()
-	p.Header.ID = 1234
-	p.Questions = append(p.Questions, *packet.NewDnsQuestion(domainName, packet.A))
-
-	buf := packet.NewBytePacketBuffer()
-	p.Write(buf)
-	data := buf.Buf[:buf.Position()]
-
 	recvBuf := make([]byte, 1024)
 
 	for i := 0; i < count; i++ {
+		currentDomain := domainName
+		if randomize {
+			currentDomain = fmt.Sprintf("w%d-req%d.%s", workerID, i, domainName)
+		}
+
+		// Build packet for each query if randomizing, else use template
+		p := packet.NewDnsPacket()
+		p.Header.ID = uint16(workerID*count + i)
+		p.Questions = append(p.Questions, *packet.NewDnsQuestion(currentDomain, packet.A))
+
+		buf := packet.NewBytePacketBuffer()
+		p.Write(buf)
+		data := buf.Buf[:buf.Position()]
+
 		queryStart := time.Now()
 		
 		n, err := conn.Write(data)
