@@ -31,6 +31,7 @@ Unlike standard implementations that use libraries, cloudDNS implements the bina
 *   **UDP Worker Pool**: Uses a fixed pool of background workers and a task queue to handle traffic bursts without resource exhaustion.
 *   **In-Memory Packet Cache**: A thread-safe, TTL-aware cache that stores serialized binary responses to bypass database lookups for frequent queries.
 *   **Hexagonal Architecture**: Strict separation between Domain logic, Ports (Interfaces), and Adapters (PostgreSQL, DNS, API).
+*   **Transactional Zone Creation**: Atomic initialization of zones with standard-compliant SOA and NS records.
 
 ## 5. Management & Observability
 *   **RESTful Management API**: Provides standard HTTP endpoints for multi-tenant Zone and Record management.
