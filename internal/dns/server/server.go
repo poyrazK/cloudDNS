@@ -20,6 +20,7 @@ type Server struct {
 	udpQueue    chan udpTask
 	Logger      *slog.Logger
 	queryFn     func(server string, name string, qtype packet.QueryType) (*packet.DnsPacket, error)
+	limiter     *rateLimiter
 }
 
 type udpTask struct {
@@ -39,8 +40,18 @@ func NewServer(addr string, repo ports.DNSRepository, logger *slog.Logger) *Serv
 		WorkerCount: 10,
 		udpQueue:    make(chan udpTask, 1000),
 		Logger:      logger,
+		limiter:     newRateLimiter(100, 20), // 100 queries/sec with 20 burst
 	}
 	s.queryFn = s.sendQuery
+	
+	// Periodic cleanup of rate limiter buckets
+	go func() {
+		for {
+			time.Sleep(5 * time.Minute)
+			s.limiter.Cleanup()
+		}
+	}()
+
 	return s
 }
 
@@ -153,6 +164,15 @@ func (s *Server) handlePacket(data []byte, srcAddr net.Addr, sendFn func([]byte)
 	
 	// Create a contextual logger for this request
 	logger := s.Logger.With("client_ip", clientIP)
+
+	// --- Rate Limiting ---
+	if !s.limiter.Allow(clientIP) {
+		logger.Warn("rate limit exceeded", "ip", clientIP)
+		// Option 1: Drop packet (recommended for UDP under heavy flood)
+		// Option 2: Send REFUSED/SERVFAIL
+		// Let's drop for now to save bandwidth/CPU
+		return nil 
+	}
 
 	// 1. Parse Request
 	reqBuffer := packet.NewBytePacketBuffer()
