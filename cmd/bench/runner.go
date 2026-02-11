@@ -21,9 +21,8 @@ import (
 )
 
 func main() {
-	count := flag.Int("n", 1000, "Total number of queries")
-	concurrency := flag.Int("c", 10, "Concurrency level")
-	randomize := flag.Bool("random", false, "Randomize subdomains")
+	count := flag.Int("n", 10000, "Total number of queries")
+	concurrency := flag.Int("c", 100, "Concurrency level")
 	flag.Parse()
 
 	ctx := context.Background()
@@ -40,14 +39,10 @@ func main() {
 		},
 		WaitingFor: wait.ForListeningPort("5432/tcp"),
 	}
-	pgContainer, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+	pgContainer, _ := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: pgReq,
 		Started:          true,
 	})
-	if err != nil {
-		fmt.Printf("Failed to start postgres: %v\n", err)
-		os.Exit(1)
-	}
 	defer pgContainer.Terminate(ctx)
 
 	host, _ := pgContainer.Host(ctx)
@@ -61,21 +56,17 @@ func main() {
 		ExposedPorts: []string{"6379/tcp"},
 		WaitingFor:   wait.ForListeningPort("6379/tcp"),
 	}
-	redisContainer, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+	redisContainer, _ := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: redisReq,
 		Started:          true,
 	})
-	if err != nil {
-		fmt.Printf("Failed to start redis: %v\n", err)
-		os.Exit(1)
-	}
 	defer redisContainer.Terminate(ctx)
 
 	redisHost, _ := redisContainer.Host(ctx)
 	redisPort, _ := redisContainer.MappedPort(ctx, "6379")
 	redisAddr := fmt.Sprintf("%s:%s", redisHost, redisPort.Port())
 
-	// 3. Initialize Schema & Seed Data
+	// 3. Setup Schema & Seed 10,000 Records
 	db, _ := sql.Open("pgx", dbURL)
 	schema, _ := os.ReadFile("internal/adapters/repository/schema.sql")
 	db.ExecContext(ctx, string(schema))
@@ -89,30 +80,38 @@ func main() {
 	}
 	stmt.Close()
 
-	// 4. Start Server with Tiered Cache (Redis Enabled)
+	// 4. Start Server
 	addr := "127.0.0.1:10053"
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	repo := repository.NewPostgresRepository(db)
 	srv := server.NewServer(addr, repo, logger)
 	srv.Redis = server.NewRedisCache(redisAddr, "", 0)
-
-	fmt.Printf("Starting CloudDNS Tiered-Cache Server on %s\n", addr)
 	go srv.Run()
 
 	time.Sleep(1 * time.Second)
 
-	// 5. Run Benchmark
-	fmt.Printf("Executing TIERED-CACHE Scaling Test: %d queries | %d concurrency | Random: %v\n", *count, *concurrency, *randomize)
-	
-	args := []string{"run", "cmd/bench/main.go", "-server", addr, "-n", strconv.Itoa(*count), "-c", strconv.Itoa(*concurrency)}
-	if *randomize {
+	// 5. Phase 1: Cold Run (Postgres + Redis Population)
+	fmt.Println("\n--- PHASE 1: COLD RUN (Database Driven) ---")
+	runBench(addr, *count, *concurrency, true, 10000)
+
+	// 6. Phase 2: Warm Run (Redis Driven)
+	fmt.Println("\n--- PHASE 2: WARM RUN (Redis Driven) ---")
+	runBench(addr, *count, *concurrency, true, 10000)
+
+	fmt.Println("\nValidation Complete.")
+}
+
+func runBench(addr string, n int, c int, random bool, rangeLimit int) {
+	args := []string{"run", "cmd/bench/main.go", "-server", addr, "-n", strconv.Itoa(n), "-c", strconv.Itoa(c)}
+	if random {
 		args = append(args, "-random")
 	}
+	if rangeLimit > 0 {
+		args = append(args, "-range", strconv.Itoa(rangeLimit))
+	}
 
-	benchCmd := exec.Command("go", args...)
-	benchCmd.Stdout = os.Stdout
-	benchCmd.Stderr = os.Stderr
-	benchCmd.Run()
-
-	fmt.Println("\nBenchmark Complete. Shutting down containers.")
+	cmd := exec.Command("go", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Run()
 }

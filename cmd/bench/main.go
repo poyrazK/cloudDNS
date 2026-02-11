@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"math/rand"
 	"net"
 	"sort"
 	"sync"
@@ -26,11 +27,12 @@ func main() {
 	domain := flag.String("domain", "test.com", "Domain to query")
 	concurrency := flag.Int("c", 10, "Number of concurrent workers")
 	count := flag.Int("n", 1000, "Total number of queries to send")
-	randomize := flag.Bool("random", false, "Randomize subdomains to force cache misses")
+	randomize := flag.Bool("random", false, "Randomize subdomains")
+	rangeLimit := flag.Int("range", 0, "Limit randomization to req-0 to req-N (0 for infinite)")
 	flag.Parse()
 
-	fmt.Printf("Starting Whole-Picture Scaling Test\n")
-	fmt.Printf("Configuration: %d queries | %d concurrency | Target: %s | Randomize: %v\n", *count, *concurrency, *target, *randomize)
+	fmt.Printf("Starting Tiered-Cache Validation Test\n")
+	fmt.Printf("Configuration: %d queries | %d concurrency | Random: %v | Range: %d\n", *count, *concurrency, *target, *randomize, *rangeLimit)
 
 	stats := Stats{
 		Latencies: make(chan time.Duration, *count),
@@ -45,7 +47,7 @@ func main() {
 	for i := 0; i < *concurrency; i++ {
 		go func(workerID int) {
 			defer wg.Done()
-			runWorker(*target, *domain, queriesPerWorker, workerID, *randomize, &stats)
+			runWorker(*target, *domain, queriesPerWorker, workerID, *randomize, *rangeLimit, &stats)
 		}(i)
 	}
 
@@ -56,7 +58,7 @@ func main() {
 	printEnhancedReport(duration, &stats, *concurrency)
 }
 
-func runWorker(target string, domainName string, count int, workerID int, randomize bool, stats *Stats) {
+func runWorker(target string, domainName string, count int, workerID int, randomize bool, rangeLimit int, stats *Stats) {
 	conn, err := net.Dial("udp", target)
 	if err != nil {
 		fmt.Printf("Connection error: %v\n", err)
@@ -65,16 +67,21 @@ func runWorker(target string, domainName string, count int, workerID int, random
 	defer conn.Close()
 
 	recvBuf := make([]byte, 1024)
+	r := rand.New(rand.NewSource(time.Now().UnixNano() + int64(workerID)))
 
 	for i := 0; i < count; i++ {
 		currentDomain := domainName
 		if randomize {
-			currentDomain = fmt.Sprintf("w%d-req%d.%s", workerID, i, domainName)
+			if rangeLimit > 0 {
+				// Query within the seeded range (req-0.test.com to req-N.test.com)
+				currentDomain = fmt.Sprintf("req-%d.%s", r.Intn(rangeLimit), domainName)
+			} else {
+				currentDomain = fmt.Sprintf("w%d-req%d.%s", workerID, i, domainName)
+			}
 		}
 
-		// Build packet for each query if randomizing, else use template
 		p := packet.NewDnsPacket()
-		p.Header.ID = uint16(workerID*count + i)
+		p.Header.ID = uint16(r.Uint32())
 		p.Questions = append(p.Questions, *packet.NewDnsQuestion(currentDomain, packet.A))
 
 		buf := packet.NewBytePacketBuffer()
