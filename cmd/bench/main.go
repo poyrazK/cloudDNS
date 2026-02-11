@@ -22,17 +22,19 @@ type Stats struct {
 	Latencies     chan time.Duration
 }
 
+var tlds = []string{"com", "net", "org", "io", "dev", "ai", "cloud", "gov", "edu", "tr", "com.tr", "me", "info"}
+
 func main() {
 	target := flag.String("server", "127.0.0.1:1053", "DNS server to test")
-	domain := flag.String("domain", "test.com", "Domain to query")
 	concurrency := flag.Int("c", 10, "Number of concurrent workers")
 	count := flag.Int("n", 1000, "Total number of queries to send")
-	randomize := flag.Bool("random", false, "Randomize subdomains")
-	rangeLimit := flag.Int("range", 0, "Limit randomization to req-0 to req-N (0 for infinite)")
+	rangeLimit := flag.Int("range", 10000000, "Number of records in the database (default 10M)")
+	zipfS := flag.Float64("zipf-s", 1.1, "Zipf distribution constant (s > 1). Higher means more 'Hot' domains.")
+	zipfV := flag.Float64("zipf-v", 100, "Zipf distribution constant (v >= 1).")
 	flag.Parse()
 
-	fmt.Printf("Starting Tiered-Cache Validation Test\n")
-	fmt.Printf("Configuration: %d queries | %d concurrency | Random: %v | Range: %d\n", *count, *concurrency, *target, *randomize, *rangeLimit)
+	fmt.Printf("Starting Realistic Scale Test\n")
+	fmt.Printf("Configuration: %d queries | %d concurrency | Pool Size: %d | Zipf(s=%.1f, v=%.1f)\n", *count, *concurrency, *rangeLimit, *zipfS, *zipfV)
 
 	stats := Stats{
 		Latencies: make(chan time.Duration, *count),
@@ -47,7 +49,7 @@ func main() {
 	for i := 0; i < *concurrency; i++ {
 		go func(workerID int) {
 			defer wg.Done()
-			runWorker(*target, *domain, queriesPerWorker, workerID, *randomize, *rangeLimit, &stats)
+			runRealisticWorker(*target, queriesPerWorker, workerID, uint64(*rangeLimit), *zipfS, *zipfV, &stats)
 		}(i)
 	}
 
@@ -58,7 +60,7 @@ func main() {
 	printEnhancedReport(duration, &stats, *concurrency)
 }
 
-func runWorker(target string, domainName string, count int, workerID int, randomize bool, rangeLimit int, stats *Stats) {
+func runRealisticWorker(target string, count int, workerID int, rangeLimit uint64, s float64, v float64, stats *Stats) {
 	conn, err := net.Dial("udp", target)
 	if err != nil {
 		fmt.Printf("Connection error: %v\n", err)
@@ -68,17 +70,12 @@ func runWorker(target string, domainName string, count int, workerID int, random
 
 	recvBuf := make([]byte, 1024)
 	r := rand.New(rand.NewSource(time.Now().UnixNano() + int64(workerID)))
+	zipf := rand.NewZipf(r, s, v, rangeLimit-1)
 
 	for i := 0; i < count; i++ {
-		currentDomain := domainName
-		if randomize {
-			if rangeLimit > 0 {
-				// Query within the seeded range (req-0.test.com to req-N.test.com)
-				currentDomain = fmt.Sprintf("req-%d.%s", r.Intn(rangeLimit), domainName)
-			} else {
-				currentDomain = fmt.Sprintf("w%d-req%d.%s", workerID, i, domainName)
-			}
-		}
+		// Use Zipf distribution to select a 'Hot' or 'Cold' domain
+		idx := zipf.Uint64()
+		currentDomain := fmt.Sprintf("host-%d.%s", idx, tlds[idx%uint64(len(tlds))])
 
 		p := packet.NewDnsPacket()
 		p.Header.ID = uint16(r.Uint32())
@@ -97,7 +94,7 @@ func runWorker(target string, domainName string, count int, workerID int, random
 		}
 		atomic.AddUint64(&stats.BytesSent, uint64(n))
 
-		conn.SetReadDeadline(time.Now().Add(1 * time.Second))
+		conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 		n, err = conn.Read(recvBuf)
 		
 		if err != nil {
