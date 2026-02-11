@@ -28,9 +28,9 @@ func main() {
 
 	ctx := context.Background()
 
-	// 1. Start Temporary PostgreSQL using Testcontainers
-	fmt.Println("Starting Temporary PostgreSQL Container...")
-	req := testcontainers.ContainerRequest{
+	// 1. Start PostgreSQL
+	fmt.Println("Starting PostgreSQL Container...")
+	pgReq := testcontainers.ContainerRequest{
 		Image:        "postgres:16-alpine",
 		ExposedPorts: []string{"5432/tcp"},
 		Env: map[string]string{
@@ -41,7 +41,7 @@ func main() {
 		WaitingFor: wait.ForListeningPort("5432/tcp"),
 	}
 	pgContainer, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: req,
+		ContainerRequest: pgReq,
 		Started:          true,
 	})
 	if err != nil {
@@ -51,55 +51,60 @@ func main() {
 	defer pgContainer.Terminate(ctx)
 
 	host, _ := pgContainer.Host(ctx)
-	port, _ := pgContainer.MappedPort(ctx, "5432")
-	dbURL := fmt.Sprintf("postgres://postgres:password@%s:%s/clouddns?sslmode=disable", host, port.Port())
+	pgPort, _ := pgContainer.MappedPort(ctx, "5432")
+	dbURL := fmt.Sprintf("postgres://postgres:password@%s:%s/clouddns?sslmode=disable", host, pgPort.Port())
 
-	// 2. Initialize Schema
-	db, err := sql.Open("pgx", dbURL)
+	// 2. Start Redis
+	fmt.Println("Starting Redis Container...")
+	redisReq := testcontainers.ContainerRequest{
+		Image:        "redis:7-alpine",
+		ExposedPorts: []string{"6379/tcp"},
+		WaitingFor:   wait.ForListeningPort("6379/tcp"),
+	}
+	redisContainer, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: redisReq,
+		Started:          true,
+	})
 	if err != nil {
-		fmt.Printf("Failed to connect to db: %v\n", err)
+		fmt.Printf("Failed to start redis: %v\n", err)
 		os.Exit(1)
 	}
-	
-	schema, _ := os.ReadFile("internal/adapters/repository/schema.sql")
-	if _, err := db.ExecContext(ctx, string(schema)); err != nil {
-		fmt.Printf("Failed to init schema: %v\n", err)
-		os.Exit(1)
-	}
+	defer redisContainer.Terminate(ctx)
 
-	// 3. Seed 10,000 Records
-	fmt.Println("Seeding 10,000 records for 'test.com'...")
+	redisHost, _ := redisContainer.Host(ctx)
+	redisPort, _ := redisContainer.MappedPort(ctx, "6379")
+	redisAddr := fmt.Sprintf("%s:%s", redisHost, redisPort.Port())
+
+	// 3. Initialize Schema & Seed Data
+	db, _ := sql.Open("pgx", dbURL)
+	schema, _ := os.ReadFile("internal/adapters/repository/schema.sql")
+	db.ExecContext(ctx, string(schema))
+
+	fmt.Println("Seeding 10,000 records...")
 	zoneID := uuid.New()
 	db.ExecContext(ctx, "INSERT INTO dns_zones (id, tenant_id, name) VALUES ($1, $2, $3)", zoneID, "bench", "test.com")
-	
 	stmt, _ := db.PrepareContext(ctx, "INSERT INTO dns_records (id, zone_id, name, type, content, ttl) VALUES ($1, $2, $3, $4, $5, $6)")
 	for i := 0; i < 10000; i++ {
 		stmt.ExecContext(ctx, uuid.New(), zoneID, fmt.Sprintf("req-%d.test.com", i), "A", "1.2.3.4", 3600)
 	}
 	stmt.Close()
 
-	// 4. Start Server with Real PostgreSQL Repository
+	// 4. Start Server with Tiered Cache (Redis Enabled)
 	addr := "127.0.0.1:10053"
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	repo := repository.NewPostgresRepository(db)
 	srv := server.NewServer(addr, repo, logger)
+	srv.Redis = server.NewRedisCache(redisAddr, "", 0)
 
-	fmt.Printf("Starting CloudDNS Production-Grade Server on %s\n", addr)
-	go func() {
-		if err := srv.Run(); err != nil {
-			fmt.Printf("Server error: %v\n", err)
-		}
-	}()
+	fmt.Printf("Starting CloudDNS Tiered-Cache Server on %s\n", addr)
+	go srv.Run()
 
 	time.Sleep(1 * time.Second)
 
 	// 5. Run Benchmark
-	fmt.Printf("Executing REAL-WORLD Scaling Test: %d queries | %d concurrency | Random: %v\n", *count, *concurrency, *randomize)
+	fmt.Printf("Executing TIERED-CACHE Scaling Test: %d queries | %d concurrency | Random: %v\n", *count, *concurrency, *randomize)
 	
-	args := []string{"run", "cmd/bench/main.go", 
-		"-server", addr, 
-		"-n", strconv.Itoa(*count), 
-		"-c", strconv.Itoa(*concurrency)}
+	args := []string{"run", "cmd/bench/main.go", "-server", addr, "-n", strconv.Itoa(*count), "-c", strconv.Itoa(*concurrency)}
 	if *randomize {
 		args = append(args, "-random")
 	}
@@ -107,10 +112,7 @@ func main() {
 	benchCmd := exec.Command("go", args...)
 	benchCmd.Stdout = os.Stdout
 	benchCmd.Stderr = os.Stderr
-	
-	if err := benchCmd.Run(); err != nil {
-		fmt.Printf("Benchmark failed: %v\n", err)
-	}
+	benchCmd.Run()
 
-	fmt.Println("\nBenchmark Complete. Shutting down container.")
+	fmt.Println("\nBenchmark Complete. Shutting down containers.")
 }

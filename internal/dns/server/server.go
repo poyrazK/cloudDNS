@@ -19,6 +19,7 @@ type Server struct {
 	Addr        string
 	Repo        ports.DNSRepository
 	Cache       *DNSCache
+	Redis       *RedisCache
 	WorkerCount int
 	udpQueue    chan udpTask
 	Logger      *slog.Logger
@@ -41,10 +42,10 @@ func NewServer(addr string, repo ports.DNSRepository, logger *slog.Logger) *Serv
 		Addr:        addr,
 		Repo:        repo,
 		Cache:       NewDNSCache(),
-		WorkerCount: runtime.NumCPU() * 8, // Doubled for 1M test
-		udpQueue:    make(chan udpTask, 10000), // Larger queue for 1M test
+		WorkerCount: runtime.NumCPU() * 8,
+		udpQueue:    make(chan udpTask, 10000),
 		Logger:      logger,
-		limiter:     newRateLimiter(200000, 100000), // Extreme thresholds for 1M test
+		limiter:     newRateLimiter(200000, 100000),
 		TsigKeys:    make(map[string][]byte),
 	}
 	s.queryFn = s.sendQuery
@@ -225,23 +226,35 @@ func (s *Server) handlePacket(data []byte, srcAddr net.Addr, sendFn func([]byte)
 		}
 	}
 
-	// 2. Check Cache
+	// 2. Check TIERED CACHE
 	if len(request.Questions) > 0 {
 		q := request.Questions[0]
 		cacheKey := fmt.Sprintf("%s:%d", q.Name, q.QType)
+		
+		// Tier 1: In-Memory
 		if cachedData, found := s.Cache.Get(cacheKey); found {
 			if len(cachedData) >= 2 {
 				cachedData[0] = byte(request.Header.ID >> 8)
 				cachedData[1] = byte(request.Header.ID & 0xFF)
 			}
 			err := sendFn(cachedData)
-			logger.Info("dns query processed",
-				"name", queryName,
-				"type", queryType,
-				"cache", "hit",
-				"latency_ms", time.Since(start).Milliseconds(),
-			)
+			logger.Info("dns query processed", "name", queryName, "type", queryType, "cache", "l1-hit", "latency_ms", time.Since(start).Milliseconds())
 			return err
+		}
+
+		// Tier 2: Redis
+		if s.Redis != nil {
+			if cachedData, found := s.Redis.Get(context.Background(), cacheKey); found {
+				if len(cachedData) >= 2 {
+					cachedData[0] = byte(request.Header.ID >> 8)
+					cachedData[1] = byte(request.Header.ID & 0xFF)
+				}
+				// Populate L1 from L2
+				s.Cache.Set(cacheKey, cachedData, 60*time.Second)
+				err := sendFn(cachedData)
+				logger.Info("dns query processed", "name", queryName, "type", queryType, "cache", "l2-hit", "latency_ms", time.Since(start).Milliseconds())
+				return err
+			}
 		}
 	}
 
@@ -361,7 +374,12 @@ SERIALIZE:
 		cacheKey := fmt.Sprintf("%s:%d", q.Name, q.QType)
 		cacheData := make([]byte, len(resData))
 		copy(cacheData, resData)
+		
+		// Populate L1 and L2
 		s.Cache.Set(cacheKey, cacheData, time.Duration(minTTL)*time.Second)
+		if s.Redis != nil {
+			s.Redis.Set(context.Background(), cacheKey, cacheData, time.Duration(minTTL)*time.Second)
+		}
 	}
 
 	// 7. Send Back
