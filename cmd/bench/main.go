@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"net"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -12,10 +13,12 @@ import (
 )
 
 type Stats struct {
-	TotalQueries uint64
-	Success      uint64
-	Errors       uint64
-	Latencies    chan time.Duration
+	TotalQueries  uint64
+	Success       uint64
+	Errors        uint64
+	BytesSent     uint64
+	BytesReceived uint64
+	Latencies     chan time.Duration
 }
 
 func main() {
@@ -25,7 +28,8 @@ func main() {
 	count := flag.Int("n", 1000, "Total number of queries to send")
 	flag.Parse()
 
-	fmt.Printf("Starting scaling test: %d queries, %d concurrency, targeting %s\n", *count, *concurrency, *target)
+	fmt.Printf("Starting Whole-Picture Scaling Test\n")
+	fmt.Printf("Configuration: %d queries | %d concurrency | Target: %s | Domain: %s\n", *count, *concurrency, *target, *domain)
 
 	stats := Stats{
 		Latencies: make(chan time.Duration, *count),
@@ -48,7 +52,7 @@ func main() {
 	duration := time.Since(start)
 	close(stats.Latencies)
 
-	printReport(duration, &stats)
+	printEnhancedReport(duration, &stats, *concurrency)
 }
 
 func runWorker(target string, domainName string, count int, stats *Stats) {
@@ -59,65 +63,75 @@ func runWorker(target string, domainName string, count int, stats *Stats) {
 	}
 	defer conn.Close()
 
-	// Pre-build packet to minimize worker overhead
 	p := packet.NewDnsPacket()
 	p.Header.ID = 1234
-	p.Header.RecursionDesired = true
 	p.Questions = append(p.Questions, *packet.NewDnsQuestion(domainName, packet.A))
 
 	buf := packet.NewBytePacketBuffer()
 	p.Write(buf)
 	data := buf.Buf[:buf.Position()]
 
-	recvBuf := make([]byte, 512)
+	recvBuf := make([]byte, 1024)
 
 	for i := 0; i < count; i++ {
 		queryStart := time.Now()
 		
-		_, err := conn.Write(data)
+		n, err := conn.Write(data)
 		if err != nil {
 			atomic.AddUint64(&stats.Errors, 1)
 			continue
 		}
+		atomic.AddUint64(&stats.BytesSent, uint64(n))
 
-		conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-		_, err = conn.Read(recvBuf)
+		conn.SetReadDeadline(time.Now().Add(1 * time.Second))
+		n, err = conn.Read(recvBuf)
 		
 		if err != nil {
 			atomic.AddUint64(&stats.Errors, 1)
 		} else {
 			atomic.AddUint64(&stats.Success, 1)
+			atomic.AddUint64(&stats.BytesReceived, uint64(n))
 			stats.Latencies <- time.Since(queryStart)
 		}
 		atomic.AddUint64(&stats.TotalQueries, 1)
 	}
 }
 
-func printReport(duration time.Duration, stats *Stats) {
+func printEnhancedReport(duration time.Duration, stats *Stats, concurrency int) {
 	qps := float64(stats.Success) / duration.Seconds()
+	mbSent := float64(stats.BytesSent) / 1024 / 1024
+	mbRecv := float64(stats.BytesReceived) / 1024 / 1024
 	
-	var totalLat time.Duration
 	var latencies []time.Duration
 	for l := range stats.Latencies {
-		totalLat += l
 		latencies = append(latencies, l)
 	}
+	sort.Slice(latencies, func(i, j int) bool { return latencies[i] < latencies[j] })
 
-	avg := time.Duration(0)
-	if len(latencies) > 0 {
-		avg = totalLat / time.Duration(len(latencies))
-	}
-
-	fmt.Println("\n--- Scaling Test Results ---")
-	fmt.Printf("Total Time:     %v\n", duration)
-	fmt.Printf("Queries:        %d\n", stats.TotalQueries)
-	fmt.Printf("Success:        %d\n", stats.Success)
-	fmt.Printf("Errors:         %d\n", stats.Errors)
-	fmt.Printf("Throughput:     %.2f QPS\n", qps)
-	fmt.Printf("Average Latency: %v\n", avg)
+	fmt.Println("\n============================================")
+	fmt.Println("          DNS ENGINE PERFORMANCE REPORT       ")
+	fmt.Println("============================================")
+	fmt.Printf("Test Duration:    %v\n", duration)
+	fmt.Printf("Concurrency:      %d workers\n", concurrency)
+	fmt.Printf("Throughput:       %.2f queries/sec\n", qps)
+	fmt.Printf("Data Transfer:    %.2f MB Sent | %.2f MB Received\n", mbSent, mbRecv)
 	
-	if stats.Errors > 0 {
-		fmt.Printf("Error Rate:     %.2f%%\n", (float64(stats.Errors)/float64(stats.TotalQueries))*100)
+	fmt.Println("\n--- Query Statistics ---")
+	fmt.Printf("Total Attempted:  %d\n", stats.TotalQueries)
+	fmt.Printf("Successful:       %d\n", stats.Success)
+	fmt.Printf("Failed/Timed out: %d\n", stats.Errors)
+	if stats.TotalQueries > 0 {
+		fmt.Printf("Reliability:      %.2f%%\n", (float64(stats.Success)/float64(stats.TotalQueries))*100)
 	}
-	fmt.Println("----------------------------")
+
+	if len(latencies) > 0 {
+		fmt.Println("\n--- Latency Percentiles ---")
+		fmt.Printf("P50 (Median):     %v\n", latencies[len(latencies)/2])
+		fmt.Printf("P90:              %v\n", latencies[int(float64(len(latencies))*0.90)])
+		fmt.Printf("P95:              %v\n", latencies[int(float64(len(latencies))*0.95)])
+		fmt.Printf("P99:              %v\n", latencies[int(float64(len(latencies))*0.99)])
+		fmt.Printf("Min:              %v\n", latencies[0])
+		fmt.Printf("Max:              %v\n", latencies[len(latencies)-1])
+	}
+	fmt.Println("============================================\n")
 }
