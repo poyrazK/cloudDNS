@@ -36,6 +36,28 @@ func (m *mockDNSService) ListZones(ctx context.Context, tenantID string) ([]doma
 	return m.zones, nil
 }
 
+func (m *mockDNSService) DeleteZone(ctx context.Context, id, tenantID string) error {
+	return nil
+}
+
+func (m *mockDNSService) DeleteRecord(ctx context.Context, id, zoneID string) error {
+	return nil
+}
+
+func TestCreateZone_BadRequest(t *testing.T) {
+	svc := &mockDNSService{}
+	handler := NewAPIHandler(svc)
+	
+	req := httptest.NewRequest("POST", "/zones", bytes.NewBuffer([]byte("invalid json")))
+	w := httptest.NewRecorder()
+	
+	handler.CreateZone(w, req)
+	
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected status 400, got %d", w.Code)
+	}
+}
+
 func TestCreateZone(t *testing.T) {
 	svc := &mockDNSService{}
 	handler := NewAPIHandler(svc)

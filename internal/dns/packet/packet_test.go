@@ -288,3 +288,28 @@ func TestCNAMERecordSerialization(t *testing.T) {
 		t.Errorf("Expected real.test.com, got %s", parsed.Host)
 	}
 }
+
+func TestNameCompression(t *testing.T) {
+	buffer := NewBytePacketBuffer()
+	
+	// Write "google.com" normally at pos 0
+	buffer.WriteName("google.com")
+	pos := buffer.Position()
+	
+	// Write a compressed pointer to "google.com" at the new position
+	// Format for pointer: 11xxxxxx xxxxxxxx where xxx... is the offset (0 in this case)
+	// Binary: 11000000 00000000 (0xC0 0x00)
+	buffer.Write(0xC0)
+	buffer.Write(0x00)
+	
+	// Seek to the pointer and read
+	buffer.Seek(pos)
+	name, err := buffer.ReadName()
+	if err != nil {
+		t.Fatalf("Failed to read compressed name: %v", err)
+	}
+	
+	if name != "google.com" {
+		t.Errorf("Expected compressed name google.com, got %s", name)
+	}
+}

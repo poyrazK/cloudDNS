@@ -123,4 +123,42 @@ func TestPostgresRepository_Integration(t *testing.T) {
 	if len(internalRes) != 2 {
 		t.Errorf("Internal client expected 2 records, got %d", len(internalRes))
 	}
+
+	// 4. Test ListZones
+	zones, err := repo.ListZones(ctx, "tenant-1")
+	if err != nil || len(zones) != 1 {
+		t.Errorf("ListZones failed: %v, count: %d", err, len(zones))
+	}
+
+	// 5. Test Audit Logs
+	audit := &domain.AuditLog{
+		ID:           "550e8400-e29b-41d4-a716-446655440003",
+		TenantID:     "tenant-1",
+		Action:       "CREATE_ZONE",
+		ResourceType: "ZONE",
+		ResourceID:   zoneID,
+		Details:      "Test log",
+		CreatedAt:    time.Now(),
+	}
+	err = repo.SaveAuditLog(ctx, audit)
+	if err != nil {
+		t.Errorf("SaveAuditLog failed: %v", err)
+	}
+
+	logs, err := repo.GetAuditLogs(ctx, "tenant-1")
+	if err != nil || len(logs) != 1 {
+		t.Errorf("GetAuditLogs failed: %v, count: %d", err, len(logs))
+	}
+
+	// 6. Test Delete
+	err = repo.DeleteZone(ctx, zoneID, "tenant-1")
+	if err != nil {
+		t.Errorf("DeleteZone failed: %v", err)
+	}
+
+	// Verify cascade delete of records
+	leftover, _ := repo.GetRecords(ctx, "example.com.", domain.TypeA, "8.8.8.8")
+	if len(leftover) != 0 {
+		t.Errorf("Records were not deleted after zone deletion")
+	}
 }
