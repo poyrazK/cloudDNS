@@ -1,0 +1,60 @@
+package services
+
+import (
+	"context"
+	"testing"
+
+	"github.com/poyrazK/cloudDNS/internal/core/domain"
+)
+
+// Mock repository that captures audit logs
+type auditMockRepo struct {
+	mockRepo // Inherit from existing mock
+	logs []domain.AuditLog
+}
+
+func (m *auditMockRepo) SaveAuditLog(ctx context.Context, log *domain.AuditLog) error {
+	m.logs = append(m.logs, *log)
+	return nil
+}
+
+func TestAuditLogCreation(t *testing.T) {
+	repo := &auditMockRepo{}
+	svc := NewDNSService(repo)
+
+	// 1. Create Zone
+	zone := &domain.Zone{Name: "audit.test", TenantID: "t1"}
+	err := svc.CreateZone(context.Background(), zone)
+	if err != nil {
+		t.Fatalf("CreateZone failed: %v", err)
+	}
+
+	// Verify Audit Log for Zone Creation
+	if len(repo.logs) != 1 {
+		t.Fatalf("Expected 1 audit log, got %d", len(repo.logs))
+	}
+	if repo.logs[0].Action != "CREATE_ZONE" {
+		t.Errorf("Expected action CREATE_ZONE, got %s", repo.logs[0].Action)
+	}
+	if repo.logs[0].ResourceType != "ZONE" {
+		t.Errorf("Expected resource type ZONE, got %s", repo.logs[0].ResourceType)
+	}
+
+	// 2. Create Record
+	record := &domain.Record{Name: "www.audit.test", Type: domain.TypeA, Content: "1.2.3.4", TTL: 300}
+	err = svc.CreateRecord(context.Background(), record)
+	if err != nil {
+		t.Fatalf("CreateRecord failed: %v", err)
+	}
+
+	// Verify Audit Log for Record Creation
+	if len(repo.logs) != 2 {
+		t.Fatalf("Expected 2 audit logs, got %d", len(repo.logs))
+	}
+	if repo.logs[1].Action != "CREATE_RECORD" {
+		t.Errorf("Expected action CREATE_RECORD, got %s", repo.logs[1].Action)
+	}
+	if repo.logs[1].ResourceType != "RECORD" {
+		t.Errorf("Expected resource type RECORD, got %s", repo.logs[1].ResourceType)
+	}
+}
