@@ -44,7 +44,7 @@ func NewServer(addr string, repo ports.DNSRepository, logger *slog.Logger) *Serv
 		WorkerCount: runtime.NumCPU() * 2, // Scale workers based on CPU
 		udpQueue:    make(chan udpTask, 2000),
 		Logger:      logger,
-		limiter:     newRateLimiter(100, 20),
+		limiter:     newRateLimiter(10000, 5000), // Increased for scaling tests
 		TsigKeys:    make(map[string][]byte),
 	}
 	s.queryFn = s.sendQuery
