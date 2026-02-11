@@ -145,6 +145,16 @@ func (q *DnsQuestion) Write(buffer *BytePacketBuffer) error {
 	return nil
 }
 
+type EdnsOption struct {
+	Code uint16
+	Data []byte
+}
+
+type ExtendedDnsError struct {
+	ErrorCode uint16
+	ExtraText string
+}
+
 type DnsRecord struct {
 	Name     string
 	Type     QueryType
@@ -167,6 +177,7 @@ type DnsRecord struct {
 	ExtendedRcode  uint8
 	EDNSVersion    uint8
 	Z              uint16
+	Options        []EdnsOption
 	// TSIG fields
 	Algorithm  string
 	TimeSigned uint64
@@ -219,7 +230,24 @@ func (r *DnsRecord) Read(buffer *BytePacketBuffer) error {
 		r.ExtendedRcode = uint8(r.TTL >> 24)
 		r.EDNSVersion = uint8((r.TTL >> 16) & 0xFF)
 		r.Z = uint16(r.TTL & 0xFFFF)
-		buffer.Step(int(dataLen))
+		
+		// Read EDNS Options (RFC 6891)
+		remaining := int(dataLen)
+		for remaining >= 4 {
+			optCode, _ := buffer.Readu16()
+			optLen, _ := buffer.Readu16()
+			if int(optLen) > remaining-4 {
+				break
+			}
+			optData, _ := buffer.ReadRange(buffer.Position(), int(optLen))
+			buffer.Step(int(optLen))
+			
+			r.Options = append(r.Options, EdnsOption{
+				Code: optCode,
+				Data: optData,
+			})
+			remaining -= (4 + int(optLen))
+		}
 	case TSIG:
 		r.Algorithm, err = buffer.ReadName()
 		if err != nil { return err }
@@ -258,7 +286,23 @@ func (r *DnsRecord) Write(buffer *BytePacketBuffer) (int, error) {
 		ttl |= uint32(r.EDNSVersion) << 16
 		ttl |= uint32(r.Z)
 		if err := buffer.Writeu32(ttl); err != nil { return 0, err }
-		if err := buffer.Writeu16(0); err != nil { return 0, err } 
+		
+		// Write Options RDATA
+		lenPos := buffer.Position()
+		if err := buffer.Writeu16(0); err != nil { return 0, err } // Placeholder for RDLENGTH
+
+		for _, opt := range r.Options {
+			buffer.Writeu16(opt.Code)
+			buffer.Writeu16(uint16(len(opt.Data)))
+			for _, b := range opt.Data { buffer.Write(b) }
+		}
+
+		currPos := buffer.Position()
+		dataLen := currPos - (lenPos + 2)
+		buffer.Seek(lenPos)
+		buffer.Writeu16(uint16(dataLen))
+		buffer.Seek(currPos)
+
 		return buffer.Position() - startPos, nil
 	}
 
