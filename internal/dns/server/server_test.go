@@ -57,6 +57,14 @@ func (m *mockServerRepo) DeleteRecord(ctx context.Context, recordID string, zone
 	return nil
 }
 
+func (m *mockServerRepo) SaveAuditLog(ctx context.Context, log *domain.AuditLog) error {
+	return nil
+}
+
+func (m *mockServerRepo) GetAuditLogs(ctx context.Context, tenantID string) ([]domain.AuditLog, error) {
+	return nil, nil
+}
+
 func TestHandlePacketLocalHit(t *testing.T) {
 	repo := &mockServerRepo{
 		records: []domain.Record{

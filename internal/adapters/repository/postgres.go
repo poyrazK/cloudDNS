@@ -132,6 +132,32 @@ func (r *PostgresRepository) DeleteRecord(ctx context.Context, recordID string, 
 	return err
 }
 
+func (r *PostgresRepository) SaveAuditLog(ctx context.Context, log *domain.AuditLog) error {
+	query := `INSERT INTO audit_logs (id, tenant_id, action, resource_type, resource_id, details, created_at) 
+			  VALUES ($1, $2, $3, $4, $5, $6, $7)`
+	_, err := r.db.ExecContext(ctx, query, log.ID, log.TenantID, log.Action, log.ResourceType, log.ResourceID, log.Details, log.CreatedAt)
+	return err
+}
+
+func (r *PostgresRepository) GetAuditLogs(ctx context.Context, tenantID string) ([]domain.AuditLog, error) {
+	query := `SELECT id, tenant_id, action, resource_type, resource_id, details, created_at FROM audit_logs WHERE tenant_id = $1 ORDER BY created_at DESC`
+	rows, err := r.db.QueryContext(ctx, query, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var logs []domain.AuditLog
+	for rows.Next() {
+		var l domain.AuditLog
+		if err := rows.Scan(&l.ID, &l.TenantID, &l.Action, &l.ResourceType, &l.ResourceID, &l.Details, &l.CreatedAt); err != nil {
+			return nil, err
+		}
+		logs = append(logs, l)
+	}
+	return logs, nil
+}
+
 // ConvertDomainToPacketRecord is a helper to bridge domain model and wire format
 func ConvertDomainToPacketRecord(rec domain.Record) (packet.DnsRecord, error) {
 	pRec := packet.DnsRecord{

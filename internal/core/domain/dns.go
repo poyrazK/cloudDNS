@@ -38,3 +38,13 @@ type Record struct {
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
 }
+
+type AuditLog struct {
+	ID         string    `json:"id"`
+	TenantID   string    `json:"tenant_id"`
+	Action     string    `json:"action"`      // e.g., "CREATE_RECORD", "DELETE_ZONE"
+	ResourceType string  `json:"resource_type"` // e.g., "ZONE", "RECORD"
+	ResourceID string    `json:"resource_id"`
+	Details    string    `json:"details"`     // JSON or string description
+	CreatedAt  time.Time `json:"created_at"`
+}

@@ -45,6 +45,11 @@ func (m *mockRepo) ListZones(ctx context.Context, tenantID string) ([]domain.Zon
 func (m *mockRepo) DeleteZone(ctx context.Context, id, tenantID string) error   { return nil }
 func (m *mockRepo) DeleteRecord(ctx context.Context, id, zoneID string) error { return nil }
 
+func (m *mockRepo) SaveAuditLog(ctx context.Context, log *domain.AuditLog) error { return nil }
+func (m *mockRepo) GetAuditLogs(ctx context.Context, tenantID string) ([]domain.AuditLog, error) {
+	return nil, nil
+}
+
 func TestCreateZone(t *testing.T) {
 	repo := &mockRepo{}
 	svc := NewDNSService(repo)

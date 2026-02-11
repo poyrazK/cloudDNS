@@ -30,7 +30,6 @@ func (s *dnsService) CreateZone(ctx context.Context, zone *domain.Zone) error {
 	}
 
 	// 1. Create Default SOA Record
-	// Format: "ns1.clouddns.io. admin.clouddns.io. 2024021101 3600 600 1209600 300"
 	soaContent := fmt.Sprintf("ns1.clouddns.io. admin.clouddns.io. %s 3600 600 1209600 300",
 		time.Now().Format("2006010201"))
 	
@@ -57,8 +56,13 @@ func (s *dnsService) CreateZone(ctx context.Context, zone *domain.Zone) error {
 		UpdatedAt: zone.UpdatedAt,
 	}
 
-	// We need a repository method that handles this atomically
-	return s.repo.CreateZoneWithRecords(ctx, zone, []domain.Record{*soaRecord, *nsRecord})
+	if err := s.repo.CreateZoneWithRecords(ctx, zone, []domain.Record{*soaRecord, *nsRecord}); err != nil {
+		return err
+	}
+
+	// 3. Audit Log
+	s.audit(ctx, zone.TenantID, "CREATE_ZONE", "ZONE", zone.ID, fmt.Sprintf("Created zone %s", zone.Name))
+	return nil
 }
 
 func (s *dnsService) CreateRecord(ctx context.Context, record *domain.Record) error {
@@ -66,12 +70,29 @@ func (s *dnsService) CreateRecord(ctx context.Context, record *domain.Record) er
 	record.CreatedAt = time.Now()
 	record.UpdatedAt = time.Now()
 
-	// Basic TTL validation
 	if record.TTL < 60 {
 		record.TTL = 60
 	}
 
-	return s.repo.CreateRecord(ctx, record)
+	if err := s.repo.CreateRecord(ctx, record); err != nil {
+		return err
+	}
+
+	s.audit(ctx, "unknown", "CREATE_RECORD", "RECORD", record.ID, fmt.Sprintf("Created %s record for %s", record.Type, record.Name))
+	return nil
+}
+
+func (s *dnsService) audit(ctx context.Context, tenantID, action, resType, resID, details string) {
+	log := &domain.AuditLog{
+		ID:           uuid.New().String(),
+		TenantID:     tenantID,
+		Action:       action,
+		ResourceType: resType,
+		ResourceID:   resID,
+		Details:      details,
+		CreatedAt:    time.Now(),
+	}
+	_ = s.repo.SaveAuditLog(ctx, log) // Fire and forget audit for now
 }
 
 func (s *dnsService) Resolve(ctx context.Context, name string, qType domain.RecordType, clientIP string) ([]domain.Record, error) {
