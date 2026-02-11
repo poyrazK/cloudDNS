@@ -269,6 +269,24 @@ func (s *Server) handlePacket(data []byte, srcAddr net.Addr, sendFn func([]byte)
 		q := request.Questions[0]
 		response.Questions = append(response.Questions, q)
 
+		// --- Fast Path for A Records ---
+		if q.QType == packet.A {
+			ips, err := s.Repo.GetIPsForName(context.Background(), q.Name, clientIP)
+			if err == nil && len(ips) > 0 {
+				source = "local-fast"
+				for _, ipStr := range ips {
+					response.Answers = append(response.Answers, packet.DnsRecord{
+						Name:  q.Name,
+						Type:  packet.A,
+						Class: 1,
+						TTL:   minTTL,
+						IP:    net.ParseIP(ipStr),
+					})
+				}
+				goto SERIALIZE
+			}
+		}
+
 		var domainType domain.RecordType
 		switch q.QType {
 		case packet.A: domainType = domain.TypeA
@@ -309,6 +327,7 @@ func (s *Server) handlePacket(data []byte, srcAddr net.Addr, sendFn func([]byte)
 		response.Header.ResCode = 4 // FORMERR
 	}
 
+SERIALIZE:
 	// 5. Serialize and Handle Truncation
 	resBuffer := packet.GetBuffer()
 	defer packet.PutBuffer(resBuffer)

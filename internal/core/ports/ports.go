@@ -7,6 +7,7 @@ import (
 
 type DNSRepository interface {
 	GetRecords(ctx context.Context, name string, qType domain.RecordType, clientIP string) ([]domain.Record, error)
+	GetIPsForName(ctx context.Context, name string, clientIP string) ([]string, error)
 	CreateZone(ctx context.Context, zone *domain.Zone) error
 	CreateZoneWithRecords(ctx context.Context, zone *domain.Zone, records []domain.Record) error
 	CreateRecord(ctx context.Context, record *domain.Record) error

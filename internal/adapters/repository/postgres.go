@@ -59,6 +59,28 @@ func (r *PostgresRepository) GetRecords(ctx context.Context, name string, qType 
 	return records, nil
 }
 
+func (r *PostgresRepository) GetIPsForName(ctx context.Context, name string, clientIP string) ([]string, error) {
+	// Optimized query returning only content for Type A
+	query := `SELECT content FROM dns_records 
+	          WHERE name = $1 AND type = 'A' AND (network IS NULL OR $2::inet <<= network)`
+	
+	rows, err := r.db.QueryContext(ctx, query, name, clientIP)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ips []string
+	for rows.Next() {
+		var ip string
+		if err := rows.Scan(&ip); err != nil {
+			return nil, err
+		}
+		ips = append(ips, ip)
+	}
+	return ips, nil
+}
+
 func (r *PostgresRepository) CreateZone(ctx context.Context, zone *domain.Zone) error {
 	query := `INSERT INTO dns_zones (id, tenant_id, name, vpc_id, description, created_at, updated_at) 
 			  VALUES ($1, $2, $3, $4, $5, $6, $7)`
