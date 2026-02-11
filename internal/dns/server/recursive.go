@@ -27,7 +27,7 @@ func (s *Server) resolveRecursive(name string, qtype packet.QueryType) (*packet.
 
 		// 2. Query the current name server
 		serverAddr := net.JoinHostPort(ns, "53")
-		resp, err := s.sendQuery(serverAddr, name, qtype)
+		resp, err := s.queryFn(serverAddr, name, qtype)
 		if err != nil {
 			return nil, err
 		}

@@ -260,3 +260,42 @@ func TestHandlePacketEDNS(t *testing.T) {
 		t.Errorf("HandlePacket failed with EDNS: %v", err)
 	}
 }
+
+func TestHandlePacketTruncation(t *testing.T) {
+	repo := &mockServerRepo{}
+	srv := NewServer("127.0.0.1:0", repo, nil)
+
+	// Inject many answers into mock repo
+	for i := 0; i < 50; i++ {
+		repo.records = append(repo.records, domain.Record{
+			Name:    "big.test",
+			Type:    domain.TypeA,
+			Content: "1.2.3.4",
+			TTL:     300,
+		})
+	}
+
+	req := packet.NewDnsPacket()
+	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "big.test", QType: packet.A})
+	// No OPT -> limit 512
+	reqBuf := packet.NewBytePacketBuffer()
+	req.Write(reqBuf)
+
+	err := srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
+		resPacket := packet.NewDnsPacket()
+		resBuffer := packet.NewBytePacketBuffer()
+		copy(resBuffer.Buf, resp)
+		resPacket.FromBuffer(resBuffer)
+
+		if !resPacket.Header.TruncatedMessage {
+			t.Errorf("Expected TC bit to be set")
+		}
+		if len(resPacket.Answers) > 0 {
+			t.Errorf("Expected answers to be cleared in truncated response, got %d", len(resPacket.Answers))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("handlePacket failed: %v", err)
+	}
+}

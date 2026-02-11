@@ -11,9 +11,11 @@ type BytePacketBuffer struct {
 	Pos int
 }
 
+const MaxPacketSize = 65535
+
 func NewBytePacketBuffer() *BytePacketBuffer {
 	return &BytePacketBuffer{
-		Buf: make([]byte, 512),
+		Buf: make([]byte, MaxPacketSize),
 		Pos: 0,
 	}
 }
@@ -41,7 +43,7 @@ func (b *BytePacketBuffer) Seek(pos int) error {
 
 // Read reads a single byte
 func (b *BytePacketBuffer) Read() (byte, error) {
-	if b.Pos >= 512 {
+	if b.Pos >= MaxPacketSize {
 		return 0, errors.New("end of buffer")
 	}
 	res := b.Buf[b.Pos]
@@ -51,7 +53,7 @@ func (b *BytePacketBuffer) Read() (byte, error) {
 
 // ReadRange reads a slice of bytes
 func (b *BytePacketBuffer) ReadRange(start int, length int) ([]byte, error) {
-	if start+length > 512 {
+	if start+length > MaxPacketSize {
 		return nil, errors.New("out of bounds")
 	}
 	res := make([]byte, length)
@@ -61,7 +63,7 @@ func (b *BytePacketBuffer) ReadRange(start int, length int) ([]byte, error) {
 
 // Readu16 reads 2 bytes as uint16 (Big Endian)
 func (b *BytePacketBuffer) Readu16() (uint16, error) {
-	if b.Pos+2 > 512 {
+	if b.Pos+2 > MaxPacketSize {
 		return 0, errors.New("end of buffer")
 	}
 	b1, _ := b.Read()
@@ -71,7 +73,7 @@ func (b *BytePacketBuffer) Readu16() (uint16, error) {
 
 // Readu32 reads 4 bytes as uint32 (Big Endian)
 func (b *BytePacketBuffer) Readu32() (uint32, error) {
-	if b.Pos+4 > 512 {
+	if b.Pos+4 > MaxPacketSize {
 		return 0, errors.New("end of buffer")
 	}
 	b1, _ := b.Read()
@@ -144,7 +146,7 @@ func (b *BytePacketBuffer) ReadName() (string, error) {
 
 // Get reads a byte at a specific position without moving cursor
 func (b *BytePacketBuffer) Get(pos int) (byte, error) {
-	if pos >= 512 {
+	if pos >= MaxPacketSize {
 		return 0, errors.New("end of buffer")
 	}
 	return b.Buf[pos], nil
@@ -152,7 +154,7 @@ func (b *BytePacketBuffer) Get(pos int) (byte, error) {
 
 // GetRange reads a range without moving cursor
 func (b *BytePacketBuffer) GetRange(start int, length int) ([]byte, error) {
-	if start+length > 512 {
+	if start+length > MaxPacketSize {
 		return nil, errors.New("out of bounds")
 	}
 	return b.Buf[start : start+length], nil
@@ -160,7 +162,7 @@ func (b *BytePacketBuffer) GetRange(start int, length int) ([]byte, error) {
 
 // Write writes a single byte
 func (b *BytePacketBuffer) Write(val byte) error {
-	if b.Pos >= 512 {
+	if b.Pos >= MaxPacketSize {
 		return errors.New("end of buffer")
 	}
 	b.Buf[b.Pos] = val

@@ -19,6 +19,7 @@ type Server struct {
 	WorkerCount int
 	udpQueue    chan udpTask
 	Logger      *slog.Logger
+	queryFn     func(server string, name string, qtype packet.QueryType) (*packet.DnsPacket, error)
 }
 
 type udpTask struct {
@@ -31,7 +32,7 @@ func NewServer(addr string, repo ports.DNSRepository, logger *slog.Logger) *Serv
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{
+	s := &Server{
 		Addr:        addr,
 		Repo:        repo,
 		Cache:       NewDNSCache(),
@@ -39,6 +40,8 @@ func NewServer(addr string, repo ports.DNSRepository, logger *slog.Logger) *Serv
 		udpQueue:    make(chan udpTask, 1000),
 		Logger:      logger,
 	}
+	s.queryFn = s.sendQuery
+	return s
 }
 
 func (s *Server) Run() error {

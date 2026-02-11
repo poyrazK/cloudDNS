@@ -153,14 +153,14 @@ func TestSOARecordSerialization(t *testing.T) {
 
 func TestBufferOverflow(t *testing.T) {
 	buffer := NewBytePacketBuffer()
-	buffer.Pos = 511
+	buffer.Pos = MaxPacketSize - 1
 	err := buffer.Write(1)
 	if err != nil {
-		t.Errorf("Should be able to write at 511")
+		t.Errorf("Should be able to write at MaxPacketSize - 1")
 	}
 	err = buffer.Write(2)
 	if err == nil {
-		t.Errorf("Should have failed to write at 512")
+		t.Errorf("Should have failed to write at MaxPacketSize")
 	}
 }
 
@@ -286,6 +286,72 @@ func TestCNAMERecordSerialization(t *testing.T) {
 
 	if parsed.Host != "real.test.com" {
 		t.Errorf("Expected real.test.com, got %s", parsed.Host)
+	}
+}
+
+func TestReadWriteAllTypes(t *testing.T) {
+	records := []DnsRecord{
+		{Name: "a.test", Type: A, TTL: 300, IP: net.ParseIP("1.2.3.4")},
+		{Name: "aaaa.test", Type: AAAA, TTL: 300, IP: net.ParseIP("2001:db8::1")},
+		{Name: "ns.test", Type: NS, TTL: 300, Host: "ns1.test"},
+		{Name: "cname.test", Type: CNAME, TTL: 300, Host: "real.test"},
+		{Name: "mx.test", Type: MX, TTL: 300, Priority: 10, Host: "mail.test"},
+		{Name: "", Type: OPT, UDPPayloadSize: 4096, TTL: 0}, // EDNS
+	}
+
+	for _, rec := range records {
+		buffer := NewBytePacketBuffer()
+		_, err := rec.Write(buffer)
+		if err != nil {
+			t.Errorf("Failed to write %v: %v", rec.Type, err)
+			continue
+		}
+
+		buffer.Seek(0)
+		parsed := DnsRecord{}
+		err = parsed.Read(buffer)
+		if err != nil {
+			t.Errorf("Failed to read %v: %v", rec.Type, err)
+			continue
+		}
+
+		if rec.Type != OPT && parsed.Name != rec.Name {
+			t.Errorf("%v: Name mismatch: %s vs %s", rec.Type, parsed.Name, rec.Name)
+		}
+		
+		switch rec.Type {
+		case A, AAAA:
+			if parsed.IP.String() != rec.IP.String() {
+				t.Errorf("%v: IP mismatch: %s vs %s", rec.Type, parsed.IP, rec.IP)
+			}
+		case NS, CNAME:
+			if parsed.Host != rec.Host {
+				t.Errorf("%v: Host mismatch: %s vs %s", rec.Type, parsed.Host, rec.Host)
+			}
+		case MX:
+			if parsed.Priority != rec.Priority || parsed.Host != rec.Host {
+				t.Errorf("%v: MX mismatch", rec.Type)
+			}
+		case OPT:
+			if parsed.UDPPayloadSize != 4096 {
+				t.Errorf("OPT: Expected size 4096, got %d", parsed.UDPPayloadSize)
+			}
+		}
+	}
+}
+
+func TestReadName_InfiniteLoop(t *testing.T) {
+	buffer := NewBytePacketBuffer()
+	
+	// Create a pointer that points to itself
+	// Pos 0: 11000000 00000000 (Pointer to pos 0)
+	buffer.Write(0xC0)
+	buffer.Write(0x00)
+	
+	buffer.Seek(0)
+	_, err := buffer.ReadName()
+	if err == nil {
+		t.Errorf("Should have failed with infinite loop error")
 	}
 }
 
