@@ -17,6 +17,7 @@ const (
 	SOA     QueryType = 6
 	AAAA    QueryType = 28
 	OPT     QueryType = 41
+	TSIG    QueryType = 250
 )
 
 type DnsHeader struct {
@@ -166,6 +167,14 @@ type DnsRecord struct {
 	ExtendedRcode  uint8
 	EDNSVersion    uint8
 	Z              uint16
+	// TSIG fields
+	Algorithm  string
+	TimeSigned uint64
+	Fudge      uint16
+	MAC        []byte
+	OriginalID uint16
+	Error      uint16
+	Other      []byte
 }
 
 func (r *DnsRecord) Read(buffer *BytePacketBuffer) error {
@@ -180,8 +189,8 @@ func (r *DnsRecord) Read(buffer *BytePacketBuffer) error {
 	r.Class, err = buffer.Readu16()
 	if err != nil { return err }
 
-	r.TTL, err = buffer.Readu32() // Actually u32
-	if err != nil { return err } // Corrected method call
+	r.TTL, err = buffer.Readu32() 
+	if err != nil { return err } 
 
 	dataLen, err := buffer.Readu16()
 	if err != nil { return err }
@@ -211,6 +220,27 @@ func (r *DnsRecord) Read(buffer *BytePacketBuffer) error {
 		r.EDNSVersion = uint8((r.TTL >> 16) & 0xFF)
 		r.Z = uint16(r.TTL & 0xFFFF)
 		buffer.Step(int(dataLen))
+	case TSIG:
+		r.Algorithm, err = buffer.ReadName()
+		if err != nil { return err }
+		
+		high, _ := buffer.Readu16()
+		low, _ := buffer.Readu32()
+		r.TimeSigned = (uint64(high) << 32) | uint64(low)
+		
+		r.Fudge, _ = buffer.Readu16()
+		
+		macLen, _ := buffer.Readu16()
+		r.MAC, err = buffer.ReadRange(buffer.Position(), int(macLen))
+		if err != nil { return err }
+		buffer.Step(int(macLen))
+		
+		r.OriginalID, _ = buffer.Readu16()
+		r.Error, _ = buffer.Readu16()
+		
+		otherLen, _ := buffer.Readu16()
+		r.Other, _ = buffer.ReadRange(buffer.Position(), int(otherLen))
+		buffer.Step(int(otherLen))
 	default:
 		buffer.Step(int(dataLen))
 	}
@@ -220,7 +250,6 @@ func (r *DnsRecord) Read(buffer *BytePacketBuffer) error {
 func (r *DnsRecord) Write(buffer *BytePacketBuffer) (int, error) {
 	startPos := buffer.Position()
 	if r.Type == OPT {
-		// OPT record uses name "" (root)
 		if err := buffer.Write(0); err != nil { return 0, err }
 		if err := buffer.Writeu16(uint16(r.Type)); err != nil { return 0, err }
 		if err := buffer.Writeu16(r.UDPPayloadSize); err != nil { return 0, err }
@@ -229,7 +258,39 @@ func (r *DnsRecord) Write(buffer *BytePacketBuffer) (int, error) {
 		ttl |= uint32(r.EDNSVersion) << 16
 		ttl |= uint32(r.Z)
 		if err := buffer.Writeu32(ttl); err != nil { return 0, err }
-		if err := buffer.Writeu16(0); err != nil { return 0, err } // No options for now
+		if err := buffer.Writeu16(0); err != nil { return 0, err } 
+		return buffer.Position() - startPos, nil
+	}
+
+	if r.Type == TSIG {
+		if err := buffer.WriteName(r.Name); err != nil { return 0, err }
+		if err := buffer.Writeu16(uint16(r.Type)); err != nil { return 0, err }
+		if err := buffer.Writeu16(r.Class); err != nil { return 0, err }
+		if err := buffer.Writeu32(r.TTL); err != nil { return 0, err }
+
+		lenPos := buffer.Position()
+		if err := buffer.Writeu16(0); err != nil { return 0, err }
+
+		if err := buffer.WriteName(r.Algorithm); err != nil { return 0, err }
+		
+		buffer.Writeu16(uint16(r.TimeSigned >> 32))
+		buffer.Writeu32(uint32(r.TimeSigned & 0xFFFFFFFF))
+		buffer.Writeu16(r.Fudge)
+		
+		buffer.Writeu16(uint16(len(r.MAC)))
+		for _, b := range r.MAC { buffer.Write(b) }
+		
+		buffer.Writeu16(r.OriginalID)
+		buffer.Writeu16(r.Error)
+		
+		buffer.Writeu16(uint16(len(r.Other)))
+		for _, b := range r.Other { buffer.Write(b) }
+
+		currPos := buffer.Position()
+		dataLen := currPos - (lenPos + 2)
+		buffer.Seek(lenPos)
+		buffer.Writeu16(uint16(dataLen))
+		buffer.Seek(currPos)
 		return buffer.Position() - startPos, nil
 	}
 	
@@ -255,25 +316,19 @@ func (r *DnsRecord) Write(buffer *BytePacketBuffer) (int, error) {
 			if err := buffer.Write(b); err != nil { return 0, err }
 		}
 	case CNAME, NS:
-		// We need to calculate length AFTER writing name... 
 		lenPos := buffer.Position()
 		if err := buffer.Writeu16(0); err != nil { return 0, err } // Placeholder
-		
 		if err := buffer.WriteName(r.Host); err != nil { return 0, err }
-		
 		currPos := buffer.Position()
 		dataLen := currPos - (lenPos + 2)
-		
 		buffer.Seek(lenPos)
 		buffer.Writeu16(uint16(dataLen))
 		buffer.Seek(currPos)
 	case MX:
 		lenPos := buffer.Position()
 		if err := buffer.Writeu16(0); err != nil { return 0, err } // Placeholder
-
 		if err := buffer.Writeu16(r.Priority); err != nil { return 0, err }
 		if err := buffer.WriteName(r.Host); err != nil { return 0, err }
-
 		currPos := buffer.Position()
 		dataLen := currPos - (lenPos + 2)
 		buffer.Seek(lenPos)
@@ -289,7 +344,6 @@ func (r *DnsRecord) Write(buffer *BytePacketBuffer) (int, error) {
 	case SOA:
 		lenPos := buffer.Position()
 		if err := buffer.Writeu16(0); err != nil { return 0, err } // Placeholder
-
 		if err := buffer.WriteName(r.MName); err != nil { return 0, err }
 		if err := buffer.WriteName(r.RName); err != nil { return 0, err }
 		if err := buffer.Writeu32(r.Serial); err != nil { return 0, err }
@@ -297,7 +351,6 @@ func (r *DnsRecord) Write(buffer *BytePacketBuffer) (int, error) {
 		if err := buffer.Writeu32(r.Retry); err != nil { return 0, err }
 		if err := buffer.Writeu32(r.Expire); err != nil { return 0, err }
 		if err := buffer.Writeu32(r.Minimum); err != nil { return 0, err }
-
 		currPos := buffer.Position()
 		dataLen := currPos - (lenPos + 2)
 		buffer.Seek(lenPos)

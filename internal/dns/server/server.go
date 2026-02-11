@@ -21,6 +21,7 @@ type Server struct {
 	Logger      *slog.Logger
 	queryFn     func(server string, name string, qtype packet.QueryType) (*packet.DnsPacket, error)
 	limiter     *rateLimiter
+	TsigKeys    map[string][]byte
 }
 
 type udpTask struct {
@@ -40,7 +41,8 @@ func NewServer(addr string, repo ports.DNSRepository, logger *slog.Logger) *Serv
 		WorkerCount: 10,
 		udpQueue:    make(chan udpTask, 1000),
 		Logger:      logger,
-		limiter:     newRateLimiter(100, 20), // 100 queries/sec with 20 burst
+		limiter:     newRateLimiter(100, 20), 
+		TsigKeys:    make(map[string][]byte),
 	}
 	s.queryFn = s.sendQuery
 	
@@ -168,9 +170,6 @@ func (s *Server) handlePacket(data []byte, srcAddr net.Addr, sendFn func([]byte)
 	// --- Rate Limiting ---
 	if !s.limiter.Allow(clientIP) {
 		logger.Warn("rate limit exceeded", "ip", clientIP)
-		// Option 1: Drop packet (recommended for UDP under heavy flood)
-		// Option 2: Send REFUSED/SERVFAIL
-		// Let's drop for now to save bandwidth/CPU
 		return nil 
 	}
 
@@ -182,6 +181,27 @@ func (s *Server) handlePacket(data []byte, srcAddr net.Addr, sendFn func([]byte)
 	if err := request.FromBuffer(reqBuffer); err != nil {
 		logger.Error("failed to parse incoming packet", "error", err)
 		return err
+	}
+
+	// --- TSIG Verification ---
+	var authenticatedKey string
+	if len(request.Resources) > 0 {
+		lastRec := request.Resources[len(request.Resources)-1]
+		if lastRec.Type == packet.TSIG {
+			secret, exists := s.TsigKeys[lastRec.Name]
+			if !exists {
+				logger.Warn("unknown TSIG key", "key", lastRec.Name)
+				// Respond with NOTAUTH or similar
+			} else {
+				// Verify signature
+				if err := request.VerifyTSIG(data, lastRec.Name, secret); err != nil {
+					logger.Error("TSIG verification failed", "error", err, "key", lastRec.Name)
+					return err // Or send REFUSED
+				}
+				authenticatedKey = lastRec.Name
+				logger.Info("authenticated DNS request", "key", authenticatedKey)
+			}
+		}
 	}
 
 	var queryName string
@@ -295,6 +315,13 @@ func (s *Server) handlePacket(data []byte, srcAddr net.Addr, sendFn func([]byte)
 		return err
 	}
 
+	// Sign response if requested
+	if authenticatedKey != "" {
+		s.Logger.Info("signing response with TSIG", "key", authenticatedKey)
+		secret := s.TsigKeys[authenticatedKey]
+		response.SignTSIG(resBuffer, authenticatedKey, secret)
+	}
+
 	if resBuffer.Position() > int(maxUDPSize) {
 		response.Header.TruncatedMessage = true
 		response.Answers = nil
@@ -323,6 +350,7 @@ func (s *Server) handlePacket(data []byte, srcAddr net.Addr, sendFn func([]byte)
 		"cache", "miss",
 		"source", source,
 		"latency_ms", time.Since(start).Milliseconds(),
+		"authenticated", authenticatedKey != "",
 	)
 	return err
 }
