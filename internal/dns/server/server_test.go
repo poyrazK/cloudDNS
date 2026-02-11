@@ -30,6 +30,12 @@ func (m *mockServerRepo) CreateZone(ctx context.Context, zone *domain.Zone) erro
 	return nil
 }
 
+func (m *mockServerRepo) CreateZoneWithRecords(ctx context.Context, zone *domain.Zone, records []domain.Record) error {
+	m.zones = append(m.zones, *zone)
+	m.records = append(m.records, records...)
+	return nil
+}
+
 func (m *mockServerRepo) CreateRecord(ctx context.Context, record *domain.Record) error {
 	m.records = append(m.records, *record)
 	return nil

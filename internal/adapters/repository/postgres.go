@@ -66,6 +66,34 @@ func (r *PostgresRepository) CreateZone(ctx context.Context, zone *domain.Zone) 
 	return err
 }
 
+func (r *PostgresRepository) CreateZoneWithRecords(ctx context.Context, zone *domain.Zone, records []domain.Record) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// 1. Insert Zone
+	zoneQuery := `INSERT INTO dns_zones (id, tenant_id, name, vpc_id, description, created_at, updated_at) 
+			      VALUES ($1, $2, $3, $4, $5, $6, $7)`
+	_, err = tx.ExecContext(ctx, zoneQuery, zone.ID, zone.TenantID, zone.Name, zone.VPCID, zone.Description, zone.CreatedAt, zone.UpdatedAt)
+	if err != nil {
+		return err
+	}
+
+	// 2. Insert Records
+	recordQuery := `INSERT INTO dns_records (id, zone_id, name, type, content, ttl, priority, created_at, updated_at) 
+			        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
+	for _, rec := range records {
+		_, err = tx.ExecContext(ctx, recordQuery, rec.ID, rec.ZoneID, rec.Name, rec.Type, rec.Content, rec.TTL, rec.Priority, rec.CreatedAt, rec.UpdatedAt)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
 func (r *PostgresRepository) CreateRecord(ctx context.Context, record *domain.Record) error {
 	query := `INSERT INTO dns_records (id, zone_id, name, type, content, ttl, priority, created_at, updated_at) 
 			  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
