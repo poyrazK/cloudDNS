@@ -32,6 +32,7 @@ Unlike standard implementations that use libraries, cloudDNS implements the bina
 *   **In-Memory Packet Cache**: A thread-safe, TTL-aware cache that stores serialized binary responses to bypass database lookups for frequent queries.
 *   **Hexagonal Architecture**: Strict separation between Domain logic, Ports (Interfaces), and Adapters (PostgreSQL, DNS, API).
 *   **Transactional Zone Creation**: Atomic initialization of zones with standard-compliant SOA and NS records.
+*   **Audit Trails**: Detailed change logging for every administrative action, enabling compliance and tracking of DNS metadata changes.
 
 ## 5. Management & Observability
 *   **RESTful Management API**: Provides standard HTTP endpoints for multi-tenant Zone and Record management.
