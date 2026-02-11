@@ -210,7 +210,6 @@ func (r *DnsRecord) Read(buffer *BytePacketBuffer) error {
 		r.ExtendedRcode = uint8(r.TTL >> 24)
 		r.EDNSVersion = uint8((r.TTL >> 16) & 0xFF)
 		r.Z = uint16(r.TTL & 0xFFFF)
-		// Skip data for now
 		buffer.Step(int(dataLen))
 	default:
 		buffer.Step(int(dataLen))

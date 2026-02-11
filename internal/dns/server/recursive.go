@@ -8,6 +8,16 @@ import (
 	"github.com/poyrazK/cloudDNS/internal/dns/packet"
 )
 
+type recursiveResolver struct {
+	rootHints []string
+}
+
+func newRecursiveResolver() *recursiveResolver {
+	return &recursiveResolver{
+		rootHints: []string{"198.41.0.4"},
+	}
+}
+
 func (s *Server) resolveRecursive(name string, qtype packet.QueryType) (*packet.DnsPacket, error) {
 	// 1. Start with a root server (a.root-servers.net)
 	ns := "198.41.0.4"

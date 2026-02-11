@@ -19,7 +19,9 @@ func NewAPIHandler(svc ports.DNSService) *APIHandler {
 func (h *APIHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /zones", h.CreateZone)
 	mux.HandleFunc("GET /zones", h.ListZones)
+	mux.HandleFunc("DELETE /zones/{id}", h.DeleteZone)
 	mux.HandleFunc("POST /zones/{id}/records", h.CreateRecord)
+	mux.HandleFunc("DELETE /zones/{zone_id}/records/{id}", h.DeleteRecord)
 }
 
 func (h *APIHandler) CreateZone(w http.ResponseWriter, r *http.Request) {
@@ -78,4 +80,31 @@ func (h *APIHandler) CreateRecord(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(record)
+}
+
+func (h *APIHandler) DeleteZone(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	tenantID := r.URL.Query().Get("tenant_id")
+	if tenantID == "" {
+		tenantID = "default-tenant"
+	}
+
+	if err := h.svc.DeleteZone(r.Context(), id, tenantID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *APIHandler) DeleteRecord(w http.ResponseWriter, r *http.Request) {
+	zoneID := r.PathValue("zone_id")
+	id := r.PathValue("id")
+
+	if err := h.svc.DeleteRecord(r.Context(), id, zoneID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
