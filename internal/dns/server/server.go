@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"runtime"
+	"syscall"
 	"time"
-	"github.com/poyrazK/cloudDNS/internal/dns/packet"
-	"github.com/poyrazK/cloudDNS/internal/core/ports"
-	"github.com/poyrazK/cloudDNS/internal/core/domain"
+
 	"github.com/poyrazK/cloudDNS/internal/adapters/repository"
+	"github.com/poyrazK/cloudDNS/internal/core/domain"
+	"github.com/poyrazK/cloudDNS/internal/core/ports"
+	"github.com/poyrazK/cloudDNS/internal/dns/packet"
 )
 
 type Server struct {
@@ -38,14 +41,14 @@ func NewServer(addr string, repo ports.DNSRepository, logger *slog.Logger) *Serv
 		Addr:        addr,
 		Repo:        repo,
 		Cache:       NewDNSCache(),
-		WorkerCount: 10,
-		udpQueue:    make(chan udpTask, 1000),
+		WorkerCount: runtime.NumCPU() * 2, // Scale workers based on CPU
+		udpQueue:    make(chan udpTask, 2000),
 		Logger:      logger,
-		limiter:     newRateLimiter(100, 20), 
+		limiter:     newRateLimiter(100, 20),
 		TsigKeys:    make(map[string][]byte),
 	}
 	s.queryFn = s.sendQuery
-	
+
 	// Periodic cleanup of rate limiter buckets
 	go func() {
 		for {
@@ -58,58 +61,57 @@ func NewServer(addr string, repo ports.DNSRepository, logger *slog.Logger) *Serv
 }
 
 func (s *Server) Run() error {
-	fmt.Printf("Attempting to listen on %s (UDP/TCP)...\n", s.Addr)
+	s.Logger.Info("starting parallel server", "addr", s.Addr, "listeners", runtime.NumCPU())
 
-	// UDP
-	udpAddr, err := net.ResolveUDPAddr("udp", s.Addr)
-	if err != nil {
-		return err
+	// 1. Parallel UDP Listeners using SO_REUSEPORT
+	lc := net.ListenConfig{
+		Control: func(network, address string, c syscall.RawConn) error {
+			return c.Control(func(fd uintptr) {
+				syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_REUSEPORT, 1)
+			})
+		},
 	}
-	udpConn, err := net.ListenUDP("udp", udpAddr)
-	if err != nil {
-		fmt.Printf("Failed to listen UDP: %v\n", err)
-		return err
+
+	for i := 0; i < runtime.NumCPU(); i++ {
+		go func(id int) {
+			conn, err := lc.ListenPacket(context.Background(), "udp", s.Addr)
+			if err != nil {
+				s.Logger.Error("failed to start UDP listener", "id", id, "error", err)
+				return
+			}
+			defer conn.Close()
+
+			for {
+				buf := make([]byte, 512)
+				n, addr, err := conn.ReadFrom(buf)
+				if err != nil {
+					continue
+				}
+				data := make([]byte, n)
+				copy(data, buf[:n])
+				s.udpQueue <- udpTask{addr: addr, data: data, conn: conn}
+			}
+		}(i)
 	}
-	defer udpConn.Close()
 
-	// TCP
-	tcpListener, err := net.Listen("tcp", s.Addr)
-	if err != nil {
-		fmt.Printf("Failed to listen TCP: %v\n", err)
-		return err
-	}
-	defer tcpListener.Close()
-
-	fmt.Println("DNS Server successfully listening on", s.Addr, "(UDP and TCP)...")
-
-	// Start UDP Workers
+	// 2. Start UDP Workers
 	for i := 0; i < s.WorkerCount; i++ {
 		go s.udpWorker()
 	}
 
-	go func() {
-		for {
-			conn, err := tcpListener.Accept()
-			if err != nil {
-				fmt.Println("TCP Accept error:", err)
-				continue
-			}
-			go s.handleTCPConnection(conn)
-		}
-	}()
+	// 3. Start TCP Listener
+	tcpListener, err := lc.Listen(context.Background(), "tcp", s.Addr)
+	if err != nil {
+		return err
+	}
+	defer tcpListener.Close()
 
 	for {
-		buf := make([]byte, 512)
-		n, addr, err := udpConn.ReadFrom(buf)
+		conn, err := tcpListener.Accept()
 		if err != nil {
-			fmt.Println("UDP Read error:", err)
 			continue
 		}
-
-		// Send to worker pool
-		data := make([]byte, n)
-		copy(data, buf[:n])
-		s.udpQueue <- udpTask{addr: addr, data: data, conn: udpConn}
+		go s.handleTCPConnection(conn)
 	}
 }
 
