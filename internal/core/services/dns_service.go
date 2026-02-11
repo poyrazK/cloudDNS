@@ -96,7 +96,36 @@ func (s *dnsService) audit(ctx context.Context, tenantID, action, resType, resID
 }
 
 func (s *dnsService) Resolve(ctx context.Context, name string, qType domain.RecordType, clientIP string) ([]domain.Record, error) {
-	return s.repo.GetRecords(ctx, name, qType, clientIP)
+	// 1. Direct Match
+	records, err := s.repo.GetRecords(ctx, name, qType, clientIP)
+	if err != nil {
+		return nil, err
+	}
+	if len(records) > 0 {
+		return records, nil
+	}
+
+	// 2. Wildcard Matching (*.domain.com)
+	// We iteratively strip labels from the left and replace with '*'
+	// e.g. "a.b.example.com." -> "*.b.example.com." -> "*.example.com." -> "*.com."
+	labels := strings.Split(strings.TrimSuffix(name, "."), ".")
+	for i := 0; i < len(labels)-1; i++ {
+		wildcardName := "*." + strings.Join(labels[i+1:], ".") + "."
+		
+		wildcardRecords, err := s.repo.GetRecords(ctx, wildcardName, qType, clientIP)
+		if err != nil {
+			return nil, err
+		}
+		if len(wildcardRecords) > 0 {
+			// Rewrite wildcard name to the requested name for the response
+			for j := range wildcardRecords {
+				wildcardRecords[j].Name = name
+			}
+			return wildcardRecords, nil
+		}
+	}
+
+	return nil, nil
 }
 
 func (s *dnsService) ListZones(ctx context.Context, tenantID string) ([]domain.Zone, error) {

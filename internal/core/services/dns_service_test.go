@@ -104,3 +104,29 @@ func TestDeleteRecord(t *testing.T) {
 		t.Errorf("Expected action DELETE_RECORD, got %s", repo.logs[0].Action)
 	}
 }
+
+func TestResolve_Wildcard(t *testing.T) {
+	repo := &mockRepo{
+		records: []domain.Record{
+			{Name: "*.example.com.", Type: domain.TypeA, Content: "9.9.9.9"},
+		},
+	}
+	svc := NewDNSService(repo)
+
+	// Query for sub.example.com. -> should match *.example.com.
+	res, err := svc.Resolve(context.Background(), "sub.example.com.", domain.TypeA, "1.1.1.1")
+	if err != nil {
+		t.Fatalf("Resolve failed: %v", err)
+	}
+
+	if len(res) != 1 {
+		t.Errorf("Expected 1 record, got %d", len(res))
+	} else {
+		if res[0].Content != "9.9.9.9" {
+			t.Errorf("Expected content 9.9.9.9, got %s", res[0].Content)
+		}
+		if res[0].Name != "sub.example.com." {
+			t.Errorf("Expected name to be rewritten to sub.example.com., got %s", res[0].Name)
+		}
+	}
+}
