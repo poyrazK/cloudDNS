@@ -16,43 +16,56 @@ import (
 )
 
 func main() {
+	// 1. Initialize Structured Logging
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}))
+	slog.SetDefault(logger)
+
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
-		// Fallback for development, though we should prefer env vars
-		dbURL = "postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable"
+		dbURL = "postgres://postgres:postgres@localhost:5432/clouddns?sslmode=disable"
 	}
 
 	db, err := sql.Open("pgx", dbURL)
 	if err != nil {
-		log.Fatalf("Unable to connect to database: %v\n", err)
+		logger.Error("failed to connect to database", "error", err)
+		os.Exit(1)
 	}
 	defer db.Close()
-
-	if err := db.Ping(); err != nil {
-		fmt.Printf("Warning: Could not ping database: %v\n", err)
-	}
 
 	repo := repository.NewPostgresRepository(db)
 	dnsSvc := services.NewDNSService(repo)
 
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-
-	// Start DNS Server
-	// Listen on 10053 for development (since 53 requires root)
-	dnsServer := server.NewServer("127.0.0.1:10053", repo, logger)
+	// 2. Start DNS Server
+	dnsAddr := os.Getenv("DNS_ADDR")
+	if dnsAddr == "" {
+		dnsAddr = "127.0.0.1:10053"
+	}
+	dnsServer := server.NewServer(dnsAddr, repo, logger)
 	go func() {
 		if err := dnsServer.Run(); err != nil {
-			log.Fatalf("DNS Server failed: %v", err)
+			logger.Error("DNS server failed", "error", err)
+			os.Exit(1)
 		}
 	}()
 
-	// Start Management API
+	// 3. Start Management API
+	apiAddr := os.Getenv("API_ADDR")
+	if apiAddr == "" {
+		apiAddr = ":8080"
+	}
 	apiHandler := api.NewAPIHandler(dnsSvc)
 	mux := http.NewServeMux()
 	apiHandler.RegisterRoutes(mux)
 
-	fmt.Println("Management API listening on :8080...")
-	if err := http.ListenAndServe(":8080", mux); err != nil {
-		log.Fatalf("HTTP Server failed: %v", err)
+	logger.Info("cloudDNS services starting", 
+		"dns_addr", dnsAddr, 
+		"api_addr", apiAddr,
+	)
+
+	if err := http.ListenAndServe(apiAddr, mux); err != nil {
+		logger.Error("API server failed", "error", err)
+		os.Exit(1)
 	}
 }
