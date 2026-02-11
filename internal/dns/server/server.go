@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math/rand"
 	"net"
 	"runtime"
 	"syscall"
@@ -26,6 +27,9 @@ type Server struct {
 	queryFn     func(server string, name string, qtype packet.QueryType) (*packet.DnsPacket, error)
 	limiter     *rateLimiter
 	TsigKeys    map[string][]byte
+
+	// Testing/Chaos flags
+	SimulateDBLatency time.Duration
 }
 
 type udpTask struct {
@@ -281,6 +285,13 @@ func (s *Server) handlePacket(data []byte, srcAddr net.Addr, sendFn func([]byte)
 	if len(request.Questions) > 0 {
 		q := request.Questions[0]
 		response.Questions = append(response.Questions, q)
+
+		// --- Chaos Simulation ---
+		if s.SimulateDBLatency > 0 {
+			// Add random jitter (50% to 150% of simulated latency)
+			jitter := time.Duration(float64(s.SimulateDBLatency) * (0.5 + rand.Float64()))
+			time.Sleep(jitter)
+		}
 
 		// --- Fast Path for A Records ---
 		if q.QType == packet.A {
