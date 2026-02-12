@@ -60,14 +60,14 @@ func (p *DnsPacket) VerifyTSIG(rawBuffer []byte, keyName string, secret []byte) 
 func (p *DnsPacket) SignTSIG(buffer *BytePacketBuffer, keyName string, secret []byte) error {
 	// 1. Prepare TSIG Record (without MAC yet)
 	tsig := DnsRecord{
-		Name:       keyName,
-		Type:       TSIG,
-		Class:      255, // ANY
-		TTL:        0,
-		Algorithm:  "hmac-md5.sig-alg.reg.int.",
-		TimeSigned: uint64(time.Now().Unix()),
-		Fudge:      300,
-		OriginalID: p.Header.ID,
+		Name:          keyName,
+		Type:          TSIG,
+		Class:         255, // ANY
+		TTL:           0,
+		AlgorithmName: "hmac-md5.sig-alg.reg.int.",
+		TimeSigned:    uint64(time.Now().Unix()),
+		Fudge:         300,
+		OriginalID:    p.Header.ID,
 	}
 
 	// 2. Compute MAC

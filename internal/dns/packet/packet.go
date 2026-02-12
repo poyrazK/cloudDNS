@@ -183,6 +183,19 @@ type DnsRecord struct {
 	// NSEC
 	NextName   string
 	TypeBitMap []byte
+	// DNSKEY
+	Flags     uint16
+	Algorithm uint8
+	PublicKey []byte
+	// RRSIG
+	TypeCovered uint16
+	Labels      uint8
+	OrigTTL     uint32
+	Expiration  uint32
+	Inception   uint32
+	KeyTag      uint16
+	SignerName  string
+	Signature   []byte
 	// EDNS
 	UDPPayloadSize uint16
 	ExtendedRcode  uint8
@@ -190,13 +203,13 @@ type DnsRecord struct {
 	Z              uint16
 	Options        []EdnsOption
 	// TSIG
-	Algorithm  string
-	TimeSigned uint64
-	Fudge      uint16
-	MAC        []byte
-	OriginalID uint16
-	Error      uint16
-	Other      []byte
+	AlgorithmName string
+	TimeSigned    uint64
+	Fudge         uint16
+	MAC           []byte
+	OriginalID    uint16
+	Error         uint16
+	Other         []byte
 }
 
 func (r *DnsRecord) Read(buffer *BytePacketBuffer) error {
@@ -216,6 +229,7 @@ func (r *DnsRecord) Read(buffer *BytePacketBuffer) error {
 
 	dataLen, err := buffer.Readu16()
 	if err != nil { return err }
+	startPos := buffer.Position()
 
 	switch r.Type {
 	case A:
@@ -264,9 +278,28 @@ func (r *DnsRecord) Read(buffer *BytePacketBuffer) error {
 		r.EMailBX, _ = buffer.ReadName()
 	case NSEC:
 		r.NextName, _ = buffer.ReadName()
-		remaining := int(dataLen) - (buffer.Position() - (buffer.Position() - 0 /* inaccurate without tracking start of RDATA */))
-		// Note: Simplified NSEC bitmap reading for now
+		remaining := int(dataLen) - (buffer.Position() - startPos)
 		r.TypeBitMap, _ = buffer.ReadRange(buffer.Position(), remaining)
+		buffer.Step(remaining)
+	case DNSKEY:
+		r.Flags, _ = buffer.Readu16()
+		protocol, _ := buffer.Read() // Must be 3
+		_ = protocol
+		r.Algorithm, _ = buffer.Read()
+		remaining := int(dataLen) - (buffer.Position() - startPos)
+		r.PublicKey, _ = buffer.ReadRange(buffer.Position(), remaining)
+		buffer.Step(remaining)
+	case RRSIG:
+		r.TypeCovered, _ = buffer.Readu16()
+		r.Algorithm, _ = buffer.Read()
+		r.Labels, _ = buffer.Read()
+		r.OrigTTL, _ = buffer.Readu32()
+		r.Expiration, _ = buffer.Readu32()
+		r.Inception, _ = buffer.Readu32()
+		r.KeyTag, _ = buffer.Readu16()
+		r.SignerName, _ = buffer.ReadName()
+		remaining := int(dataLen) - (buffer.Position() - startPos)
+		r.Signature, _ = buffer.ReadRange(buffer.Position(), remaining)
 		buffer.Step(remaining)
 	case OPT:
 		r.UDPPayloadSize = r.Class
@@ -318,7 +351,7 @@ func (r *DnsRecord) Write(buffer *BytePacketBuffer) (int, error) {
 		buffer.Writeu32(r.TTL)
 		lenPos := buffer.Position()
 		buffer.Writeu16(0)
-		buffer.WriteName(r.Algorithm)
+		buffer.WriteName(r.AlgorithmName)
 		buffer.Writeu16(uint16(r.TimeSigned >> 32))
 		buffer.Writeu32(uint32(r.TimeSigned & 0xFFFFFFFF))
 		buffer.Writeu16(r.Fudge)
@@ -403,6 +436,28 @@ func (r *DnsRecord) Write(buffer *BytePacketBuffer) (int, error) {
 		buffer.Writeu16(0)
 		buffer.WriteName(r.NextName)
 		for _, b := range r.TypeBitMap { buffer.Write(b) }
+		currPos := buffer.Position()
+		buffer.Seek(lenPos)
+		buffer.Writeu16(uint16(currPos - (lenPos + 2)))
+		buffer.Seek(currPos)
+	case DNSKEY:
+		buffer.Writeu16(uint16(4 + len(r.PublicKey)))
+		buffer.Writeu16(r.Flags)
+		buffer.Write(3) // Protocol
+		buffer.Write(r.Algorithm)
+		for _, b := range r.PublicKey { buffer.Write(b) }
+	case RRSIG:
+		lenPos := buffer.Position()
+		buffer.Writeu16(0)
+		buffer.Writeu16(r.TypeCovered)
+		buffer.Write(r.Algorithm)
+		buffer.Write(r.Labels)
+		buffer.Writeu32(r.OrigTTL)
+		buffer.Writeu32(r.Expiration)
+		buffer.Writeu32(r.Inception)
+		buffer.Writeu16(r.KeyTag)
+		buffer.WriteName(r.SignerName)
+		for _, b := range r.Signature { buffer.Write(b) }
 		currPos := buffer.Position()
 		buffer.Seek(lenPos)
 		buffer.Writeu16(uint16(currPos - (lenPos + 2)))
