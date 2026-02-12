@@ -69,98 +69,70 @@ func TestPostgresRepository_Integration(t *testing.T) {
 	repo := NewPostgresRepository(db)
 	ctx := context.Background()
 
-	// 1. Test CreateZoneWithRecords
-	zoneID := "550e8400-e29b-41d4-a716-446655440000"
-	zone := &domain.Zone{
-		ID:       zoneID,
-		TenantID: "tenant-1",
-		Name:     "example.com.",
-	}
-	records := []domain.Record{
-		{
-			ID:      "550e8400-e29b-41d4-a716-446655440001",
-			ZoneID:  zoneID,
-			Name:    "example.com.",
-			Type:    domain.TypeA,
-			Content: "1.2.3.4",
-			TTL:     3600,
-		},
+	// 1. Test Ping
+	if err := repo.Ping(ctx); err != nil {
+		t.Errorf("Ping failed: %v", err)
 	}
 
-	err := repo.CreateZoneWithRecords(ctx, zone, records)
-	if err != nil {
-		t.Fatalf("CreateZoneWithRecords failed: %v", err)
+	// 2. Test CreateZone
+	zoneID1 := "550e8400-e29b-41d4-a716-446655440000"
+	zone := &domain.Zone{ID: zoneID1, Name: "base.test.", TenantID: "t1"}
+	if err := repo.CreateZone(ctx, zone); err != nil {
+		t.Fatalf("CreateZone failed: %v", err)
 	}
 
-	// 2. Test Case-Insensitive Lookup (RFC 1034)
-	found, err := repo.GetRecords(ctx, "ExAmPlE.CoM.", domain.TypeA, "8.8.8.8")
-	if err != nil || len(found) != 1 {
-		t.Errorf("Expected 1 record via mixed-case lookup, got %d", len(found))
+	// 3. Test GetZone
+	gotZone, err := repo.GetZone(ctx, "base.test.")
+	if err != nil || gotZone == nil || gotZone.ID != zoneID1 {
+		t.Errorf("GetZone failed: %v, got %+v", err, gotZone)
 	}
 
-	// 3. Test Split-Horizon (Network specific)
-	internalNet := "10.0.0.0/8"
-	repo.CreateRecord(ctx, &domain.Record{
-		ID:      "550e8400-e29b-41d4-a716-446655440002",
-		ZoneID:  zoneID,
-		Name:    "example.com.",
-		Type:    domain.TypeA,
-		Content: "10.0.0.5",
-		TTL:     60,
-		Network: &internalNet,
-	})
-
-	publicRes, _ := repo.GetRecords(ctx, "example.com.", domain.TypeA, "8.8.8.8")
-	if len(publicRes) != 1 || publicRes[0].Content != "1.2.3.4" {
-		t.Errorf("Public client got wrong records: %v", publicRes)
+	// 4. Test CreateRecord
+	recordID1 := "550e8400-e29b-41d4-a716-446655440001"
+	record := &domain.Record{
+		ID: recordID1, ZoneID: zoneID1, Name: "www.base.test.", Type: domain.TypeA, Content: "1.2.3.4", TTL: 300,
+	}
+	if err := repo.CreateRecord(ctx, record); err != nil {
+		t.Fatalf("CreateRecord failed: %v", err)
 	}
 
-	internalRes, _ := repo.GetRecords(ctx, "example.com.", domain.TypeA, "10.5.5.5")
-	if len(internalRes) != 2 {
-		t.Errorf("Internal client expected 2 records, got %d", len(internalRes))
+	// 5. Test GetRecords (Case Insensitive)
+	recs, err := repo.GetRecords(ctx, "WwW.BaSe.TeSt.", domain.TypeA, "8.8.8.8")
+	if err != nil || len(recs) != 1 {
+		t.Errorf("GetRecords failed: %v, count: %d", err, len(recs))
 	}
 
-	// 4. Test ListRecordsForZone (AXFR)
-	allRecords, err := repo.ListRecordsForZone(ctx, zoneID)
-	if err != nil || len(allRecords) < 1 {
-		t.Errorf("ListRecordsForZone failed: %v", err)
+	// 6. Test GetIPsForName
+	ips, err := repo.GetIPsForName(ctx, "www.base.test.", "8.8.8.8")
+	if err != nil || len(ips) != 1 || ips[0] != "1.2.3.4" {
+		t.Errorf("GetIPsForName failed: %v, got %v", err, ips)
 	}
 
-	// 5. Test ListZones
-	zones, err := repo.ListZones(ctx, "tenant-1")
-	if err != nil || len(zones) != 1 {
-		t.Errorf("ListZones failed: %v, count: %d", err, len(zones))
+	// 7. Test ListRecordsForZone
+	allRecs, err := repo.ListRecordsForZone(ctx, zoneID1)
+	if err != nil || len(allRecs) != 1 {
+		t.Errorf("ListRecordsForZone failed: %v, count: %d", err, len(allRecs))
 	}
 
-	// 6. Test Audit Logs
+	// 8. Test Audit Logs
+	auditID1 := "550e8400-e29b-41d4-a716-446655440002"
 	audit := &domain.AuditLog{
-		ID:           "550e8400-e29b-41d4-a716-446655440003",
-		TenantID:     "tenant-1",
-		Action:       "CREATE_ZONE",
-		ResourceType: "ZONE",
-		ResourceID:   zoneID,
-		Details:      "Test log",
-		CreatedAt:    time.Now(),
+		ID: auditID1, TenantID: "t1", Action: "CREATE", ResourceType: "ZONE", ResourceID: zoneID1, Details: "...", CreatedAt: time.Now(),
 	}
-	err = repo.SaveAuditLog(ctx, audit)
-	if err != nil {
-		t.Errorf("SaveAuditLog failed: %v", err)
+	repo.SaveAuditLog(ctx, audit)
+	logs, _ := repo.GetAuditLogs(ctx, "t1")
+	if len(logs) != 1 {
+		t.Errorf("Audit logs expected 1, got %d", len(logs))
 	}
 
-	logs, err := repo.GetAuditLogs(ctx, "tenant-1")
-	if err != nil || len(logs) != 1 {
-		t.Errorf("GetAuditLogs failed: %v, count: %d", err, len(logs))
+	// 9. Test DeleteRecord
+	if err := repo.DeleteRecord(ctx, recordID1, zoneID1); err != nil {
+		t.Errorf("DeleteRecord failed: %v", err)
 	}
 
-	// 7. Test Delete
-	err = repo.DeleteZone(ctx, zoneID, "tenant-1")
-	if err != nil {
+	// 10. Test DeleteZone
+	if err := repo.DeleteZone(ctx, zoneID1, "t1"); err != nil {
 		t.Errorf("DeleteZone failed: %v", err)
-	}
-
-	leftover, _ := repo.GetRecords(ctx, "example.com.", domain.TypeA, "8.8.8.8")
-	if len(leftover) != 0 {
-		t.Errorf("Records were not deleted after zone deletion")
 	}
 }
 

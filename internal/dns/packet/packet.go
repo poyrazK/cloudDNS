@@ -7,33 +7,35 @@ import (
 type QueryType uint16
 
 const (
-	UNKNOWN QueryType = 0
-	A       QueryType = 1
-	NS      QueryType = 2
-	MD      QueryType = 3
-	MF      QueryType = 4
-	CNAME   QueryType = 5
-	SOA     QueryType = 6
-	MB      QueryType = 7
-	MG      QueryType = 8
-	MR      QueryType = 9
-	NULL    QueryType = 10
-	WKS     QueryType = 11
-	PTR     QueryType = 12
-	HINFO   QueryType = 13
-	MINFO   QueryType = 14
-	MX      QueryType = 15
-	TXT     QueryType = 16
-	AAAA    QueryType = 28
-	SRV     QueryType = 33
-	DS      QueryType = 43
-	RRSIG   QueryType = 46
-	NSEC    QueryType = 47
-	DNSKEY  QueryType = 48
-	AXFR    QueryType = 252
-	ANY     QueryType = 255
-	OPT     QueryType = 41
-	TSIG    QueryType = 250
+	UNKNOWN    QueryType = 0
+	A          QueryType = 1
+	NS         QueryType = 2
+	MD         QueryType = 3
+	MF         QueryType = 4
+	CNAME      QueryType = 5
+	SOA        QueryType = 6
+	MB         QueryType = 7
+	MG         QueryType = 8
+	MR         QueryType = 9
+	NULL       QueryType = 10
+	WKS        QueryType = 11
+	PTR        QueryType = 12
+	HINFO      QueryType = 13
+	MINFO      QueryType = 14
+	MX         QueryType = 15
+	TXT        QueryType = 16
+	AAAA       QueryType = 28
+	SRV        QueryType = 33
+	DS         QueryType = 43
+	RRSIG      QueryType = 46
+	NSEC       QueryType = 47
+	DNSKEY     QueryType = 48
+	NSEC3      QueryType = 50
+	NSEC3PARAM QueryType = 51
+	AXFR       QueryType = 252
+	ANY        QueryType = 255
+	OPT        QueryType = 41
+	TSIG       QueryType = 250
 )
 
 type DnsHeader struct {
@@ -196,6 +198,11 @@ type DnsRecord struct {
 	KeyTag      uint16
 	SignerName  string
 	Signature   []byte
+	// NSEC3
+	HashAlg    uint8
+	Iterations uint16
+	Salt       []byte
+	NextHash   []byte
 	// EDNS
 	UDPPayloadSize uint16
 	ExtendedRcode  uint8
@@ -301,6 +308,29 @@ func (r *DnsRecord) Read(buffer *BytePacketBuffer) error {
 		remaining := int(dataLen) - (buffer.Position() - startPos)
 		r.Signature, _ = buffer.ReadRange(buffer.Position(), remaining)
 		buffer.Step(remaining)
+	case NSEC3:
+		r.HashAlg, _ = buffer.Read()
+		r.Flags = 0 // simplified
+		f, _ := buffer.Read()
+		_ = f
+		r.Iterations, _ = buffer.Readu16()
+		saltLen, _ := buffer.Read()
+		r.Salt, _ = buffer.ReadRange(buffer.Position(), int(saltLen))
+		buffer.Step(int(saltLen))
+		hashLen, _ := buffer.Read()
+		r.NextHash, _ = buffer.ReadRange(buffer.Position(), int(hashLen))
+		buffer.Step(int(hashLen))
+		remaining := int(dataLen) - (buffer.Position() - startPos)
+		r.TypeBitMap, _ = buffer.ReadRange(buffer.Position(), remaining)
+		buffer.Step(remaining)
+	case NSEC3PARAM:
+		r.HashAlg, _ = buffer.Read()
+		f, _ := buffer.Read()
+		_ = f
+		r.Iterations, _ = buffer.Readu16()
+		saltLen, _ := buffer.Read()
+		r.Salt, _ = buffer.ReadRange(buffer.Position(), int(saltLen))
+		buffer.Step(int(saltLen))
 	case OPT:
 		r.UDPPayloadSize = r.Class
 		r.ExtendedRcode = uint8(r.TTL >> 24)
@@ -458,6 +488,33 @@ func (r *DnsRecord) Write(buffer *BytePacketBuffer) (int, error) {
 		buffer.Writeu16(r.KeyTag)
 		buffer.WriteName(r.SignerName)
 		for _, b := range r.Signature { buffer.Write(b) }
+		currPos := buffer.Position()
+		buffer.Seek(lenPos)
+		buffer.Writeu16(uint16(currPos - (lenPos + 2)))
+		buffer.Seek(currPos)
+	case NSEC3:
+		lenPos := buffer.Position()
+		buffer.Writeu16(0)
+		buffer.Write(r.HashAlg)
+		buffer.Write(uint8(r.Flags))
+		buffer.Writeu16(r.Iterations)
+		buffer.Write(uint8(len(r.Salt)))
+		for _, b := range r.Salt { buffer.Write(b) }
+		buffer.Write(uint8(len(r.NextHash)))
+		for _, b := range r.NextHash { buffer.Write(b) }
+		for _, b := range r.TypeBitMap { buffer.Write(b) }
+		currPos := buffer.Position()
+		buffer.Seek(lenPos)
+		buffer.Writeu16(uint16(currPos - (lenPos + 2)))
+		buffer.Seek(currPos)
+	case NSEC3PARAM:
+		lenPos := buffer.Position()
+		buffer.Writeu16(0)
+		buffer.Write(r.HashAlg)
+		buffer.Write(uint8(r.Flags))
+		buffer.Writeu16(r.Iterations)
+		buffer.Write(uint8(len(r.Salt)))
+		for _, b := range r.Salt { buffer.Write(b) }
 		currPos := buffer.Position()
 		buffer.Seek(lenPos)
 		buffer.Writeu16(uint16(currPos - (lenPos + 2)))

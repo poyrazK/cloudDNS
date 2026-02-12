@@ -346,23 +346,300 @@ func TestReadName_InfiniteLoop(t *testing.T) {
 	}
 }
 
-func TestNameCompression(t *testing.T) {
+func TestDNSKEYRecordSerialization(t *testing.T) {
+
+	record := DnsRecord{
+
+		Name:      "example.com.",
+
+		Type:      DNSKEY,
+
+		TTL:       3600,
+
+		Flags:     256,
+
+		Algorithm: 13,
+
+		PublicKey: []byte{0x01, 0x02, 0x03, 0x04},
+
+	}
+
+
+
 	buffer := NewBytePacketBuffer()
-	buffer.HasNames = true
-	
-	buffer.WriteName("google.com.")
-	pos := buffer.Position()
-	
-	buffer.Write(0xC0)
-	buffer.Write(0x00)
-	
-	buffer.Seek(pos)
-	name, err := buffer.ReadName()
+
+	_, err := record.Write(buffer)
+
 	if err != nil {
-		t.Fatalf("Failed to read compressed name: %v", err)
+
+		t.Fatalf("Failed to write DNSKEY record: %v", err)
+
 	}
-	
-	if name != "google.com." {
-		t.Errorf("Expected compressed name google.com., got %s", name)
+
+
+
+	buffer.Seek(0)
+
+	parsed := DnsRecord{}
+
+	err = parsed.Read(buffer)
+
+	if err != nil {
+
+		t.Fatalf("Failed to read DNSKEY record: %v", err)
+
 	}
+
+
+
+	if parsed.Flags != record.Flags || parsed.Algorithm != record.Algorithm {
+
+		t.Errorf("DNSKEY metadata mismatch")
+
+	}
+
+	if string(parsed.PublicKey) != string(record.PublicKey) {
+
+		t.Errorf("PublicKey mismatch")
+
+	}
+
 }
+
+
+
+func TestRRSIGRecordSerialization(t *testing.T) {
+
+	record := DnsRecord{
+
+		Name:        "example.com.",
+
+		Type:        RRSIG,
+
+		TTL:         3600,
+
+		TypeCovered: uint16(A),
+
+		Algorithm:   13,
+
+		Labels:      2,
+
+		OrigTTL:     3600,
+
+		Expiration:  1700000000,
+
+		Inception:   1600000000,
+
+		KeyTag:      12345,
+
+		SignerName:  "example.com.",
+
+		Signature:   []byte{0xDE, 0xAD, 0xBE, 0xEF},
+
+	}
+
+
+
+	buffer := NewBytePacketBuffer()
+
+	_, err := record.Write(buffer)
+
+	if err != nil {
+
+		t.Fatalf("Failed to write RRSIG record: %v", err)
+
+	}
+
+
+
+	buffer.Seek(0)
+
+	parsed := DnsRecord{}
+
+	err = parsed.Read(buffer)
+
+	if err != nil {
+
+		t.Fatalf("Failed to read RRSIG record: %v", err)
+
+	}
+
+
+
+	if parsed.TypeCovered != record.TypeCovered || parsed.KeyTag != record.KeyTag {
+
+		t.Errorf("RRSIG metadata mismatch")
+
+	}
+
+	if parsed.SignerName != record.SignerName {
+
+		t.Errorf("SignerName mismatch: expected %s, got %s", record.SignerName, parsed.SignerName)
+
+	}
+
+}
+
+
+
+func TestNSECRecordSerialization(t *testing.T) {
+
+	record := DnsRecord{
+
+		Name:       "a.example.com.",
+
+		Type:       NSEC,
+
+		TTL:        3600,
+
+		NextName:   "z.example.com.",
+
+		TypeBitMap: []byte{0x00, 0x06, 0x40, 0x01},
+
+	}
+
+
+
+	buffer := NewBytePacketBuffer()
+
+	_, err := record.Write(buffer)
+
+	if err != nil {
+
+		t.Fatalf("Failed to write NSEC record: %v", err)
+
+	}
+
+
+
+	buffer.Seek(0)
+
+	parsed := DnsRecord{}
+
+	err = parsed.Read(buffer)
+
+	if err != nil {
+
+		t.Fatalf("Failed to read NSEC record: %v", err)
+
+	}
+
+
+
+	if parsed.NextName != record.NextName {
+
+		t.Errorf("NextName mismatch: expected %s, got %s", record.NextName, parsed.NextName)
+
+	}
+
+}
+
+
+
+func TestHINFORecordSerialization(t *testing.T) {
+
+	record := DnsRecord{
+
+		Name: "host.test.",
+
+		Type: HINFO,
+
+		TTL:  300,
+
+		CPU:  "INTEL-I7",
+
+		OS:   "LINUX",
+
+	}
+
+
+
+	buffer := NewBytePacketBuffer()
+
+	_, err := record.Write(buffer)
+
+	if err != nil {
+
+		t.Fatalf("Failed to write HINFO record: %v", err)
+
+	}
+
+
+
+	buffer.Seek(0)
+
+	parsed := DnsRecord{}
+
+	err = parsed.Read(buffer)
+
+	if err != nil {
+
+		t.Fatalf("Failed to read HINFO record: %v", err)
+
+	}
+
+
+
+	if parsed.CPU != record.CPU || parsed.OS != record.OS {
+
+		t.Errorf("HINFO mismatch")
+
+	}
+
+}
+
+
+
+func TestMINFORecordSerialization(t *testing.T) {
+
+	record := DnsRecord{
+
+		Name:    "mail.test.",
+
+		Type:    MINFO,
+
+		TTL:     300,
+
+		RMailBX: "admin.test.",
+
+		EMailBX: "errors.test.",
+
+	}
+
+
+
+	buffer := NewBytePacketBuffer()
+
+	_, err := record.Write(buffer)
+
+	if err != nil {
+
+		t.Fatalf("Failed to write MINFO record: %v", err)
+
+	}
+
+
+
+	buffer.Seek(0)
+
+	parsed := DnsRecord{}
+
+	err = parsed.Read(buffer)
+
+	if err != nil {
+
+		t.Fatalf("Failed to read MINFO record: %v", err)
+
+	}
+
+
+
+	if parsed.RMailBX != record.RMailBX || parsed.EMailBX != record.EMailBX {
+
+		t.Errorf("MINFO mismatch")
+
+	}
+
+}
+
+

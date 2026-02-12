@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
@@ -134,28 +135,43 @@ func TestDeleteRecord(t *testing.T) {
 	}
 }
 
-func TestResolve_Wildcard(t *testing.T) {
-	repo := &mockRepo{
-		records: []domain.Record{
-			{Name: "*.example.com.", Type: domain.TypeA, Content: "9.9.9.9"},
-		},
-	}
+func TestImportZone(t *testing.T) {
+	repo := &mockRepo{}
 	svc := NewDNSService(repo)
 
-	// Query for sub.example.com. -> should match *.example.com.
-	res, err := svc.Resolve(context.Background(), "sub.example.com.", domain.TypeA, "1.1.1.1")
+	zoneFile := `
+$ORIGIN import.test.
+$TTL 3600
+@   IN  SOA ns1.import.test. admin.import.test. 1 2 3 4 5
+www IN  A   1.2.3.4
+`
+	ctx := context.Background()
+	zone, err := svc.ImportZone(ctx, "t1", strings.NewReader(zoneFile))
 	if err != nil {
-		t.Fatalf("Resolve failed: %v", err)
+		t.Fatalf("ImportZone failed: %v", err)
 	}
 
-	if len(res) != 1 {
-		t.Errorf("Expected 1 record, got %d", len(res))
-	} else {
-		if res[0].Content != "9.9.9.9" {
-			t.Errorf("Expected content 9.9.9.9, got %s", res[0].Content)
-		}
-		if res[0].Name != "sub.example.com." {
-			t.Errorf("Expected name to be rewritten to sub.example.com., got %s", res[0].Name)
-		}
+	if zone.Name != "import.test." {
+		t.Errorf("Expected zone name import.test., got %s", zone.Name)
+	}
+
+	// Verify records were created in repo
+	if len(repo.records) != 2 {
+		t.Errorf("Expected 2 records, got %d", len(repo.records))
+	}
+}
+
+func TestImportZone_Error(t *testing.T) {
+	repo := &mockRepo{}
+	svc := NewDNSService(repo)
+
+	// Malformed (missing fields)
+	malformed := "$ORIGIN test.com.\nwww A"
+	_, err := svc.ImportZone(context.Background(), "t1", strings.NewReader(malformed))
+	
+	// Master parser currently skips lines it can't parse rather than returning error 
+	// unless io.Reader fails. But we can check if it handled correctly.
+	if err != nil {
+		t.Errorf("Expected skip/partial rather than fatal err, got %v", err)
 	}
 }

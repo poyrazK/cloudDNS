@@ -16,134 +16,117 @@ import (
 	"github.com/poyrazK/cloudDNS/internal/dns/packet"
 )
 
-func TestEndToEndDNS(t *testing.T) {
-	// 1. Setup Stack with Mock Repo
-	repo := &mockServerRepo{} // Using the mock from server_test.go
+func TestEndToEndDNS_Advanced(t *testing.T) {
+	// 1. Setup Stack with Mock Repo (or real PG if we wanted even more integration)
+	repo := &mockServerRepo{}
 	svc := services.NewDNSService(repo)
-	dnsAddr := "127.0.0.1:10055"
-	apiAddr := "127.0.0.1:18080"
+	dnsAddr := "127.0.0.1:10056"
+	apiAddr := "127.0.0.1:18081"
 
-	// 2. Start DNS Server
 	dnsSrv := NewServer(dnsAddr, repo, nil)
 	go dnsSrv.Run()
 
-	// 3. Start Management API
 	apiHandler := api.NewAPIHandler(svc)
 	mux := http.NewServeMux()
 	apiHandler.RegisterRoutes(mux)
 	apiSrv := &http.Server{Addr: apiAddr, Handler: mux}
 	go apiSrv.ListenAndServe()
 
-	// Give servers a moment to start
 	time.Sleep(200 * time.Millisecond)
 	defer apiSrv.Shutdown(context.Background())
 
-	// 4. Create a Zone via API
-	zoneReq := domain.Zone{
-		Name:     "e2e.test.",
-		TenantID: "admin",
-	}
+	// 2. Setup Zone with multiple records including Wildcards
+	zoneReq := domain.Zone{Name: "advanced.test.", TenantID: "admin"}
 	body, _ := json.Marshal(zoneReq)
-	resp, err := http.Post(fmt.Sprintf("http://%s/zones", apiAddr), "application/json", bytes.NewBuffer(body))
-	if err != nil || resp.StatusCode != http.StatusCreated {
-		t.Fatalf("Failed to create zone via API: %v", err)
-	}
+	resp, _ := http.Post(fmt.Sprintf("http://%s/zones", apiAddr), "application/json", bytes.NewBuffer(body))
 	var createdZone domain.Zone
 	json.NewDecoder(resp.Body).Decode(&createdZone)
 
-	// 5. Create a Record via API
-	recordReq := domain.Record{
-		Name:    "www.e2e.test.",
-		Type:    domain.TypeA,
-		Content: "9.9.9.9",
-		TTL:     300,
+	records := []domain.Record{
+		{Name: "a.advanced.test.", Type: domain.TypeA, Content: "1.1.1.1", TTL: 300, ZoneID: createdZone.ID},
+		{Name: "*.advanced.test.", Type: domain.TypeTXT, Content: "wildcard", TTL: 300, ZoneID: createdZone.ID},
 	}
-	body, _ = json.Marshal(recordReq)
-	url := fmt.Sprintf("http://%s/zones/%s/records", apiAddr, createdZone.ID)
-	resp, err = http.Post(url, "application/json", bytes.NewBuffer(body))
-	if err != nil || resp.StatusCode != http.StatusCreated {
-		t.Fatalf("Failed to create record via API: %v", err)
+	for _, r := range records {
+		b, _ := json.Marshal(r)
+		http.Post(fmt.Sprintf("http://%s/zones/%s/records", apiAddr, createdZone.ID), "application/json", bytes.NewBuffer(b))
 	}
 
-	// 6. Query via DNS (UDP)
-	// Manually construct and send a UDP packet to our server
+	// 3. Test Wildcard Resolution
 	query := packet.NewDnsPacket()
-	query.Header.ID = 0xbeef
-	query.Questions = append(query.Questions, packet.DnsQuestion{
-		Name: "www.e2e.test.", QType: packet.A,
-	})
+	query.Questions = append(query.Questions, packet.DnsQuestion{Name: "anything.advanced.test.", QType: packet.TXT})
 	qBuf := packet.NewBytePacketBuffer()
 	query.Write(qBuf)
 
-	conn, err := net.Dial("udp", dnsAddr)
-	if err != nil {
-		t.Fatalf("Failed to connect to DNS: %v", err)
-	}
-	defer conn.Close()
-
-	_, err = conn.Write(qBuf.Buf[:qBuf.Position()])
-	if err != nil {
-		t.Fatalf("Failed to send DNS query: %v", err)
-	}
-
-	resBuf := make([]byte, 512)
-	conn.SetReadDeadline(time.Now().Add(1 * time.Second))
-	n, err := conn.Read(resBuf)
-	if err != nil {
-		t.Fatalf("Failed to read DNS response: %v", err)
-	}
-
-	// 7. Verify Result
-	resPacket := packet.NewDnsPacket()
+	conn, _ := net.Dial("udp", dnsAddr)
+	conn.Write(qBuf.Buf[:qBuf.Position()])
+	resBuf := make([]byte, 1024)
+	n, _ := conn.Read(resBuf)
+	
+	res := packet.NewDnsPacket()
 	pBuf := packet.NewBytePacketBuffer()
 	copy(pBuf.Buf, resBuf[:n])
-	err = resPacket.FromBuffer(pBuf)
-	if err != nil {
-		t.Fatalf("Failed to parse DNS response: %v", err)
+	res.FromBuffer(pBuf)
+
+	if len(res.Answers) == 0 || res.Answers[0].Txt != "wildcard" {
+		t.Errorf("Wildcard E2E failed")
 	}
 
-	if len(resPacket.Answers) == 0 {
-		t.Fatal("Expected at least one answer in DNS response")
+	// 4. Test AXFR over TCP
+	tcpConn, _ := net.Dial("tcp", dnsAddr)
+	axfrQuery := packet.NewDnsPacket()
+	axfrQuery.Header.ID = 0x1234
+	axfrQuery.Questions = append(axfrQuery.Questions, packet.DnsQuestion{Name: "advanced.test.", QType: packet.AXFR})
+	aqBuf := packet.NewBytePacketBuffer()
+	axfrQuery.Write(aqBuf)
+
+	tcpAQBuf := make([]byte, aqBuf.Position()+2)
+	tcpAQBuf[0] = byte(aqBuf.Position() >> 8)
+	tcpAQBuf[1] = byte(aqBuf.Position() & 0xFF)
+	copy(tcpAQBuf[2:], aqBuf.Buf[:aqBuf.Position()])
+	tcpConn.Write(tcpAQBuf)
+
+	// Read first SOA
+	lenB := make([]byte, 2)
+	tcpConn.Read(lenB)
+	axfrRLen := uint16(lenB[0])<<8 | uint16(lenB[1])
+	axfrRData := make([]byte, axfrRLen)
+	tcpConn.Read(axfrRData)
+	
+	axfrRes := packet.NewDnsPacket()
+	arb := packet.NewBytePacketBuffer()
+	copy(arb.Buf, axfrRData)
+	axfrRes.FromBuffer(arb)
+	
+	if len(axfrRes.Answers) == 0 || axfrRes.Answers[0].Type != packet.SOA {
+		t.Errorf("AXFR E2E failed to start with SOA")
 	}
-	if resPacket.Answers[0].IP.String() != "9.9.9.9" {
-		t.Errorf("Expected IP 9.9.9.9, got %s", resPacket.Answers[0].IP.String())
+	tcpConn.Close()
+
+	// 5. Test EDNS(0) + NSEC (Authenticated Denial)
+	conn2, _ := net.Dial("udp", dnsAddr)
+	query2 := packet.NewDnsPacket()
+	query2.Questions = append(query2.Questions, packet.DnsQuestion{Name: "missing.advanced.test.", QType: packet.A})
+	query2.Resources = append(query2.Resources, packet.DnsRecord{
+		Name: ".", Type: packet.OPT, UDPPayloadSize: 4096, Z: 0x8000,
+	})
+	qBuf2 := packet.NewBytePacketBuffer()
+	query2.Write(qBuf2)
+	conn2.Write(qBuf2.Buf[:qBuf2.Position()])
+	
+	n2, _ := conn2.Read(resBuf)
+	res2 := packet.NewDnsPacket()
+	pBuf2 := packet.NewBytePacketBuffer()
+	copy(pBuf2.Buf, resBuf[:n2])
+	res2.FromBuffer(pBuf2)
+
+	foundNSEC := false
+	for _, auth := range res2.Authorities {
+		if auth.Type == packet.NSEC {
+			foundNSEC = true
+			break
+		}
 	}
-
-	// 8. Query via DNS (TCP)
-	tcpConn, err := net.Dial("tcp", dnsAddr)
-	if err != nil {
-		t.Fatalf("Failed to connect to DNS via TCP: %v", err)
-	}
-	defer tcpConn.Close()
-
-	// Prepend 2-byte length for TCP
-	tcpQBuf := make([]byte, qBuf.Position()+2)
-	tcpQBuf[0] = byte(qBuf.Position() >> 8)
-	tcpQBuf[1] = byte(qBuf.Position() & 0xFF)
-	copy(tcpQBuf[2:], qBuf.Buf[:qBuf.Position()])
-
-	_, err = tcpConn.Write(tcpQBuf)
-	if err != nil {
-		t.Fatalf("Failed to send DNS query via TCP: %v", err)
-	}
-
-	// Read length
-	tcpLenBuf := make([]byte, 2)
-	tcpConn.Read(tcpLenBuf)
-	tcpRespLen := uint16(tcpLenBuf[0])<<8 | uint16(tcpLenBuf[1])
-
-	tcpResBuf := make([]byte, tcpRespLen)
-	_, err = tcpConn.Read(tcpResBuf)
-	if err != nil {
-		t.Fatalf("Failed to read DNS response via TCP: %v", err)
-	}
-
-	resPacketTCP := packet.NewDnsPacket()
-	pBufTCP := packet.NewBytePacketBuffer()
-	copy(pBufTCP.Buf, tcpResBuf)
-	resPacketTCP.FromBuffer(pBufTCP)
-
-	if len(resPacketTCP.Answers) == 0 || resPacketTCP.Answers[0].IP.String() != "9.9.9.9" {
-		t.Errorf("TCP resolution failed")
+	if !foundNSEC {
+		t.Errorf("DNSSEC/NSEC E2E failed: no NSEC record in NXDOMAIN response")
 	}
 }
