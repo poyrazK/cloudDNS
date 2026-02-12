@@ -18,8 +18,9 @@ const (
 	TXT     QueryType = 16
 	AAAA    QueryType = 28
 	SRV     QueryType = 33
-	OPT     QueryType = 41
+	AXFR    QueryType = 252
 	ANY     QueryType = 255
+	OPT     QueryType = 41
 	TSIG    QueryType = 250
 )
 
@@ -206,7 +207,7 @@ func (r *DnsRecord) Read(buffer *BytePacketBuffer) error {
 		if err != nil { return err }
 		r.IP = net.IP(rawIP)
 		buffer.Step(16)
-	case NS, CNAME:
+	case NS, CNAME, PTR:
 		r.Host, err = buffer.ReadName()
 		if err != nil { return err }
 	case MX:
@@ -309,7 +310,7 @@ func (r *DnsRecord) Write(buffer *BytePacketBuffer) (int, error) {
 	case AAAA:
 		buffer.Writeu16(16)
 		for _, b := range r.IP.To16() { buffer.Write(b) }
-	case CNAME, NS:
+	case CNAME, NS, PTR:
 		lenPos := buffer.Position()
 		buffer.Writeu16(0)
 		buffer.WriteName(r.Host)

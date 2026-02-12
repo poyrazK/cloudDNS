@@ -181,10 +181,28 @@ func (s *Server) handleTCPConnection(conn net.Conn) {
 	defer conn.Close()
 	for {
 		lenBuf := make([]byte, 2)
-		if _, err := io.ReadFull(conn, lenBuf); err != nil { return }
+		if _, err := io.ReadFull(conn, lenBuf); err != nil {
+			return
+		}
 		packetLen := uint16(lenBuf[0])<<8 | uint16(lenBuf[1])
 		data := make([]byte, packetLen)
-		if _, err := io.ReadFull(conn, data); err != nil { return }
+		if _, err := io.ReadFull(conn, data); err != nil {
+			return
+		}
+
+		// Check for AXFR
+		reqBuffer := packet.GetBuffer()
+		reqBuffer.Load(data)
+		request := packet.NewDnsPacket()
+		if err := request.FromBuffer(reqBuffer); err == nil && len(request.Questions) > 0 {
+			if request.Questions[0].QType == packet.AXFR {
+				s.handleAXFR(conn, request)
+				packet.PutBuffer(reqBuffer)
+				continue
+			}
+		}
+		packet.PutBuffer(reqBuffer)
+
 		s.handlePacket(data, conn.RemoteAddr(), func(resp []byte) error {
 			resLen := uint16(len(resp))
 			fullResp := append([]byte{byte(resLen >> 8), byte(resLen & 0xFF)}, resp...)
@@ -192,6 +210,101 @@ func (s *Server) handleTCPConnection(conn net.Conn) {
 			return err
 		})
 	}
+}
+
+func (s *Server) handleAXFR(conn net.Conn, request *packet.DnsPacket) {
+	q := request.Questions[0]
+	if !strings.HasSuffix(q.Name, ".") {
+		q.Name += "."
+	}
+
+	ctx := context.Background()
+	zone, _ := s.Repo.GetZone(ctx, q.Name)
+	if zone == nil {
+		s.Logger.Warn("AXFR requested for non-existent zone", "name", q.Name)
+		s.sendTCPError(conn, request.Header.ID, 3) // NXDOMAIN
+		return
+	}
+
+	records, err := s.Repo.ListRecordsForZone(ctx, zone.ID)
+	if err != nil {
+		s.Logger.Error("AXFR failed to list records", "zone", zone.ID, "error", err)
+		s.sendTCPError(conn, request.Header.ID, 2) // SERVFAIL
+		return
+	}
+
+	var soa *domain.Record
+	for _, rec := range records {
+		if rec.Type == domain.TypeSOA {
+			soa = &rec
+			break
+		}
+	}
+
+	if soa == nil {
+		s.Logger.Error("AXFR failed: zone has no SOA", "zone", zone.Name)
+		s.sendTCPError(conn, request.Header.ID, 2)
+		return
+	}
+
+	// Filter out the SOA record from the main list to avoid duplication if it's already there
+	var otherRecords []domain.Record
+	for _, rec := range records {
+		if rec.Type != domain.TypeSOA {
+			otherRecords = append(otherRecords, rec)
+		}
+	}
+
+	// Stream packets: SOA -> [all other records] -> SOA
+	stream := append([]domain.Record{*soa}, otherRecords...)
+	stream = append(stream, *soa)
+
+	s.Logger.Info("AXFR starting", "zone", zone.Name, "records", len(stream))
+
+	for i, rec := range stream {
+		pRec, err := repository.ConvertDomainToPacketRecord(rec)
+		if err != nil {
+			s.Logger.Error("AXFR failed to convert record", "type", rec.Type, "error", err)
+			continue
+		}
+
+		response := packet.NewDnsPacket()
+		response.Header.ID = request.Header.ID
+		response.Header.Response = true
+		response.Header.AuthoritativeAnswer = true
+		response.Questions = append(response.Questions, q)
+		response.Answers = append(response.Answers, pRec)
+
+		resBuffer := packet.GetBuffer()
+		resBuffer.HasNames = true
+		response.Write(resBuffer)
+		resData := resBuffer.Buf[:resBuffer.Position()]
+
+		resLen := uint16(len(resData))
+		fullResp := append([]byte{byte(resLen >> 8), byte(resLen & 0xFF)}, resData...)
+		if _, err := conn.Write(fullResp); err != nil {
+			s.Logger.Error("AXFR connection broken", "error", err)
+			packet.PutBuffer(resBuffer)
+			return
+		}
+		s.Logger.Debug("AXFR sent packet", "index", i, "type", pRec.Type)
+		packet.PutBuffer(resBuffer)
+	}
+	s.Logger.Info("AXFR completed", "zone", zone.Name)
+}
+
+func (s *Server) sendTCPError(conn net.Conn, id uint16, rcode uint8) {
+	response := packet.NewDnsPacket()
+	response.Header.ID = id
+	response.Header.Response = true
+	response.Header.ResCode = rcode
+	resBuffer := packet.GetBuffer()
+	response.Write(resBuffer)
+	resData := resBuffer.Buf[:resBuffer.Position()]
+	resLen := uint16(len(resData))
+	fullResp := append([]byte{byte(resLen >> 8), byte(resLen & 0xFF)}, resData...)
+	conn.Write(fullResp)
+	packet.PutBuffer(resBuffer)
 }
 
 func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]byte) error) error {
@@ -235,7 +348,7 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 	if !strings.HasSuffix(q.Name, ".") {
 		q.Name += "."
 	}
-	cacheKey := fmt.Sprintf("%s:%d", q.Name, q.QType)
+	cacheKey := fmt.Sprintf("%s:%d", strings.ToLower(q.Name), q.QType)
 
 	// L1/L2 Check
 	if cachedData, found := s.Cache.Get(cacheKey); found {
@@ -419,6 +532,10 @@ func queryTypeToRecordType(qType packet.QueryType) domain.RecordType {
 		return domain.TypeSOA
 	case packet.TXT:
 		return domain.TypeTXT
+	case packet.PTR:
+		return domain.TypePTR
+	case packet.ANY:
+		return "" // ANY matches all types in our repo logic
 	default:
 		return ""
 	}

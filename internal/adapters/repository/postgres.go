@@ -24,8 +24,9 @@ func (r *PostgresRepository) GetRecords(ctx context.Context, name string, qType 
 	// 1. The name and type match.
 	// 2. The clientIP is within the record's network CIDR OR the network is NULL (global).
 	// In Postgres, '$2::inet <<= network' checks if the network CIDR contains the client IP.
+	// RFC 1034: Domain name comparisons must be case-insensitive.
 	query := `SELECT id, zone_id, name, type, content, ttl, priority, network FROM dns_records 
-	          WHERE name = $1 AND (network IS NULL OR $2::inet <<= network)`
+	          WHERE LOWER(name) = LOWER($1) AND (network IS NULL OR $2::inet <<= network)`
 	
 	var rows *sql.Rows
 	var err error
@@ -62,7 +63,7 @@ func (r *PostgresRepository) GetRecords(ctx context.Context, name string, qType 
 func (r *PostgresRepository) GetIPsForName(ctx context.Context, name string, clientIP string) ([]string, error) {
 	// Optimized query returning only content for Type A
 	query := `SELECT content FROM dns_records 
-	          WHERE name = $1 AND type = 'A' AND (network IS NULL OR $2::inet <<= network)`
+	          WHERE LOWER(name) = LOWER($1) AND type = 'A' AND (network IS NULL OR $2::inet <<= network)`
 	
 	rows, err := r.db.QueryContext(ctx, query, name, clientIP)
 	if err != nil {
@@ -82,7 +83,7 @@ func (r *PostgresRepository) GetIPsForName(ctx context.Context, name string, cli
 }
 
 func (r *PostgresRepository) GetZone(ctx context.Context, name string) (*domain.Zone, error) {
-	query := `SELECT id, tenant_id, name, vpc_id, description, created_at, updated_at FROM dns_zones WHERE name = $1`
+	query := `SELECT id, tenant_id, name, vpc_id, description, created_at, updated_at FROM dns_zones WHERE LOWER(name) = LOWER($1)`
 	var z domain.Zone
 	err := r.db.QueryRowContext(ctx, query, name).Scan(&z.ID, &z.TenantID, &z.Name, &z.VPCID, &z.Description, &z.CreatedAt, &z.UpdatedAt)
 	if err == sql.ErrNoRows {
@@ -92,6 +93,30 @@ func (r *PostgresRepository) GetZone(ctx context.Context, name string) (*domain.
 		return nil, err
 	}
 	return &z, nil
+}
+
+func (r *PostgresRepository) ListRecordsForZone(ctx context.Context, zoneID string) ([]domain.Record, error) {
+	query := `SELECT id, zone_id, name, type, content, ttl, priority, network FROM dns_records WHERE zone_id = $1`
+	rows, err := r.db.QueryContext(ctx, query, zoneID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var records []domain.Record
+	for rows.Next() {
+		var rec domain.Record
+		var priority sql.NullInt32
+		if err := rows.Scan(&rec.ID, &rec.ZoneID, &rec.Name, &rec.Type, &rec.Content, &rec.TTL, &priority, &rec.Network); err != nil {
+			return nil, err
+		}
+		if priority.Valid {
+			p := int(priority.Int32)
+			rec.Priority = &p
+		}
+		records = append(records, rec)
+	}
+	return records, nil
 }
 
 func (r *PostgresRepository) CreateZone(ctx context.Context, zone *domain.Zone) error {
@@ -241,6 +266,12 @@ func ConvertDomainToPacketRecord(rec domain.Record) (packet.DnsRecord, error) {
 	case domain.TypeTXT:
 		pRec.Type = packet.TXT
 		pRec.Txt = rec.Content
+	case domain.TypePTR:
+		pRec.Type = packet.PTR
+		pRec.Host = rec.Content
+		if !strings.HasSuffix(pRec.Host, ".") {
+			pRec.Host += "."
+		}
 	case domain.TypeSOA:
 		pRec.Type = packet.SOA
 		// SOA content: "mname rname serial refresh retry expire minimum"

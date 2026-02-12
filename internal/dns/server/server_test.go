@@ -44,6 +44,16 @@ func (m *mockServerRepo) GetZone(ctx context.Context, name string) (*domain.Zone
 	return nil, nil
 }
 
+func (m *mockServerRepo) ListRecordsForZone(ctx context.Context, zoneID string) ([]domain.Record, error) {
+	var res []domain.Record
+	for _, r := range m.records {
+		if r.ZoneID == zoneID {
+			res = append(res, r)
+		}
+	}
+	return res, nil
+}
+
 func (m *mockServerRepo) CreateZone(ctx context.Context, zone *domain.Zone) error {
 	m.zones = append(m.zones, *zone)
 	return nil

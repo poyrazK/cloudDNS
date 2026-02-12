@@ -97,11 +97,6 @@ func TestRFCCompliance_NameCompression(t *testing.T) {
 	})
 
 	// Check if "example.com" appears multiple times as a string or if compression is used.
-	// A simple heuristic: if the total packet size is significantly smaller than the sum of string lengths.
-	// "www.example.com" (15) + "example.com" (11) + "ns1.example.com" (15) = 41 chars
-	// With compression, "example.com" should only be written fully once.
-	
-	// We can inspect the raw buffer for 0xC0 (compression pointer prefix)
 	foundCompression := false
 	for _, b := range capturedResp {
 		if (b & 0xC0) == 0xC0 {
@@ -111,5 +106,127 @@ func TestRFCCompliance_NameCompression(t *testing.T) {
 	}
 	if !foundCompression {
 		t.Errorf("Expected name compression pointers (0xC0) in the response buffer")
+	}
+}
+
+func TestRFCCompliance_CaseInsensitivity(t *testing.T) {
+	repo := &mockServerRepo{
+		zones: []domain.Zone{{ID: "z1", Name: "example.com."}},
+		records: []domain.Record{
+			{Name: "www.example.com.", Type: domain.TypeA, Content: "1.2.3.4", TTL: 300},
+		},
+	}
+	srv := NewServer("127.0.0.1:0", repo, nil)
+
+	req := packet.NewDnsPacket()
+	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "WwW.ExAmPlE.CoM.", QType: packet.A})
+	reqBuf := packet.NewBytePacketBuffer()
+	req.Write(reqBuf)
+
+	var capturedResp []byte
+	srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 53}, func(resp []byte) error {
+		capturedResp = resp
+		return nil
+	})
+
+	resPacket := packet.NewDnsPacket()
+	resBuf := packet.NewBytePacketBuffer()
+	copy(resBuf.Buf, capturedResp)
+	resPacket.FromBuffer(resBuf)
+
+	if len(resPacket.Answers) == 0 {
+		t.Fatalf("Expected answer for mixed-case query, got none")
+	}
+}
+
+func TestRFCCompliance_AXFR(t *testing.T) {
+	repo := &mockServerRepo{
+		zones: []domain.Zone{
+			{ID: "z1", Name: "axfr.test."},
+		},
+		records: []domain.Record{
+			{ID: "r1", ZoneID: "z1", Name: "axfr.test.", Type: domain.TypeSOA, Content: "ns1.axfr.test. admin.axfr.test. 1 3600 600 1209600 300", TTL: 3600},
+			{ID: "r2", ZoneID: "z1", Name: "axfr.test.", Type: domain.TypeNS, Content: "ns1.axfr.test.", TTL: 3600},
+			{ID: "r3", ZoneID: "z1", Name: "www.axfr.test.", Type: domain.TypeA, Content: "1.1.1.1", TTL: 300},
+		},
+	}
+	srv := NewServer("127.0.0.1:0", repo, nil)
+
+	// AXFR requires a TCP connection. We can mock it using net.Pipe.
+	clientConn, serverConn := net.Pipe()
+	defer clientConn.Close()
+	defer serverConn.Close()
+
+	req := packet.NewDnsPacket()
+	req.Header.ID = 0x1234
+	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "axfr.test.", QType: packet.AXFR})
+	
+	// Run AXFR handler in goroutine
+	go srv.handleAXFR(serverConn, req)
+
+	// Read responses from client side
+	// Expected: SOA, NS, A, SOA (Total 4 packets)
+	receivedCount := 0
+	for i := 0; i < 4; i++ {
+		lenBuf := make([]byte, 2)
+		n, _ := clientConn.Read(lenBuf)
+		if n != 2 { break }
+		
+		respLen := uint16(lenBuf[0])<<8 | uint16(lenBuf[1])
+		respData := make([]byte, respLen)
+		clientConn.Read(respData)
+
+		respPacket := packet.NewDnsPacket()
+		pBuf := packet.NewBytePacketBuffer()
+		pBuf.Load(respData)
+		respPacket.FromBuffer(pBuf)
+
+		if len(respPacket.Answers) == 0 {
+			t.Errorf("Expected answer in AXFR packet %d", i)
+			continue
+		}
+		
+		receivedCount++
+		// Verify start and end are SOA
+		if (i == 0 || i == 3) && respPacket.Answers[0].Type != packet.SOA {
+			t.Errorf("Packet %d in AXFR should be SOA", i)
+		}
+	}
+
+	if receivedCount != 4 {
+		t.Errorf("Expected 4 packets in AXFR stream, got %d", receivedCount)
+	}
+}
+
+func TestRFCCompliance_PTR(t *testing.T) {
+	repo := &mockServerRepo{
+		zones: []domain.Zone{{ID: "z1", Name: "0.0.127.in-addr.arpa."}},
+		records: []domain.Record{
+			{Name: "1.0.0.127.in-addr.arpa.", Type: domain.TypePTR, Content: "localhost.", TTL: 3600},
+		},
+	}
+	srv := NewServer("127.0.0.1:0", repo, nil)
+
+	req := packet.NewDnsPacket()
+	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "1.0.0.127.in-addr.arpa.", QType: packet.PTR})
+	reqBuf := packet.NewBytePacketBuffer()
+	req.Write(reqBuf)
+
+	var capturedResp []byte
+	srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 53}, func(resp []byte) error {
+		capturedResp = resp
+		return nil
+	})
+
+	resPacket := packet.NewDnsPacket()
+	resBuf := packet.NewBytePacketBuffer()
+	copy(resBuf.Buf, capturedResp)
+	resPacket.FromBuffer(resBuf)
+
+	if len(resPacket.Answers) == 0 {
+		t.Fatalf("Expected answer for PTR query, got none")
+	}
+	if resPacket.Answers[0].Host != "localhost." {
+		t.Errorf("Expected host localhost., got %s", resPacket.Answers[0].Host)
 	}
 }

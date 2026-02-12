@@ -133,7 +133,6 @@ func (b *BytePacketBuffer) ReadName() (string, error) {
 	maxJumps := 5
 	jumpsPerformed := 0
 
-	delimiter := ""
 	var out strings.Builder
 
 	for {
@@ -152,7 +151,9 @@ func (b *BytePacketBuffer) ReadName() (string, error) {
 			if !jumped {
 				b.Seek(pos)
 			}
-			return out.String(), nil
+			res := out.String()
+			if res == "" { return ".", nil }
+			return res, nil
 		}
 
 		// Compression pointer (11xxxxxx)
@@ -175,8 +176,6 @@ func (b *BytePacketBuffer) ReadName() (string, error) {
 		pos++
 		lenInt := int(lenByte)
 		
-		out.WriteString(delimiter)
-		// Optimization: avoid GetRange allocation by using direct slice
 		if pos+lenInt > MaxPacketSize {
 			return "", errors.New("out of bounds")
 		}
@@ -188,8 +187,7 @@ func (b *BytePacketBuffer) ReadName() (string, error) {
 				out.WriteByte(char)
 			}
 		}
-		
-		delimiter = "."
+		out.WriteByte('.')
 		pos += lenInt
 	}
 }

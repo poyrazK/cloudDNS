@@ -14,6 +14,7 @@ const (
 	TypeTXT   RecordType = "TXT"
 	TypeNS    RecordType = "NS"
 	TypeSOA   RecordType = "SOA"
+	TypePTR   RecordType = "PTR"
 )
 
 type Zone struct {
