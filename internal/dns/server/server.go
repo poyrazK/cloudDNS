@@ -10,9 +10,12 @@ import (
 	"net"
 	"net/http"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/poyrazK/cloudDNS/internal/adapters/repository"
+	"github.com/poyrazK/cloudDNS/internal/core/domain"
 	"github.com/poyrazK/cloudDNS/internal/core/ports"
 	"github.com/poyrazK/cloudDNS/internal/dns/packet"
 )
@@ -193,28 +196,50 @@ func (s *Server) handleTCPConnection(conn net.Conn) {
 
 func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]byte) error) error {
 	start := time.Now()
-	
+
 	var clientIP string
 	switch addr := srcAddr.(type) {
-	case string: clientIP, _, _ = net.SplitHostPort(addr)
-	case net.Addr: clientIP, _, _ = net.SplitHostPort(addr.String())
+	case string:
+		clientIP, _, _ = net.SplitHostPort(addr)
+	case net.Addr:
+		clientIP, _, _ = net.SplitHostPort(addr.String())
 	}
 
-	if !s.limiter.Allow(clientIP) { return nil }
+	if !s.limiter.Allow(clientIP) {
+		return nil
+	}
 
 	reqBuffer := packet.GetBuffer()
 	defer packet.PutBuffer(reqBuffer)
 	reqBuffer.Load(data)
 
 	request := packet.NewDnsPacket()
-	if err := request.FromBuffer(reqBuffer); err != nil { return err }
+	if err := request.FromBuffer(reqBuffer); err != nil {
+		s.Logger.Error("failed to parse packet", "error", err)
+		return err
+	}
 
-	if len(request.Questions) == 0 { return nil }
+	if len(request.Questions) == 0 {
+		response := packet.NewDnsPacket()
+		response.Header.ID = request.Header.ID
+		response.Header.Response = true
+		response.Header.ResCode = 4 // FORMERR
+		resBuffer := packet.GetBuffer()
+		defer packet.PutBuffer(resBuffer)
+		response.Write(resBuffer)
+		return sendFn(resBuffer.Buf[:resBuffer.Position()])
+	}
+
 	q := request.Questions[0]
+	// Standardize name for lookup
+	if !strings.HasSuffix(q.Name, ".") {
+		q.Name += "."
+	}
 	cacheKey := fmt.Sprintf("%s:%d", q.Name, q.QType)
 
 	// L1/L2 Check
 	if cachedData, found := s.Cache.Get(cacheKey); found {
+		// Rewrite Transaction ID
 		if len(cachedData) >= 2 {
 			cachedData[0] = byte(request.Header.ID >> 8)
 			cachedData[1] = byte(request.Header.ID & 0xFF)
@@ -223,6 +248,11 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 	}
 	if s.Redis != nil {
 		if cachedData, found := s.Redis.Get(context.Background(), cacheKey); found {
+			// Rewrite Transaction ID
+			if len(cachedData) >= 2 {
+				cachedData[0] = byte(request.Header.ID >> 8)
+				cachedData[1] = byte(request.Header.ID & 0xFF)
+			}
 			s.Cache.Set(cacheKey, cachedData, 60*time.Second)
 			return sendFn(cachedData)
 		}
@@ -239,34 +269,157 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 	response.Header.AuthoritativeAnswer = true
 	response.Questions = append(response.Questions, q)
 
-	var minTTL uint32 = 300
+	ctx := context.Background()
 	source := "local"
 
-	if q.QType == packet.A {
-		ips, err := s.Repo.GetIPsForName(context.Background(), q.Name, clientIP)
-		if err == nil && len(ips) > 0 {
-			source = "local-fast"
-			for _, ipStr := range ips {
-				response.Answers = append(response.Answers, packet.DnsRecord{Name: q.Name, Type: packet.A, Class: 1, TTL: minTTL, IP: net.ParseIP(ipStr)})
+	// 1. Find the zone for this query to include Authority/Additional records
+	zoneName := q.Name
+	var zone *domain.Zone
+	for {
+		z, _ := s.Repo.GetZone(ctx, zoneName)
+		if z != nil {
+			zone = z
+			break
+		}
+		idx := strings.Index(zoneName, ".")
+		if idx == -1 || idx == len(zoneName)-1 {
+			break
+		}
+		zoneName = zoneName[idx+1:]
+	}
+
+	// 2. Resolve Main Records
+	qTypeStr := queryTypeToRecordType(q.QType)
+	records, err := s.Repo.GetRecords(ctx, q.Name, qTypeStr, clientIP)
+	if err == nil && len(records) > 0 {
+		for _, rec := range records {
+			pRec, err := repository.ConvertDomainToPacketRecord(rec)
+			if err == nil {
+				response.Answers = append(response.Answers, pRec)
+			}
+		}
+	} else if zone != nil {
+		// Try wildcard matching if no direct records found
+		labels := strings.Split(strings.TrimSuffix(q.Name, "."), ".")
+		for i := 0; i < len(labels)-1; i++ {
+			wildcardName := "*." + strings.Join(labels[i+1:], ".") + "."
+			wildcardRecords, err := s.Repo.GetRecords(ctx, wildcardName, qTypeStr, clientIP)
+			if err == nil && len(wildcardRecords) > 0 {
+				source = "wildcard"
+				for _, rec := range wildcardRecords {
+					rec.Name = q.Name // RFC: Rewrite wildcard to query name
+					pRec, err := repository.ConvertDomainToPacketRecord(rec)
+					if err == nil {
+						response.Answers = append(response.Answers, pRec)
+					}
+				}
+				break
+			}
+		}
+	}
+
+	// 3. Handle NXDOMAIN / No Data
+	if len(response.Answers) == 0 {
+		if zone != nil {
+			response.Header.ResCode = 3 // NXDOMAIN
+			// RFC: Include SOA in Authority section for negative caching
+			soaRecords, _ := s.Repo.GetRecords(ctx, zone.Name, domain.TypeSOA, clientIP)
+			for _, rec := range soaRecords {
+				pRec, err := repository.ConvertDomainToPacketRecord(rec)
+				if err == nil {
+					response.Authorities = append(response.Authorities, pRec)
+				}
 			}
 		} else {
-			response.Header.ResCode = 3 // NXDOMAIN
-			minTTL = 60
+			// Not authoritative for this zone
+			response.Header.AuthoritativeAnswer = false
+			response.Header.ResCode = 3
+		}
+	} else if zone != nil {
+		// 4. Populate Authority Section (NS records)
+		nsRecords, _ := s.Repo.GetRecords(ctx, zone.Name, domain.TypeNS, clientIP)
+		for _, rec := range nsRecords {
+			pRec, err := repository.ConvertDomainToPacketRecord(rec)
+			if err == nil {
+				response.Authorities = append(response.Authorities, pRec)
+				
+				// 5. Populate Additional Section (Glue records)
+				glueRecords, _ := s.Repo.GetRecords(ctx, pRec.Host, domain.TypeA, clientIP)
+				for _, gRec := range glueRecords {
+					gpRec, err := repository.ConvertDomainToPacketRecord(gRec)
+					if err == nil {
+						response.Resources = append(response.Resources, gpRec)
+					}
+				}
+			}
+		}
+	}
+
+	// Handle Truncation
+	maxSize := 512
+	for _, res := range request.Resources {
+		if res.Type == packet.OPT {
+			maxSize = int(res.UDPPayloadSize)
+			if maxSize < 512 { maxSize = 512 }
+			break
 		}
 	}
 
 	resBuffer := packet.GetBuffer()
 	defer packet.PutBuffer(resBuffer)
+	resBuffer.HasNames = true // Enable Name Compression
 	response.Write(resBuffer)
+	
+	if resBuffer.Position() > maxSize {
+		response.Header.TruncatedMessage = true
+		response.Answers = nil
+		response.Authorities = nil
+		response.Resources = nil
+		resBuffer.Reset()
+		resBuffer.HasNames = true
+		response.Write(resBuffer)
+	}
+	
 	resData := resBuffer.Buf[:resBuffer.Position()]
 
-	if response.Header.ResCode == 0 || response.Header.ResCode == 3 {
+	// Cache the result
+	var ttl uint32 = 300
+	if len(response.Answers) > 0 {
+		ttl = response.Answers[0].TTL
+	} else if len(response.Authorities) > 0 {
+		ttl = response.Authorities[0].TTL
+	}
+
+	if (response.Header.ResCode == 0 || response.Header.ResCode == 3) && !response.Header.TruncatedMessage {
 		cacheData := make([]byte, len(resData))
 		copy(cacheData, resData)
-		s.Cache.Set(cacheKey, cacheData, time.Duration(minTTL)*time.Second)
-		if s.Redis != nil { s.Redis.Set(context.Background(), cacheKey, cacheData, time.Duration(minTTL)*time.Second) }
+		s.Cache.Set(cacheKey, cacheData, time.Duration(ttl)*time.Second)
+		if s.Redis != nil {
+			s.Redis.Set(ctx, cacheKey, cacheData, time.Duration(ttl)*time.Second)
+		}
 	}
 
 	s.Logger.Info("query processed", "name", q.Name, "src", source, "lat", time.Since(start).Milliseconds())
 	return sendFn(resData)
+}
+
+func queryTypeToRecordType(qType packet.QueryType) domain.RecordType {
+	switch qType {
+	case packet.A:
+		return domain.TypeA
+	case packet.AAAA:
+		return domain.TypeAAAA
+	case packet.CNAME:
+		return domain.TypeCNAME
+	case packet.NS:
+		return domain.TypeNS
+	case packet.MX:
+		return domain.TypeMX
+	case packet.SOA:
+		return domain.TypeSOA
+	case packet.TXT:
+		return domain.TypeTXT
+	default:
+		return ""
+	}
 }

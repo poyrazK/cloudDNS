@@ -22,6 +22,25 @@ func (m *mockRepo) GetRecords(ctx context.Context, name string, qType domain.Rec
 	return res, nil
 }
 
+func (m *mockRepo) GetIPsForName(ctx context.Context, name string, clientIP string) ([]string, error) {
+	var res []string
+	for _, r := range m.records {
+		if r.Name == name && r.Type == domain.TypeA {
+			res = append(res, r.Content)
+		}
+	}
+	return res, nil
+}
+
+func (m *mockRepo) GetZone(ctx context.Context, name string) (*domain.Zone, error) {
+	for _, z := range m.zones {
+		if z.Name == name {
+			return &z, nil
+		}
+	}
+	return nil, nil
+}
+
 func (m *mockRepo) CreateZone(ctx context.Context, zone *domain.Zone) error {
 	m.zones = append(m.zones, *zone)
 	return nil

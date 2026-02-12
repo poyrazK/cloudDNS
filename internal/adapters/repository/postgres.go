@@ -81,6 +81,19 @@ func (r *PostgresRepository) GetIPsForName(ctx context.Context, name string, cli
 	return ips, nil
 }
 
+func (r *PostgresRepository) GetZone(ctx context.Context, name string) (*domain.Zone, error) {
+	query := `SELECT id, tenant_id, name, vpc_id, description, created_at, updated_at FROM dns_zones WHERE name = $1`
+	var z domain.Zone
+	err := r.db.QueryRowContext(ctx, query, name).Scan(&z.ID, &z.TenantID, &z.Name, &z.VPCID, &z.Description, &z.CreatedAt, &z.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &z, nil
+}
+
 func (r *PostgresRepository) CreateZone(ctx context.Context, zone *domain.Zone) error {
 	query := `INSERT INTO dns_zones (id, tenant_id, name, vpc_id, description, created_at, updated_at) 
 			  VALUES ($1, $2, $3, $4, $5, $6, $7)`
@@ -186,9 +199,14 @@ func (r *PostgresRepository) Ping(ctx context.Context) error {
 
 // ConvertDomainToPacketRecord is a helper to bridge domain model and wire format
 func ConvertDomainToPacketRecord(rec domain.Record) (packet.DnsRecord, error) {
+	name := rec.Name
+	if !strings.HasSuffix(name, ".") {
+		name += "."
+	}
+
 	pRec := packet.DnsRecord{
-		Name: rec.Name,
-		TTL:  uint32(rec.TTL),
+		Name:  name,
+		TTL:   uint32(rec.TTL),
 		Class: 1, // IN
 	}
 
@@ -202,20 +220,36 @@ func ConvertDomainToPacketRecord(rec domain.Record) (packet.DnsRecord, error) {
 	case domain.TypeCNAME:
 		pRec.Type = packet.CNAME
 		pRec.Host = rec.Content
+		if !strings.HasSuffix(pRec.Host, ".") {
+			pRec.Host += "."
+		}
 	case domain.TypeNS:
 		pRec.Type = packet.NS
 		pRec.Host = rec.Content
+		if !strings.HasSuffix(pRec.Host, ".") {
+			pRec.Host += "."
+		}
+	case domain.TypeMX:
+		pRec.Type = packet.MX
+		if rec.Priority != nil {
+			pRec.Priority = uint16(*rec.Priority)
+		}
+		pRec.Host = rec.Content
+		if !strings.HasSuffix(pRec.Host, ".") {
+			pRec.Host += "."
+		}
 	case domain.TypeTXT:
 		pRec.Type = packet.TXT
 		pRec.Txt = rec.Content
 	case domain.TypeSOA:
 		pRec.Type = packet.SOA
-		// SOA content is usually stored as a space-separated string in the DB
-		// "ns1.example.com. admin.example.com. 2023101001 3600 600 1209600 3600"
+		// SOA content: "mname rname serial refresh retry expire minimum"
 		parts := strings.Fields(rec.Content)
 		if len(parts) >= 7 {
 			pRec.MName = parts[0]
+			if !strings.HasSuffix(pRec.MName, ".") { pRec.MName += "." }
 			pRec.RName = parts[1]
+			if !strings.HasSuffix(pRec.RName, ".") { pRec.RName += "." }
 			fmt.Sscanf(parts[2], "%d", &pRec.Serial)
 			fmt.Sscanf(parts[3], "%d", &pRec.Refresh)
 			fmt.Sscanf(parts[4], "%d", &pRec.Retry)

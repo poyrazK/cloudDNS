@@ -8,8 +8,10 @@ import (
 
 // BytePacketBuffer simplifies reading and writing the DNS packet buffer
 type BytePacketBuffer struct {
-	Buf []byte
-	Pos int
+	Buf      []byte
+	Pos      int
+	names    map[string]int // For Name Compression
+	HasNames bool           // Enable/Disable name compression tracking
 }
 
 const MaxPacketSize = 65535
@@ -37,19 +39,30 @@ func PutBuffer(b *BytePacketBuffer) {
 
 func (b *BytePacketBuffer) Reset() {
 	b.Pos = 0
-	// No need to clear the whole buffer, as writes overwrite it
+	if b.names == nil {
+		b.names = make(map[string]int)
+	} else {
+		clear(b.names)
+	}
+	b.HasNames = false
 }
 
 func NewBytePacketBuffer() *BytePacketBuffer {
 	return &BytePacketBuffer{
-		Buf: make([]byte, MaxPacketSize),
-		Pos: 0,
+		Buf:   make([]byte, MaxPacketSize),
+		Pos:   0,
+		names: make(map[string]int),
 	}
 }
 
 func (b *BytePacketBuffer) Load(data []byte) {
 	copy(b.Buf, data)
 	b.Pos = 0
+	if b.names == nil {
+		b.names = make(map[string]int)
+	} else {
+		clear(b.names)
+	}
 }
 
 // Position returns the current cursor position
@@ -231,45 +244,47 @@ func (b *BytePacketBuffer) Writeu32(val uint32) error {
 	return nil
 }
 
-// WriteName writes a domain name
+// WriteName writes a domain name with compression support
 func (b *BytePacketBuffer) WriteName(name string) error {
-	// Optimization: manual label splitting to avoid strings.Split allocation
-	start := 0
-	for i := 0; i < len(name); i++ {
-		if name[i] == '.' {
-			label := name[start:i]
-			if len(label) > 63 {
-				return errors.New("label too long")
-			}
-			if len(label) > 0 {
-				if err := b.Write(byte(len(label))); err != nil {
-					return err
-				}
-				for j := 0; j < len(label); j++ {
-					if err := b.Write(label[j]); err != nil {
-						return err
-					}
-				}
-			}
-			start = i + 1
-		}
+	if name == "" || name == "." {
+		return b.Write(0)
 	}
-	
-	// Handle trailing part if any
-	if start < len(name) {
-		label := name[start:]
+
+	// Standardize: ensure name ends with a dot
+	if !strings.HasSuffix(name, ".") {
+		name += "."
+	}
+
+	curr := name
+	for {
+		if curr == "" || curr == "." {
+			return b.Write(0)
+		}
+
+		if b.HasNames {
+			lower := strings.ToLower(curr)
+			if pos, ok := b.names[lower]; ok {
+				return b.Writeu16(uint16(pos) | 0xC000)
+			}
+			if b.Pos < 0x4000 {
+				b.names[lower] = b.Pos
+			}
+		}
+
+		dotIdx := strings.IndexByte(curr, '.')
+		if dotIdx == -1 { break }
+
+		label := curr[:dotIdx]
 		if len(label) > 63 {
 			return errors.New("label too long")
 		}
-		if err := b.Write(byte(len(label))); err != nil {
-			return err
-		}
-		for j := 0; j < len(label); j++ {
-			if err := b.Write(label[j]); err != nil {
-				return err
+		if len(label) > 0 {
+			if err := b.Write(byte(len(label))); err != nil { return err }
+			for i := 0; i < len(label); i++ {
+				if err := b.Write(label[i]); err != nil { return err }
 			}
 		}
+		curr = curr[dotIdx+1:]
 	}
-
-	return b.Write(0)
+	return nil
 }

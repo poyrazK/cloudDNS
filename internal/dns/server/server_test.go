@@ -25,6 +25,25 @@ func (m *mockServerRepo) GetRecords(ctx context.Context, name string, qType doma
 	return res, nil
 }
 
+func (m *mockServerRepo) GetIPsForName(ctx context.Context, name string, clientIP string) ([]string, error) {
+	var res []string
+	for _, r := range m.records {
+		if r.Name == name && r.Type == domain.TypeA {
+			res = append(res, r.Content)
+		}
+	}
+	return res, nil
+}
+
+func (m *mockServerRepo) GetZone(ctx context.Context, name string) (*domain.Zone, error) {
+	for _, z := range m.zones {
+		if z.Name == name {
+			return &z, nil
+		}
+	}
+	return nil, nil
+}
+
 func (m *mockServerRepo) CreateZone(ctx context.Context, zone *domain.Zone) error {
 	m.zones = append(m.zones, *zone)
 	return nil
@@ -70,14 +89,14 @@ func (m *mockServerRepo) Ping(ctx context.Context) error { return nil }
 func TestHandlePacketLocalHit(t *testing.T) {
 	repo := &mockServerRepo{
 		records: []domain.Record{
-			{Name: "local.test", Type: domain.TypeA, Content: "1.1.1.1", TTL: 60},
+			{Name: "local.test.", Type: domain.TypeA, Content: "1.1.1.1", TTL: 60},
 		},
 	}
 	srv := NewServer("127.0.0.1:0", repo, nil)
 
 	req := packet.NewDnsPacket()
 	req.Header.ID = 123
-	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "local.test", QType: packet.A})
+	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "local.test.", QType: packet.A})
 	
 	buffer := packet.NewBytePacketBuffer()
 	req.Write(buffer)
@@ -99,7 +118,7 @@ func TestHandlePacketLocalHit(t *testing.T) {
 	resp.FromBuffer(resBuf)
 
 	if len(resp.Answers) != 1 {
-		t.Errorf("Expected 1 answer, got %d", len(resp.Answers))
+		t.Fatalf("Expected 1 answer, got %d", len(resp.Answers))
 	}
 	if resp.Answers[0].IP.String() != "1.1.1.1" {
 		t.Errorf("Expected 1.1.1.1, got %s", resp.Answers[0].IP.String())
@@ -111,11 +130,12 @@ func TestHandlePacketCacheHit(t *testing.T) {
 	srv := NewServer("127.0.0.1:0", repo, nil)
 	
 	// Pre-populate cache
-	cacheKey := "cached.test:1" // A record
+	cacheKey := "cached.test.:1" // A record
 	cachedPacket := packet.NewDnsPacket()
 	cachedPacket.Header.Response = true
+	cachedPacket.Questions = append(cachedPacket.Questions, packet.DnsQuestion{Name: "cached.test.", QType: packet.A})
 	cachedPacket.Answers = append(cachedPacket.Answers, packet.DnsRecord{
-		Name: "cached.test", Type: packet.A, IP: net.ParseIP("2.2.2.2"), TTL: 60,
+		Name: "cached.test.", Type: packet.A, IP: net.ParseIP("2.2.2.2"), TTL: 60, Class: 1,
 	})
 	buf := packet.NewBytePacketBuffer()
 	cachedPacket.Write(buf)
@@ -124,7 +144,7 @@ func TestHandlePacketCacheHit(t *testing.T) {
 	// Query
 	req := packet.NewDnsPacket()
 	req.Header.ID = 999
-	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "cached.test", QType: packet.A})
+	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "cached.test.", QType: packet.A})
 	reqBuf := packet.NewBytePacketBuffer()
 	req.Write(reqBuf)
 
@@ -158,7 +178,7 @@ func (d *dummyPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 func TestWorkerPoolProcessing(t *testing.T) {
 	repo := &mockServerRepo{
 		records: []domain.Record{
-			{Name: "worker.test", Type: domain.TypeA, Content: "3.3.3.3", TTL: 60},
+			{Name: "worker.test.", Type: domain.TypeA, Content: "3.3.3.3", TTL: 60},
 		},
 	}
 	srv := NewServer("127.0.0.1:0", repo, nil)
@@ -168,7 +188,7 @@ func TestWorkerPoolProcessing(t *testing.T) {
 	go srv.udpWorker()
 
 	req := packet.NewDnsPacket()
-	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "worker.test", QType: packet.A})
+	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "worker.test.", QType: packet.A})
 	reqBuf := packet.NewBytePacketBuffer()
 	req.Write(reqBuf)
 
@@ -195,7 +215,7 @@ func TestHandlePacketNXDOMAIN(t *testing.T) {
 	srv := NewServer("127.0.0.1:0", repo, nil)
 
 	req := packet.NewDnsPacket()
-	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "missing.test", QType: packet.A})
+	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "missing.test.", QType: packet.A})
 	reqBuf := packet.NewBytePacketBuffer()
 	req.Write(reqBuf)
 
@@ -244,7 +264,7 @@ func TestHandlePacketEDNS(t *testing.T) {
 	srv := NewServer("127.0.0.1:0", repo, nil)
 
 	req := packet.NewDnsPacket()
-	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "test.com", QType: packet.A})
+	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "test.com.", QType: packet.A})
 	// Add OPT record
 	req.Resources = append(req.Resources, packet.DnsRecord{
 		Type:           packet.OPT,
@@ -270,7 +290,7 @@ func TestHandlePacketTruncation(t *testing.T) {
 	// Inject many answers into mock repo
 	for i := 0; i < 50; i++ {
 		repo.records = append(repo.records, domain.Record{
-			Name:    "big.test",
+			Name:    "big.test.",
 			Type:    domain.TypeA,
 			Content: "1.2.3.4",
 			TTL:     300,
@@ -278,7 +298,7 @@ func TestHandlePacketTruncation(t *testing.T) {
 	}
 
 	req := packet.NewDnsPacket()
-	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "big.test", QType: packet.A})
+	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "big.test.", QType: packet.A})
 	// No OPT -> limit 512
 	reqBuf := packet.NewBytePacketBuffer()
 	req.Write(reqBuf)

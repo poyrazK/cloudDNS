@@ -40,7 +40,7 @@ func TestEndToEndDNS(t *testing.T) {
 
 	// 4. Create a Zone via API
 	zoneReq := domain.Zone{
-		Name:     "e2e.test",
+		Name:     "e2e.test.",
 		TenantID: "admin",
 	}
 	body, _ := json.Marshal(zoneReq)
@@ -53,7 +53,7 @@ func TestEndToEndDNS(t *testing.T) {
 
 	// 5. Create a Record via API
 	recordReq := domain.Record{
-		Name:    "www.e2e.test",
+		Name:    "www.e2e.test.",
 		Type:    domain.TypeA,
 		Content: "9.9.9.9",
 		TTL:     300,
@@ -70,7 +70,7 @@ func TestEndToEndDNS(t *testing.T) {
 	query := packet.NewDnsPacket()
 	query.Header.ID = 0xbeef
 	query.Questions = append(query.Questions, packet.DnsQuestion{
-		Name: "www.e2e.test", QType: packet.A,
+		Name: "www.e2e.test.", QType: packet.A,
 	})
 	qBuf := packet.NewBytePacketBuffer()
 	query.Write(qBuf)
