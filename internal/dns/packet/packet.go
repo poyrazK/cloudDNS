@@ -1,6 +1,7 @@
 package packet
 
 import (
+	"fmt"
 	"net"
 )
 
@@ -10,10 +11,18 @@ const (
 	UNKNOWN QueryType = 0
 	A       QueryType = 1
 	NS      QueryType = 2
+	MD      QueryType = 3
+	MF      QueryType = 4
 	CNAME   QueryType = 5
 	SOA     QueryType = 6
+	MB      QueryType = 7
+	MG      QueryType = 8
+	MR      QueryType = 9
+	NULL    QueryType = 10
+	WKS     QueryType = 11
 	PTR     QueryType = 12
 	HINFO   QueryType = 13
+	MINFO   QueryType = 14
 	MX      QueryType = 15
 	TXT     QueryType = 16
 	AAAA    QueryType = 28
@@ -151,24 +160,30 @@ type DnsRecord struct {
 	Class    uint16
 	TTL      uint32
 	Data     []byte
-	IP       net.IP   // Helper for A/AAAA
-	Host     string   // Helper for CNAME/NS/MX
-	Priority uint16   // Helper for MX
-	Txt      string   // Helper for TXT
-	MName    string   // SOA primary name server
-	RName    string   // SOA mailbox for responsible person
-	Serial   uint32   // SOA serial number
-	Refresh  uint32   // SOA refresh interval
-	Retry    uint32   // SOA retry interval
-	Expire   uint32   // SOA expire limit
-	Minimum  uint32   // SOA minimum TTL
-	// EDNS fields
+	IP       net.IP   // A/AAAA
+	Host     string   // NS/CNAME/PTR/MD/MF/MB/MG/MR
+	Priority uint16   // MX
+	Txt      string   // TXT
+	MName    string   // SOA
+	RName    string   // SOA
+	Serial   uint32   // SOA
+	Refresh  uint32   // SOA
+	Retry    uint32   // SOA
+	Expire   uint32   // SOA
+	Minimum  uint32   // SOA
+	CPU      string   // HINFO
+	OS       string   // HINFO
+	Protocol uint8    // WKS
+	BitMap   []byte   // WKS
+	RMailBX  string   // MINFO
+	EMailBX  string   // MINFO
+	// EDNS
 	UDPPayloadSize uint16
 	ExtendedRcode  uint8
 	EDNSVersion    uint8
 	Z              uint16
 	Options        []EdnsOption
-	// TSIG fields
+	// TSIG
 	Algorithm  string
 	TimeSigned uint64
 	Fudge      uint16
@@ -207,7 +222,7 @@ func (r *DnsRecord) Read(buffer *BytePacketBuffer) error {
 		if err != nil { return err }
 		r.IP = net.IP(rawIP)
 		buffer.Step(16)
-	case NS, CNAME, PTR:
+	case NS, CNAME, PTR, MD, MF, MB, MG, MR:
 		r.Host, err = buffer.ReadName()
 		if err != nil { return err }
 	case MX:
@@ -229,12 +244,23 @@ func (r *DnsRecord) Read(buffer *BytePacketBuffer) error {
 		r.Retry, _ = buffer.Readu32()
 		r.Expire, _ = buffer.Readu32()
 		r.Minimum, _ = buffer.Readu32()
+	case HINFO:
+		cpuLen, _ := buffer.Read()
+		cpu, _ := buffer.ReadRange(buffer.Position(), int(cpuLen))
+		r.CPU = string(cpu)
+		buffer.Step(int(cpuLen))
+		osLen, _ := buffer.Read()
+		osData, _ := buffer.ReadRange(buffer.Position(), int(osLen))
+		r.OS = string(osData)
+		buffer.Step(int(osLen))
+	case MINFO:
+		r.RMailBX, _ = buffer.ReadName()
+		r.EMailBX, _ = buffer.ReadName()
 	case OPT:
 		r.UDPPayloadSize = r.Class
 		r.ExtendedRcode = uint8(r.TTL >> 24)
 		r.EDNSVersion = uint8((r.TTL >> 16) & 0xFF)
 		r.Z = uint16(r.TTL & 0xFFFF)
-		
 		remaining := int(dataLen)
 		for remaining >= 4 {
 			optCode, _ := buffer.Readu16()
@@ -310,7 +336,7 @@ func (r *DnsRecord) Write(buffer *BytePacketBuffer) (int, error) {
 	case AAAA:
 		buffer.Writeu16(16)
 		for _, b := range r.IP.To16() { buffer.Write(b) }
-	case CNAME, NS, PTR:
+	case NS, CNAME, PTR, MD, MF, MB, MG, MR:
 		lenPos := buffer.Position()
 		buffer.Writeu16(0)
 		buffer.WriteName(r.Host)
@@ -345,6 +371,24 @@ func (r *DnsRecord) Write(buffer *BytePacketBuffer) (int, error) {
 		buffer.Seek(lenPos)
 		buffer.Writeu16(uint16(currPos - (lenPos + 2)))
 		buffer.Seek(currPos)
+	case HINFO:
+		buffer.Writeu16(uint16(len(r.CPU) + len(r.OS) + 2))
+		buffer.Write(byte(len(r.CPU)))
+		for i := 0; i < len(r.CPU); i++ { buffer.Write(r.CPU[i]) }
+		buffer.Write(byte(len(r.OS)))
+		for i := 0; i < len(r.OS); i++ { buffer.Write(r.OS[i]) }
+	case MINFO:
+		lenPos := buffer.Position()
+		buffer.Writeu16(0)
+		buffer.WriteName(r.RMailBX)
+		buffer.WriteName(r.EMailBX)
+		currPos := buffer.Position()
+		buffer.Seek(lenPos)
+		buffer.Writeu16(uint16(currPos - (lenPos + 2)))
+		buffer.Seek(currPos)
+	default:
+		buffer.Writeu16(uint16(len(r.Data)))
+		for _, b := range r.Data { buffer.Write(b) }
 	}
 
 	return buffer.Position() - startPos, nil

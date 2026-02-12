@@ -3,12 +3,14 @@ package services
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
 	"github.com/poyrazK/cloudDNS/internal/core/ports"
+	"github.com/poyrazK/cloudDNS/internal/dns/master"
 )
 
 type dnsService struct {
@@ -146,6 +148,35 @@ func (s *dnsService) DeleteRecord(ctx context.Context, recordID string, zoneID s
 	}
 	s.audit(ctx, "unknown", "DELETE_RECORD", "RECORD", recordID, "Deleted record")
 	return nil
+}
+
+func (s *dnsService) ImportZone(ctx context.Context, tenantID string, r io.Reader) (*domain.Zone, error) {
+	parser := master.NewMasterParser()
+	data, err := parser.Parse(r)
+	if err != nil {
+		return nil, err
+	}
+
+	zone := &data.Zone
+	zone.ID = uuid.New().String()
+	zone.TenantID = tenantID
+	zone.CreatedAt = time.Now()
+	zone.UpdatedAt = time.Now()
+
+	// Prepare records
+	for i := range data.Records {
+		data.Records[i].ID = uuid.New().String()
+		data.Records[i].ZoneID = zone.ID
+		data.Records[i].CreatedAt = zone.CreatedAt
+		data.Records[i].UpdatedAt = zone.UpdatedAt
+	}
+
+	if err := s.repo.CreateZoneWithRecords(ctx, zone, data.Records); err != nil {
+		return nil, err
+	}
+
+	s.audit(ctx, tenantID, "IMPORT_ZONE", "ZONE", zone.ID, fmt.Sprintf("Imported zone %s with %d records", zone.Name, len(data.Records)))
+	return zone, nil
 }
 
 func (s *dnsService) HealthCheck(ctx context.Context) error {
