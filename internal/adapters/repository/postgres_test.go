@@ -10,6 +10,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
+	"github.com/poyrazK/cloudDNS/internal/dns/packet"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -18,7 +19,6 @@ import (
 func setupTestDB(t *testing.T) (*sql.DB, func()) {
 	ctx := context.Background()
 
-	// Start Postgres Container
 	pgContainer, err := postgres.Run(ctx,
 		"postgres:16-alpine",
 		postgres.WithDatabase("clouddns_test"),
@@ -42,7 +42,6 @@ func setupTestDB(t *testing.T) (*sql.DB, func()) {
 		t.Fatalf("failed to open db: %s", err)
 	}
 
-	// Load Schema
 	schemaPath := filepath.Join(".", "schema.sql")
 	schema, err := os.ReadFile(schemaPath)
 	if err != nil {
@@ -93,10 +92,10 @@ func TestPostgresRepository_Integration(t *testing.T) {
 		t.Fatalf("CreateZoneWithRecords failed: %v", err)
 	}
 
-	// 2. Test GetRecords (Global)
-	found, err := repo.GetRecords(ctx, "example.com.", domain.TypeA, "8.8.8.8")
+	// 2. Test Case-Insensitive Lookup (RFC 1034)
+	found, err := repo.GetRecords(ctx, "ExAmPlE.CoM.", domain.TypeA, "8.8.8.8")
 	if err != nil || len(found) != 1 {
-		t.Errorf("Expected 1 global record, got %d", len(found))
+		t.Errorf("Expected 1 record via mixed-case lookup, got %d", len(found))
 	}
 
 	// 3. Test Split-Horizon (Network specific)
@@ -111,26 +110,29 @@ func TestPostgresRepository_Integration(t *testing.T) {
 		Network: &internalNet,
 	})
 
-	// Query from public IP -> should get only global (1.2.3.4)
 	publicRes, _ := repo.GetRecords(ctx, "example.com.", domain.TypeA, "8.8.8.8")
 	if len(publicRes) != 1 || publicRes[0].Content != "1.2.3.4" {
 		t.Errorf("Public client got wrong records: %v", publicRes)
 	}
 
-	// Query from internal IP -> should get both global AND internal (if logic allows) 
-	// or prioritized. Our current SQL matches both if network is NULL or matches.
 	internalRes, _ := repo.GetRecords(ctx, "example.com.", domain.TypeA, "10.5.5.5")
 	if len(internalRes) != 2 {
 		t.Errorf("Internal client expected 2 records, got %d", len(internalRes))
 	}
 
-	// 4. Test ListZones
+	// 4. Test ListRecordsForZone (AXFR)
+	allRecords, err := repo.ListRecordsForZone(ctx, zoneID)
+	if err != nil || len(allRecords) < 1 {
+		t.Errorf("ListRecordsForZone failed: %v", err)
+	}
+
+	// 5. Test ListZones
 	zones, err := repo.ListZones(ctx, "tenant-1")
 	if err != nil || len(zones) != 1 {
 		t.Errorf("ListZones failed: %v, count: %d", err, len(zones))
 	}
 
-	// 5. Test Audit Logs
+	// 6. Test Audit Logs
 	audit := &domain.AuditLog{
 		ID:           "550e8400-e29b-41d4-a716-446655440003",
 		TenantID:     "tenant-1",
@@ -150,15 +152,54 @@ func TestPostgresRepository_Integration(t *testing.T) {
 		t.Errorf("GetAuditLogs failed: %v, count: %d", err, len(logs))
 	}
 
-	// 6. Test Delete
+	// 7. Test Delete
 	err = repo.DeleteZone(ctx, zoneID, "tenant-1")
 	if err != nil {
 		t.Errorf("DeleteZone failed: %v", err)
 	}
 
-	// Verify cascade delete of records
 	leftover, _ := repo.GetRecords(ctx, "example.com.", domain.TypeA, "8.8.8.8")
 	if len(leftover) != 0 {
 		t.Errorf("Records were not deleted after zone deletion")
+	}
+}
+
+func TestConvertDomainToPacketRecord(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   domain.Record
+		want    packet.QueryType
+		content string
+	}{
+		{
+			name: "A record",
+			input: domain.Record{Name: "test.com", Type: domain.TypeA, Content: "1.2.3.4"},
+			want: packet.A,
+		},
+		{
+			name: "PTR record",
+			input: domain.Record{Name: "1.0.0.127.in-addr.arpa", Type: domain.TypePTR, Content: "localhost"},
+			want: packet.PTR,
+		},
+		{
+			name: "SOA record",
+			input: domain.Record{Name: "example.com", Type: domain.TypeSOA, Content: "ns1.example.com admin.example.com 1 2 3 4 5"},
+			want: packet.SOA,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ConvertDomainToPacketRecord(tt.input)
+			if err != nil {
+				t.Fatalf("ConvertDomainToPacketRecord() error = %v", err)
+			}
+			if got.Type != tt.want {
+				t.Errorf("Got type %v, want %v", got.Type, tt.want)
+			}
+			if got.Name != tt.input.Name+"." {
+				t.Errorf("Got name %s, want %s", got.Name, tt.input.Name+".")
+			}
+		})
 	}
 }

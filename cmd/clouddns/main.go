@@ -2,8 +2,6 @@ package main
 
 import (
 	"database/sql"
-	"fmt"
-	"log"
 	"log/slog"
 	"net/http"
 	"os"

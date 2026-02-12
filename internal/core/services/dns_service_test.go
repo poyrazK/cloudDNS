@@ -41,6 +41,16 @@ func (m *mockRepo) GetZone(ctx context.Context, name string) (*domain.Zone, erro
 	return nil, nil
 }
 
+func (m *mockRepo) ListRecordsForZone(ctx context.Context, zoneID string) ([]domain.Record, error) {
+	var res []domain.Record
+	for _, r := range m.records {
+		if r.ZoneID == zoneID {
+			res = append(res, r)
+		}
+	}
+	return res, nil
+}
+
 func (m *mockRepo) CreateZone(ctx context.Context, zone *domain.Zone) error {
 	m.zones = append(m.zones, *zone)
 	return nil
@@ -74,7 +84,7 @@ func TestCreateZone(t *testing.T) {
 	repo := &mockRepo{}
 	svc := NewDNSService(repo)
 
-	zone := &domain.Zone{Name: "example.com", TenantID: "t1"}
+	zone := &domain.Zone{Name: "example.com.", TenantID: "t1"}
 	err := svc.CreateZone(context.Background(), zone)
 
 	if err != nil {

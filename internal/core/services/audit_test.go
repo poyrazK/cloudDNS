@@ -13,6 +13,22 @@ type auditMockRepo struct {
 	logs []domain.AuditLog
 }
 
+func (m *auditMockRepo) GetRecords(ctx context.Context, name string, qType domain.RecordType, clientIP string) ([]domain.Record, error) {
+	return m.mockRepo.GetRecords(ctx, name, qType, clientIP)
+}
+
+func (m *auditMockRepo) GetIPsForName(ctx context.Context, name string, clientIP string) ([]string, error) {
+	return m.mockRepo.GetIPsForName(ctx, name, clientIP)
+}
+
+func (m *auditMockRepo) GetZone(ctx context.Context, name string) (*domain.Zone, error) {
+	return m.mockRepo.GetZone(ctx, name)
+}
+
+func (m *auditMockRepo) ListRecordsForZone(ctx context.Context, zoneID string) ([]domain.Record, error) {
+	return m.mockRepo.ListRecordsForZone(ctx, zoneID)
+}
+
 func (m *auditMockRepo) SaveAuditLog(ctx context.Context, log *domain.AuditLog) error {
 	m.logs = append(m.logs, *log)
 	return nil
@@ -23,7 +39,7 @@ func TestAuditLogCreation(t *testing.T) {
 	svc := NewDNSService(repo)
 
 	// 1. Create Zone
-	zone := &domain.Zone{Name: "audit.test", TenantID: "t1"}
+	zone := &domain.Zone{Name: "audit.test.", TenantID: "t1"}
 	err := svc.CreateZone(context.Background(), zone)
 	if err != nil {
 		t.Fatalf("CreateZone failed: %v", err)
@@ -41,7 +57,7 @@ func TestAuditLogCreation(t *testing.T) {
 	}
 
 	// 2. Create Record
-	record := &domain.Record{Name: "www.audit.test", Type: domain.TypeA, Content: "1.2.3.4", TTL: 300}
+	record := &domain.Record{Name: "www.audit.test.", Type: domain.TypeA, Content: "1.2.3.4", TTL: 300}
 	err = svc.CreateRecord(context.Background(), record)
 	if err != nil {
 		t.Fatalf("CreateRecord failed: %v", err)
