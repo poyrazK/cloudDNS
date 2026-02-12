@@ -3,6 +3,7 @@ package master
 import (
 	"bufio"
 	"io"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -37,17 +38,14 @@ func (p *MasterParser) Parse(r io.Reader) (*ZoneData, error) {
 	for scanner.Scan() {
 		line := scanner.Text()
 		
-		// 1. Strip comments before anything else
 		if idx := strings.IndexByte(line, ';'); idx >= 0 {
 			line = line[:idx]
 		}
 
-		// 2. Handle Multi-line state
 		if !inParen {
 			trimmed := strings.TrimSpace(line)
 			if trimmed == "" { continue }
 			
-			// Detect leading WS for the START of a record
 			firstLineLeadingWS = len(line) > 0 && (line[0] == ' ' || line[0] == '\t')
 			
 			if strings.Contains(line, "(") {
@@ -56,14 +54,12 @@ func (p *MasterParser) Parse(r io.Reader) (*ZoneData, error) {
 				if !strings.Contains(line, ")") {
 					continue
 				}
-				// Falls through if () on same line
 			}
 		} else {
 			parenLines = append(parenLines, line)
 			if !strings.Contains(line, ")") {
 				continue
 			}
-			// End of multi-line
 			inParen = false
 		}
 
@@ -79,7 +75,6 @@ func (p *MasterParser) Parse(r io.Reader) (*ZoneData, error) {
 		trimmedFull := strings.TrimSpace(fullLine)
 		if trimmedFull == "" { continue }
 
-		// 3. Directives
 		if strings.HasPrefix(trimmedFull, "$") {
 			parts := strings.Fields(trimmedFull)
 			if len(parts) < 2 { continue }
@@ -98,7 +93,6 @@ func (p *MasterParser) Parse(r io.Reader) (*ZoneData, error) {
 		fields := strings.Fields(trimmedFull)
 		if len(fields) == 0 { continue }
 
-		// 4. Determine Name
 		var name string
 		if firstLineLeadingWS {
 			name = lastName
@@ -113,7 +107,6 @@ func (p *MasterParser) Parse(r io.Reader) (*ZoneData, error) {
 			lastName = name
 		}
 
-		// 5. Parse RR Fields
 		var ttl int = p.DefaultTTL
 		var qType domain.RecordType
 		var dataParts []string
@@ -144,4 +137,34 @@ func (p *MasterParser) Parse(r io.Reader) (*ZoneData, error) {
 	}
 
 	return data, scanner.Err()
+}
+
+// RFC 4034 Section 6.1: Canonical DNS Name Order
+func CompareNamesCanonically(a, b string) int {
+	aLabels := strings.Split(strings.TrimSuffix(strings.ToLower(a), "."), ".")
+	bLabels := strings.Split(strings.TrimSuffix(strings.ToLower(b), "."), ".")
+
+	i := len(aLabels) - 1
+	j := len(bLabels) - 1
+
+	for i >= 0 && j >= 0 {
+		if aLabels[i] < bLabels[j] { return -1 }
+		if aLabels[i] > bLabels[j] { return 1 }
+		i--
+		j--
+	}
+
+	if len(aLabels) < len(bLabels) { return -1 }
+	if len(aLabels) > len(bLabels) { return 1 }
+	return 0
+}
+
+func SortRecordsCanonically(records []domain.Record) {
+	sort.Slice(records, func(i, j int) bool {
+		cmp := CompareNamesCanonically(records[i].Name, records[j].Name)
+		if cmp == 0 {
+			return records[i].Type < records[j].Type
+		}
+		return cmp < 0
+	})
 }

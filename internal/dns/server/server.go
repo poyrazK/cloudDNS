@@ -17,6 +17,7 @@ import (
 	"github.com/poyrazK/cloudDNS/internal/adapters/repository"
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
 	"github.com/poyrazK/cloudDNS/internal/core/ports"
+	"github.com/poyrazK/cloudDNS/internal/dns/master"
 	"github.com/poyrazK/cloudDNS/internal/dns/packet"
 )
 
@@ -472,6 +473,13 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 					response.Authorities = append(response.Authorities, pRec)
 				}
 			}
+			// DNSSEC: If DO bit is set, include NSEC record
+			if dnssecOK {
+				nsec, err := s.generateNSEC(ctx, zone, q.Name)
+				if err == nil {
+					response.Authorities = append(response.Authorities, nsec)
+				}
+			}
 		} else {
 			// Not authoritative for this zone
 			response.Header.AuthoritativeAnswer = false
@@ -542,6 +550,74 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 
 	s.Logger.Info("query processed", "name", q.Name, "src", source, "lat", time.Since(start).Milliseconds())
 	return sendFn(resData)
+}
+
+func (s *Server) generateNSEC(ctx context.Context, zone *domain.Zone, queryName string) (packet.DnsRecord, error) {
+	records, err := s.Repo.ListRecordsForZone(ctx, zone.ID)
+	if err != nil { return packet.DnsRecord{}, err }
+
+	master.SortRecordsCanonically(records)
+
+	// Remove duplicate names (keep only one per unique name for NSEC)
+	var uniqueNames []string
+	seen := make(map[string]bool)
+	for _, r := range records {
+		if !seen[r.Name] {
+			uniqueNames = append(uniqueNames, r.Name)
+			seen[r.Name] = true
+		}
+	}
+
+	// Find the record that "covers" the queryName
+	// NSEC Name: owner name of record in zone
+	// Next Name: next owner name in canonical order
+	var ownerName, nextName string
+	found := false
+	for i := 0; i < len(uniqueNames); i++ {
+		cmp := master.CompareNamesCanonically(queryName, uniqueNames[i])
+		if cmp < 0 {
+			// queryName is before uniqueNames[i]
+			// The interval is [uniqueNames[i-1], uniqueNames[i]]
+			if i == 0 {
+				ownerName = uniqueNames[len(uniqueNames)-1]
+				nextName = uniqueNames[0]
+			} else {
+				ownerName = uniqueNames[i-1]
+				nextName = uniqueNames[i]
+			}
+			found = true
+			break
+		}
+		if cmp == 0 {
+			// Exact match (NODATA case)
+			ownerName = uniqueNames[i]
+			if i == len(uniqueNames)-1 {
+				nextName = uniqueNames[0]
+			} else {
+				nextName = uniqueNames[i+1]
+			}
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		// Wraps around to the start
+		ownerName = uniqueNames[len(uniqueNames)-1]
+		nextName = uniqueNames[0]
+	}
+
+	nsec := packet.DnsRecord{
+		Name:     ownerName,
+		Type:     packet.NSEC,
+		Class:    1,
+		TTL:      300,
+		NextName: nextName,
+		// Simplified bitmap: just signal A, NS, SOA, NSEC
+		TypeBitMap: []byte{0x00, 0x06, 0x40, 0x01, 0x00, 0x00, 0x00, 0x03}, 
+	}
+
+	return nsec, nil
 }
 
 func queryTypeToRecordType(qType packet.QueryType) domain.RecordType {

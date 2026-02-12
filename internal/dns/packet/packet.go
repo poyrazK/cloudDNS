@@ -26,6 +26,10 @@ const (
 	TXT     QueryType = 16
 	AAAA    QueryType = 28
 	SRV     QueryType = 33
+	DS      QueryType = 43
+	RRSIG   QueryType = 46
+	NSEC    QueryType = 47
+	DNSKEY  QueryType = 48
 	AXFR    QueryType = 252
 	ANY     QueryType = 255
 	OPT     QueryType = 41
@@ -176,6 +180,9 @@ type DnsRecord struct {
 	BitMap   []byte   // WKS
 	RMailBX  string   // MINFO
 	EMailBX  string   // MINFO
+	// NSEC
+	NextName   string
+	TypeBitMap []byte
 	// EDNS
 	UDPPayloadSize uint16
 	ExtendedRcode  uint8
@@ -255,6 +262,12 @@ func (r *DnsRecord) Read(buffer *BytePacketBuffer) error {
 	case MINFO:
 		r.RMailBX, _ = buffer.ReadName()
 		r.EMailBX, _ = buffer.ReadName()
+	case NSEC:
+		r.NextName, _ = buffer.ReadName()
+		remaining := int(dataLen) - (buffer.Position() - (buffer.Position() - 0 /* inaccurate without tracking start of RDATA */))
+		// Note: Simplified NSEC bitmap reading for now
+		r.TypeBitMap, _ = buffer.ReadRange(buffer.Position(), remaining)
+		buffer.Step(remaining)
 	case OPT:
 		r.UDPPayloadSize = r.Class
 		r.ExtendedRcode = uint8(r.TTL >> 24)
@@ -381,6 +394,15 @@ func (r *DnsRecord) Write(buffer *BytePacketBuffer) (int, error) {
 		buffer.Writeu16(0)
 		buffer.WriteName(r.RMailBX)
 		buffer.WriteName(r.EMailBX)
+		currPos := buffer.Position()
+		buffer.Seek(lenPos)
+		buffer.Writeu16(uint16(currPos - (lenPos + 2)))
+		buffer.Seek(currPos)
+	case NSEC:
+		lenPos := buffer.Position()
+		buffer.Writeu16(0)
+		buffer.WriteName(r.NextName)
+		for _, b := range r.TypeBitMap { buffer.Write(b) }
 		currPos := buffer.Position()
 		buffer.Seek(lenPos)
 		buffer.Writeu16(uint16(currPos - (lenPos + 2)))
