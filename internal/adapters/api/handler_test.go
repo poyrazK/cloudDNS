@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -53,6 +54,13 @@ func (m *mockDNSService) DeleteZone(ctx context.Context, id, tenantID string) er
 
 func (m *mockDNSService) DeleteRecord(ctx context.Context, id, zoneID string) error {
 	return m.err
+}
+
+func (m *mockDNSService) ImportZone(ctx context.Context, tenantID string, r io.Reader) (*domain.Zone, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return &domain.Zone{ID: "zone-imported", TenantID: tenantID}, nil
 }
 
 func (m *mockDNSService) HealthCheck(ctx context.Context) error {

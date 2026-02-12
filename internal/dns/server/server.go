@@ -376,11 +376,40 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 		time.Sleep(time.Duration(float64(s.SimulateDBLatency) * (0.5 + rand.Float64())))
 	}
 
+	// EDNS(0) Support (RFC 6891)
+	maxSize := 512
+	dnssecOK := false
+	var clientOPT *packet.DnsRecord
+	for _, res := range request.Resources {
+		if res.Type == packet.OPT {
+			clientOPT = &res
+			maxSize = int(res.UDPPayloadSize)
+			if maxSize < 512 { maxSize = 512 }
+			// DO bit is the first bit of the Z field (TTL bits 15-0)
+			dnssecOK = (res.Z & 0x8000) != 0
+			break
+		}
+	}
+
 	response := packet.NewDnsPacket()
 	response.Header.ID = request.Header.ID
 	response.Header.Response = true
 	response.Header.AuthoritativeAnswer = true
 	response.Questions = append(response.Questions, q)
+
+	// If query had EDNS, response MUST have EDNS
+	if clientOPT != nil {
+		opt := packet.DnsRecord{
+			Name:           ".",
+			Type:           packet.OPT,
+			UDPPayloadSize: 4096, // Our server's supported buffer size
+			TTL:            0,    // Extended RCODE and Version
+		}
+		if dnssecOK {
+			opt.Z = 0x8000 // Set DO bit if client set it
+		}
+		response.Resources = append(response.Resources, opt)
+	}
 
 	ctx := context.Background()
 	source := "local"
@@ -469,7 +498,6 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 	}
 
 	// Handle Truncation
-	maxSize := 512
 	for _, res := range request.Resources {
 		if res.Type == packet.OPT {
 			maxSize = int(res.UDPPayloadSize)
