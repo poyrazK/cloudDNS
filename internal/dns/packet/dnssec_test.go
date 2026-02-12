@@ -68,3 +68,32 @@ func TestDNSSEC_SignEmptyRRSet(t *testing.T) {
 		t.Errorf("Empty RRSet should return empty record and no error")
 	}
 }
+
+func TestDNSSEC_DSGeneration(t *testing.T) {
+	dnskey := DnsRecord{
+		Name:      "example.com.",
+		Type:      DNSKEY,
+		Flags:     257,
+		Algorithm: 13,
+		PublicKey: []byte{0x01, 0x02, 0x03, 0x04},
+		TTL:       3600,
+	}
+
+	ds, err := dnskey.ComputeDS(2) // SHA-256
+	if err != nil {
+		t.Fatalf("Failed to compute DS: %v", err)
+	}
+
+	if ds.Type != DS {
+		t.Errorf("Expected DS type, got %v", ds.Type)
+	}
+	if ds.DigestType != 2 {
+		t.Errorf("Expected DigestType 2, got %d", ds.DigestType)
+	}
+	if len(ds.Digest) != 32 {
+		t.Errorf("Expected 32-byte SHA-256 digest, got %d", len(ds.Digest))
+	}
+	if ds.KeyTag != dnskey.ComputeKeyTag() {
+		t.Errorf("KeyTag mismatch in generated DS")
+	}
+}

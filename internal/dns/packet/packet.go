@@ -203,6 +203,9 @@ type DnsRecord struct {
 	Iterations uint16
 	Salt       []byte
 	NextHash   []byte
+	// DS
+	DigestType uint8
+	Digest     []byte
 	// EDNS
 	UDPPayloadSize uint16
 	ExtendedRcode  uint8
@@ -331,6 +334,13 @@ func (r *DnsRecord) Read(buffer *BytePacketBuffer) error {
 		saltLen, _ := buffer.Read()
 		r.Salt, _ = buffer.ReadRange(buffer.Position(), int(saltLen))
 		buffer.Step(int(saltLen))
+	case DS:
+		r.KeyTag, _ = buffer.Readu16()
+		r.Algorithm, _ = buffer.Read()
+		r.DigestType, _ = buffer.Read()
+		remaining := int(dataLen) - (buffer.Position() - startPos)
+		r.Digest, _ = buffer.ReadRange(buffer.Position(), remaining)
+		buffer.Step(remaining)
 	case OPT:
 		r.UDPPayloadSize = r.Class
 		r.ExtendedRcode = uint8(r.TTL >> 24)
@@ -519,6 +529,12 @@ func (r *DnsRecord) Write(buffer *BytePacketBuffer) (int, error) {
 		buffer.Seek(lenPos)
 		buffer.Writeu16(uint16(currPos - (lenPos + 2)))
 		buffer.Seek(currPos)
+	case DS:
+		buffer.Writeu16(uint16(4 + len(r.Digest)))
+		buffer.Writeu16(r.KeyTag)
+		buffer.Write(r.Algorithm)
+		buffer.Write(r.DigestType)
+		for _, b := range r.Digest { buffer.Write(b) }
 	default:
 		buffer.Writeu16(uint16(len(r.Data)))
 		for _, b := range r.Data { buffer.Write(b) }

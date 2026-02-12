@@ -4,6 +4,7 @@ import (
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/rand"
+	"crypto/sha256"
 	"strings"
 )
 
@@ -32,6 +33,45 @@ func (r *DnsRecord) ComputeKeyTag() uint16 {
 	}
 	ac += (ac >> 16) & 0xFFFF
 	return uint16(ac & 0xFFFF)
+}
+
+// RFC 4034 Section 5.2: DS RDATA Calculation
+func (r *DnsRecord) ComputeDS(digestType uint8) (DnsRecord, error) {
+	if r.Type != DNSKEY {
+		return DnsRecord{}, nil
+	}
+
+	// 1. Prepare Buffer: owner name | RDATA
+	buf := NewBytePacketBuffer()
+	buf.WriteName(strings.ToLower(r.Name))
+	buf.Writeu16(r.Flags)
+	buf.Write(3) // Protocol
+	buf.Write(r.Algorithm)
+	for _, b := range r.PublicKey {
+		buf.Write(b)
+	}
+
+	// 2. Hash it
+	var digest []byte
+	switch digestType {
+	case 2: // SHA-256
+		hashed := sha256.Sum256(buf.Buf[:buf.Position()])
+		digest = hashed[:]
+	default:
+		// Unsupported or fallback
+		return DnsRecord{}, nil
+	}
+
+	return DnsRecord{
+		Name:       r.Name,
+		Type:       DS,
+		Class:      1,
+		TTL:        r.TTL,
+		KeyTag:     r.ComputeKeyTag(),
+		Algorithm:  r.Algorithm,
+		DigestType: digestType,
+		Digest:     digest,
+	}, nil
 }
 
 // SignRRSet generates an RRSIG for a set of records
