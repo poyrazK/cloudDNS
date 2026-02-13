@@ -75,11 +75,37 @@ func (m *mockRepo) ListZones(ctx context.Context, tenantID string) ([]domain.Zon
 func (m *mockRepo) DeleteZone(ctx context.Context, id, tenantID string) error   { return nil }
 func (m *mockRepo) DeleteRecord(ctx context.Context, id, zoneID string) error { return nil }
 
+func (m *mockRepo) DeleteRecordsByNameAndType(ctx context.Context, zoneID string, name string, qType domain.RecordType) error {
+	return nil
+}
+
+func (m *mockRepo) DeleteRecordsByName(ctx context.Context, zoneID string, name string) error {
+	return nil
+}
+
+func (m *mockRepo) DeleteRecordSpecific(ctx context.Context, zoneID string, name string, qType domain.RecordType, content string) error {
+	return nil
+}
+
+func (m *mockRepo) RecordZoneChange(ctx context.Context, change *domain.ZoneChange) error {
+	return nil
+}
+
+func (m *mockRepo) ListZoneChanges(ctx context.Context, zoneID string, fromSerial uint32) ([]domain.ZoneChange, error) {
+	return nil, nil
+}
+
 func (m *mockRepo) SaveAuditLog(ctx context.Context, log *domain.AuditLog) error { return nil }
 func (m *mockRepo) GetAuditLogs(ctx context.Context, tenantID string) ([]domain.AuditLog, error) {
 	return nil, nil
 }
 func (m *mockRepo) Ping(ctx context.Context) error { return nil }
+
+func (m *mockRepo) CreateKey(ctx context.Context, key *domain.DNSSECKey) error { return nil }
+func (m *mockRepo) ListKeysForZone(ctx context.Context, zoneID string) ([]domain.DNSSECKey, error) {
+	return nil, nil
+}
+func (m *mockRepo) UpdateKey(ctx context.Context, key *domain.DNSSECKey) error { return nil }
 
 func TestCreateZone(t *testing.T) {
 	repo := &mockRepo{}
@@ -173,5 +199,53 @@ func TestImportZone_Error(t *testing.T) {
 	// unless io.Reader fails. But we can check if it handled correctly.
 	if err != nil {
 		t.Errorf("Expected skip/partial rather than fatal err, got %v", err)
+	}
+}
+
+func TestResolve_Wildcard(t *testing.T) {
+	repo := &mockRepo{
+		records: []domain.Record{
+			{Name: "*.example.test.", Type: domain.TypeA, Content: "1.1.1.1", TTL: 300},
+		},
+	}
+	svc := NewDNSService(repo)
+
+	// Test direct hit on wildcard
+	recs, err := svc.Resolve(context.Background(), "www.example.test.", domain.TypeA, "8.8.8.8")
+	if err != nil || len(recs) != 1 {
+		t.Fatalf("Wildcard resolution failed: %v", err)
+	}
+	if recs[0].Name != "www.example.test." {
+		t.Errorf("Expected name to be rewritten to www.example.test., got %s", recs[0].Name)
+	}
+
+	// Test deeper level hit
+	recs, _ = svc.Resolve(context.Background(), "a.b.c.example.test.", domain.TypeA, "8.8.8.8")
+	if len(recs) != 1 {
+		t.Errorf("Deep wildcard resolution failed")
+	}
+}
+
+func TestListZones(t *testing.T) {
+	repo := &mockRepo{
+		zones: []domain.Zone{
+			{ID: "z1", Name: "z1.test."},
+			{ID: "z2", Name: "z2.test."},
+		},
+	}
+	svc := NewDNSService(repo)
+
+	zones, err := svc.ListZones(context.Background(), "t1")
+	if err != nil || len(zones) != 2 {
+		t.Errorf("ListZones failed")
+	}
+}
+
+func TestHealthCheck(t *testing.T) {
+	repo := &mockRepo{}
+	svc := NewDNSService(repo)
+
+	if err := svc.HealthCheck(context.Background()); err != nil {
+		t.Errorf("HealthCheck failed: %v", err)
 	}
 }

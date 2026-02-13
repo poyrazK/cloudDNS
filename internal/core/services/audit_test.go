@@ -34,6 +34,18 @@ func (m *auditMockRepo) SaveAuditLog(ctx context.Context, log *domain.AuditLog) 
 	return nil
 }
 
+func (m *auditMockRepo) CreateKey(ctx context.Context, key *domain.DNSSECKey) error {
+	return m.mockRepo.CreateKey(ctx, key)
+}
+
+func (m *auditMockRepo) ListKeysForZone(ctx context.Context, zoneID string) ([]domain.DNSSECKey, error) {
+	return m.mockRepo.ListKeysForZone(ctx, zoneID)
+}
+
+func (m *auditMockRepo) UpdateKey(ctx context.Context, key *domain.DNSSECKey) error {
+	return m.mockRepo.UpdateKey(ctx, key)
+}
+
 func TestAuditLogCreation(t *testing.T) {
 	repo := &auditMockRepo{}
 	svc := NewDNSService(repo)
