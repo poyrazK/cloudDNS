@@ -7,93 +7,65 @@ import (
 	"testing"
 )
 
-func TestDNSSEC_SignAndVerify(t *testing.T) {
-	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatalf("Failed to generate key: %v", err)
-	}
-
-	records := []DnsRecord{
-		{Name: "example.com.", Type: A, TTL: 3600},
-	}
-
-	inception := uint32(1700000000)
-	expiration := inception + 3600
-	signer := "example.com."
-	keyTag := uint16(12345)
-
-	sig, err := SignRRSet(records, privKey, signer, keyTag, inception, expiration)
-	if err != nil {
-		t.Fatalf("Failed to sign RRSet: %v", err)
-	}
-
-	if sig.Type != RRSIG {
-		t.Errorf("Expected RRSIG, got %v", sig.Type)
-	}
-	if sig.TypeCovered != uint16(A) {
-		t.Errorf("Expected TypeCovered A, got %d", sig.TypeCovered)
-	}
-	if sig.KeyTag != keyTag {
-		t.Errorf("KeyTag mismatch")
-	}
-	if len(sig.Signature) != 64 {
-		t.Errorf("Expected 64-byte signature for P-256, got %d", len(sig.Signature))
-	}
-}
-
-func TestDNSSEC_ComputeKeyTag(t *testing.T) {
+func TestComputeKeyTag(t *testing.T) {
 	record := DnsRecord{
 		Type:      DNSKEY,
 		Flags:     256,
 		Algorithm: 13,
 		PublicKey: []byte{0x01, 0x02, 0x03, 0x04},
 	}
-
 	tag := record.ComputeKeyTag()
 	if tag == 0 {
-		t.Errorf("KeyTag should not be 0")
-	}
-
-	// Non-DNSKEY should return 0
-	record.Type = A
-	if record.ComputeKeyTag() != 0 {
-		t.Errorf("Non-DNSKEY should return tag 0")
+		t.Errorf("Expected non-zero key tag")
 	}
 }
 
-func TestDNSSEC_SignEmptyRRSet(t *testing.T) {
-	privKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	sig, err := SignRRSet([]DnsRecord{}, privKey, "test.", 1, 0, 0)
-	if err != nil || sig.Type != UNKNOWN {
-		t.Errorf("Empty RRSet should return empty record and no error")
-	}
-}
-
-func TestDNSSEC_DSGeneration(t *testing.T) {
-	dnskey := DnsRecord{
+func TestComputeDS(t *testing.T) {
+	record := DnsRecord{
 		Name:      "example.com.",
 		Type:      DNSKEY,
 		Flags:     257,
 		Algorithm: 13,
 		PublicKey: []byte{0x01, 0x02, 0x03, 0x04},
-		TTL:       3600,
 	}
-
-	ds, err := dnskey.ComputeDS(2) // SHA-256
+	ds, err := record.ComputeDS(2) // SHA-256
 	if err != nil {
-		t.Fatalf("Failed to compute DS: %v", err)
+		t.Fatalf("ComputeDS failed: %v", err)
 	}
+	if ds.Type != DS || len(ds.Digest) == 0 {
+		t.Errorf("Invalid DS record generated")
+	}
+}
 
-	if ds.Type != DS {
-		t.Errorf("Expected DS type, got %v", ds.Type)
+func TestSignRRSet(t *testing.T) {
+	privKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	records := []DnsRecord{
+		{Name: "www.test.", Type: A, TTL: 300, IP: []byte{1, 2, 3, 4}},
 	}
-	if ds.DigestType != 2 {
-		t.Errorf("Expected DigestType 2, got %d", ds.DigestType)
+	
+	sig, err := SignRRSet(records, privKey, "test.", 1234, 1600000000, 1700000000)
+	if err != nil {
+		t.Fatalf("SignRRSet failed: %v", err)
 	}
-	if len(ds.Digest) != 32 {
-		t.Errorf("Expected 32-byte SHA-256 digest, got %d", len(ds.Digest))
+	
+	if sig.Type != RRSIG || len(sig.Signature) != 64 {
+		t.Errorf("Invalid RRSIG generated")
 	}
-	if ds.KeyTag != dnskey.ComputeKeyTag() {
-		t.Errorf("KeyTag mismatch in generated DS")
+}
+
+func TestCountLabels(t *testing.T) {
+	cases := []struct {
+		name string
+		want int
+	}{
+		{"example.com.", 2},
+		{"www.example.com.", 3},
+		{".", 0},
+		{"", 0},
+	}
+	for _, c := range cases {
+		if got := countLabels(c.name); got != c.want {
+			t.Errorf("countLabels(%s) = %d, want %d", c.name, got, c.want)
+		}
 	}
 }

@@ -2,7 +2,10 @@ package packet
 
 import (
 	"net"
+	"strings"
 	"testing"
+
+	"github.com/poyrazK/cloudDNS/internal/core/domain"
 )
 
 func TestHeaderSerialization(t *testing.T) {
@@ -334,7 +337,6 @@ func TestReadWriteAllTypes(t *testing.T) {
 
 func TestReadName_InfiniteLoop(t *testing.T) {
 	buffer := NewBytePacketBuffer()
-	
 	// Create a pointer that points to itself
 	buffer.Write(0xC0)
 	buffer.Write(0x00)
@@ -347,299 +349,416 @@ func TestReadName_InfiniteLoop(t *testing.T) {
 }
 
 func TestDNSKEYRecordSerialization(t *testing.T) {
-
 	record := DnsRecord{
-
 		Name:      "example.com.",
-
 		Type:      DNSKEY,
-
 		TTL:       3600,
-
 		Flags:     256,
-
 		Algorithm: 13,
-
 		PublicKey: []byte{0x01, 0x02, 0x03, 0x04},
-
 	}
-
-
 
 	buffer := NewBytePacketBuffer()
-
 	_, err := record.Write(buffer)
-
 	if err != nil {
-
 		t.Fatalf("Failed to write DNSKEY record: %v", err)
-
 	}
-
-
 
 	buffer.Seek(0)
-
 	parsed := DnsRecord{}
-
 	err = parsed.Read(buffer)
-
 	if err != nil {
-
 		t.Fatalf("Failed to read DNSKEY record: %v", err)
-
 	}
-
-
 
 	if parsed.Flags != record.Flags || parsed.Algorithm != record.Algorithm {
-
 		t.Errorf("DNSKEY metadata mismatch")
-
 	}
-
 	if string(parsed.PublicKey) != string(record.PublicKey) {
-
 		t.Errorf("PublicKey mismatch")
-
 	}
-
 }
-
-
 
 func TestRRSIGRecordSerialization(t *testing.T) {
-
 	record := DnsRecord{
-
 		Name:        "example.com.",
-
 		Type:        RRSIG,
-
 		TTL:         3600,
-
 		TypeCovered: uint16(A),
-
 		Algorithm:   13,
-
 		Labels:      2,
-
 		OrigTTL:     3600,
-
 		Expiration:  1700000000,
-
 		Inception:   1600000000,
-
 		KeyTag:      12345,
-
 		SignerName:  "example.com.",
-
 		Signature:   []byte{0xDE, 0xAD, 0xBE, 0xEF},
-
 	}
-
-
 
 	buffer := NewBytePacketBuffer()
-
 	_, err := record.Write(buffer)
-
 	if err != nil {
-
 		t.Fatalf("Failed to write RRSIG record: %v", err)
-
 	}
-
-
 
 	buffer.Seek(0)
-
 	parsed := DnsRecord{}
-
 	err = parsed.Read(buffer)
-
 	if err != nil {
-
 		t.Fatalf("Failed to read RRSIG record: %v", err)
-
 	}
-
-
 
 	if parsed.TypeCovered != record.TypeCovered || parsed.KeyTag != record.KeyTag {
-
 		t.Errorf("RRSIG metadata mismatch")
-
 	}
-
 	if parsed.SignerName != record.SignerName {
-
 		t.Errorf("SignerName mismatch: expected %s, got %s", record.SignerName, parsed.SignerName)
-
 	}
-
 }
-
-
 
 func TestNSECRecordSerialization(t *testing.T) {
-
 	record := DnsRecord{
-
 		Name:       "a.example.com.",
-
 		Type:       NSEC,
-
 		TTL:        3600,
-
 		NextName:   "z.example.com.",
-
 		TypeBitMap: []byte{0x00, 0x06, 0x40, 0x01},
-
 	}
-
-
 
 	buffer := NewBytePacketBuffer()
-
 	_, err := record.Write(buffer)
-
 	if err != nil {
-
 		t.Fatalf("Failed to write NSEC record: %v", err)
-
 	}
-
-
 
 	buffer.Seek(0)
-
 	parsed := DnsRecord{}
-
 	err = parsed.Read(buffer)
-
 	if err != nil {
-
 		t.Fatalf("Failed to read NSEC record: %v", err)
-
 	}
-
-
 
 	if parsed.NextName != record.NextName {
-
 		t.Errorf("NextName mismatch: expected %s, got %s", record.NextName, parsed.NextName)
-
 	}
-
 }
-
-
 
 func TestHINFORecordSerialization(t *testing.T) {
-
 	record := DnsRecord{
-
 		Name: "host.test.",
-
 		Type: HINFO,
-
 		TTL:  300,
-
 		CPU:  "INTEL-I7",
-
 		OS:   "LINUX",
-
 	}
-
-
 
 	buffer := NewBytePacketBuffer()
-
 	_, err := record.Write(buffer)
-
 	if err != nil {
-
 		t.Fatalf("Failed to write HINFO record: %v", err)
-
 	}
-
-
 
 	buffer.Seek(0)
-
 	parsed := DnsRecord{}
-
 	err = parsed.Read(buffer)
-
 	if err != nil {
-
 		t.Fatalf("Failed to read HINFO record: %v", err)
-
 	}
-
-
 
 	if parsed.CPU != record.CPU || parsed.OS != record.OS {
-
 		t.Errorf("HINFO mismatch")
-
 	}
-
 }
-
-
 
 func TestMINFORecordSerialization(t *testing.T) {
-
 	record := DnsRecord{
-
 		Name:    "mail.test.",
-
 		Type:    MINFO,
-
 		TTL:     300,
-
 		RMailBX: "admin.test.",
-
 		EMailBX: "errors.test.",
-
 	}
-
-
 
 	buffer := NewBytePacketBuffer()
-
 	_, err := record.Write(buffer)
-
 	if err != nil {
-
 		t.Fatalf("Failed to write MINFO record: %v", err)
-
 	}
-
-
 
 	buffer.Seek(0)
-
 	parsed := DnsRecord{}
-
 	err = parsed.Read(buffer)
-
 	if err != nil {
-
 		t.Fatalf("Failed to read MINFO record: %v", err)
-
 	}
-
-
 
 	if parsed.RMailBX != record.RMailBX || parsed.EMailBX != record.EMailBX {
-
 		t.Errorf("MINFO mismatch")
-
 	}
-
 }
 
+func TestNSEC3RecordSerialization(t *testing.T) {
+	record := DnsRecord{
+		Name:       "example.com.",
+		Type:       NSEC3,
+		TTL:        300,
+		HashAlg:    1,
+		Flags:      1,
+		Iterations: 10,
+		Salt:       []byte{0xAB, 0xCD},
+		NextHash:   []byte{0x01, 0x02, 0x03, 0x04},
+		TypeBitMap: []byte{0x00, 0x02, 0x40},
+	}
 
+	buffer := NewBytePacketBuffer()
+	_, err := record.Write(buffer)
+	if err != nil {
+		t.Fatalf("Failed to write NSEC3 record: %v", err)
+	}
+
+	buffer.Seek(0)
+	parsed := DnsRecord{}
+	err = parsed.Read(buffer)
+	if err != nil {
+		t.Fatalf("Failed to read NSEC3 record: %v", err)
+	}
+
+	if parsed.HashAlg != record.HashAlg || parsed.Iterations != record.Iterations {
+		t.Errorf("NSEC3 metadata mismatch")
+	}
+	if string(parsed.Salt) != string(record.Salt) || string(parsed.NextHash) != string(record.NextHash) {
+		t.Errorf("NSEC3 hash/salt mismatch")
+	}
+}
+
+func TestNSEC3PARAMRecordSerialization(t *testing.T) {
+	record := DnsRecord{
+		Name:       "example.com.",
+		Type:       NSEC3PARAM,
+		TTL:        300,
+		HashAlg:    1,
+		Flags:      0,
+		Iterations: 10,
+		Salt:       []byte{0xDE, 0xAD},
+	}
+
+	buffer := NewBytePacketBuffer()
+	_, err := record.Write(buffer)
+	if err != nil {
+		t.Fatalf("Failed to write NSEC3PARAM record: %v", err)
+	}
+
+	buffer.Seek(0)
+	parsed := DnsRecord{}
+	err = parsed.Read(buffer)
+	if err != nil {
+		t.Fatalf("Failed to read NSEC3PARAM record: %v", err)
+	}
+
+	if parsed.HashAlg != record.HashAlg || parsed.Iterations != record.Iterations {
+		t.Errorf("NSEC3PARAM metadata mismatch")
+	}
+	if string(parsed.Salt) != string(record.Salt) {
+		t.Errorf("NSEC3PARAM salt mismatch")
+	}
+}
+
+func TestDSRecordSerialization(t *testing.T) {
+	record := DnsRecord{
+		Name:       "example.com.",
+		Type:       DS,
+		TTL:        3600,
+		KeyTag:     1234,
+		Algorithm:  13,
+		DigestType: 2,
+		Digest:     []byte{0x01, 0x02, 0x03, 0x04},
+	}
+
+	buffer := NewBytePacketBuffer()
+	_, err := record.Write(buffer)
+	if err != nil {
+		t.Fatalf("Failed to write DS record: %v", err)
+	}
+
+	buffer.Seek(0)
+	parsed := DnsRecord{}
+	err = parsed.Read(buffer)
+	if err != nil {
+		t.Fatalf("Failed to read DS record: %v", err)
+	}
+
+	if parsed.KeyTag != record.KeyTag || parsed.Algorithm != record.Algorithm || parsed.DigestType != record.DigestType {
+		t.Errorf("DS metadata mismatch")
+	}
+	if string(parsed.Digest) != string(record.Digest) {
+		t.Errorf("DS digest mismatch")
+	}
+}
+
+func TestEDERecordSerialization(t *testing.T) {
+	record := DnsRecord{
+		Name:           ".",
+		Type:           OPT,
+		UDPPayloadSize: 4096,
+	}
+	record.AddEDE(EDE_BLOCKED, "Privacy policy violation")
+
+	buffer := NewBytePacketBuffer()
+	_, err := record.Write(buffer)
+	if err != nil {
+		t.Fatalf("Failed to write OPT with EDE: %v", err)
+	}
+
+	buffer.Seek(0)
+	parsed := DnsRecord{}
+	err = parsed.Read(buffer)
+	if err != nil {
+		t.Fatalf("Failed to read record: %v", err)
+	}
+
+	if len(parsed.Options) != 1 {
+		t.Fatalf("Expected 1 EDNS option, got %d", len(parsed.Options))
+	}
+	opt := parsed.Options[0]
+	if opt.Code != 15 {
+		t.Errorf("Expected EDE option (15), got %d", opt.Code)
+	}
+	
+	infoCode := uint16(opt.Data[0])<<8 | uint16(opt.Data[1])
+	if infoCode != EDE_BLOCKED {
+		t.Errorf("Expected EDE_BLOCKED (%d), got %d", EDE_BLOCKED, infoCode)
+	}
+	extraText := string(opt.Data[2:])
+	if extraText != "Privacy policy violation" {
+		t.Errorf("Expected extra text mismatch, got %s", extraText)
+	}
+}
+
+func TestBufferPool(t *testing.T) {
+	buf := GetBuffer()
+	if buf.Position() != 0 {
+		t.Errorf("Expected reset buffer from pool")
+	}
+	buf.Write(1)
+	PutBuffer(buf)
+	
+	buf2 := GetBuffer()
+	if buf2.Position() != 0 {
+		t.Errorf("Expected reused buffer to be reset")
+	}
+}
+
+func TestBufferRandomAccess(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	data := []byte{0xDE, 0xAD, 0xBE, 0xEF}
+	buf.WriteRange(10, data)
+	
+	if val, _ := buf.Get(10); val != 0xDE {
+		t.Errorf("Get(10) failed")
+	}
+	
+	got, _ := buf.GetRange(10, 4)
+	if string(got) != string(data) {
+		t.Errorf("GetRange mismatch")
+	}
+}
+
+func TestNameCompression(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	buf.HasNames = true
+	
+	// Write name first time
+	buf.WriteName("example.com.")
+	pos1 := 0 // should be at 0
+	
+	// Write same name again
+	buf.WriteName("example.com.")
+	
+	// Buffer should now contain:
+	// [7] 'e' 'x' 'a' 'm' 'p' 'l' 'e' [3] 'c' 'o' 'm' [0] [0xC0, 0x00]
+	// Total 13 bytes for first name, then 2 byte pointer
+	if buf.Position() != 15 {
+		t.Errorf("Expected 15 bytes total, got %d", buf.Position())
+	}
+	
+	// Verify pointer
+	if buf.Buf[13] != 0xC0 || buf.Buf[14] != byte(pos1) {
+		t.Errorf("Invalid compression pointer: %x %x", buf.Buf[13], buf.Buf[14])
+	}
+}
+
+func TestReadName_MaxJumps(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	// Create a loop of pointers
+	buf.Buf[0] = 0xC0
+	buf.Buf[1] = 0x02
+	buf.Buf[2] = 0xC0
+	buf.Buf[3] = 0x00
+	
+	buf.Seek(0)
+	_, err := buf.ReadName()
+	if err == nil || !strings.Contains(err.Error(), "limit") {
+		t.Errorf("Expected jump limit error, got %v", err)
+	}
+}
+
+func TestQueryTypeUtilities(t *testing.T) {
+	if qt := RecordTypeToQueryType(domain.TypeA); qt != A {
+		t.Errorf("RecordTypeToQueryType(A) failed")
+	}
+	if s := A.String(); s != "A" {
+		t.Errorf("A.String() failed")
+	}
+	if s := QueryType(999).String(); s != "TYPE999" {
+		t.Errorf("Unknown QueryType string failed")
+	}
+}
+
+func TestBufferLoad(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	data := []byte{1, 2, 3}
+	buf.Load(data)
+	if val, _ := buf.Read(); val != 1 {
+		t.Errorf("Buffer Load failed")
+	}
+}
+
+func TestTSIG_SignVerify(t *testing.T) {
+	// 1. Create a standard DNS query
+	p := NewDnsPacket()
+	p.Header.ID = 1234
+	p.Questions = append(p.Questions, DnsQuestion{Name: "test.com.", QType: A})
+	
+	buf := NewBytePacketBuffer()
+	secret := []byte("secret")
+	
+	// 2. Proactively write the packet to the buffer (WITHOUT TSIG yet)
+	// RFC 2845: MAC is computed over the wire-format DNS message.
+	if err := p.Write(buf); err != nil {
+		t.Fatalf("Failed to write packet: %v", err)
+	}
+	
+	// 3. Append the TSIG signature to the message
+	if err := p.SignTSIG(buf, "key.", secret); err != nil {
+		t.Fatalf("SignTSIG failed: %v", err)
+	}
+	
+	// 4. Capture the final signed data and parse it back into a new packet
+	data := buf.Buf[:buf.Position()]
+	parsed := NewDnsPacket()
+	pBuf := NewBytePacketBuffer()
+	pBuf.Load(data)
+	if err := parsed.FromBuffer(pBuf); err != nil {
+		t.Fatalf("FromBuffer failed: %v", err)
+	}
+	
+	// 5. Verify the TSIG starting position was correctly tracked during parsing
+	if parsed.TsigStart == -1 {
+		t.Fatalf("TSIG record not found or incorrectly tracked in parsed packet")
+	}
+	
+	// 6. Perform HMAC verification
+	if err := parsed.VerifyTSIG(data, parsed.TsigStart, secret); err != nil {
+		t.Errorf("VerifyTSIG validation failed: %v", err)
+	}
+}
