@@ -68,6 +68,15 @@ func (c *DNSCache) Set(key string, data []byte, ttl time.Duration) {
 	}
 }
 
+func (c *DNSCache) Flush() {
+	for i := 0; i < shardCount; i++ {
+		shard := c.shards[i]
+		shard.mu.Lock()
+		shard.items = make(map[string]cacheEntry)
+		shard.mu.Unlock()
+	}
+}
+
 func (c *DNSCache) cleanupLoop() {
 	ticker := time.NewTicker(5 * time.Minute)
 	for range ticker.C {
