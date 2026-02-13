@@ -1,8 +1,10 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"net"
+	"net/http"
 	"testing"
 	"time"
 
@@ -13,6 +15,8 @@ import (
 type mockServerRepo struct {
 	records []domain.Record
 	zones   []domain.Zone
+	changes []domain.ZoneChange
+	keys    []domain.DNSSECKey
 }
 
 func (m *mockServerRepo) GetRecords(ctx context.Context, name string, qType domain.RecordType, clientIP string) ([]domain.Record, error) {
@@ -83,7 +87,65 @@ func (m *mockServerRepo) DeleteZone(ctx context.Context, zoneID string, tenantID
 	return nil
 }
 func (m *mockServerRepo) DeleteRecord(ctx context.Context, recordID string, zoneID string) error {
+	var next []domain.Record
+	for _, r := range m.records {
+		if r.ID != recordID {
+			next = append(next, r)
+		}
+	}
+	m.records = next
 	return nil
+}
+
+func (m *mockServerRepo) DeleteRecordsByNameAndType(ctx context.Context, zoneID string, name string, qType domain.RecordType) error {
+	var next []domain.Record
+	for _, r := range m.records {
+		if r.ZoneID == zoneID && r.Name == name && r.Type == qType {
+			continue
+		}
+		next = append(next, r)
+	}
+	m.records = next
+	return nil
+}
+
+func (m *mockServerRepo) DeleteRecordsByName(ctx context.Context, zoneID string, name string) error {
+	var next []domain.Record
+	for _, r := range m.records {
+		if r.ZoneID == zoneID && r.Name == name {
+			continue
+		}
+		next = append(next, r)
+	}
+	m.records = next
+	return nil
+}
+
+func (m *mockServerRepo) DeleteRecordSpecific(ctx context.Context, zoneID string, name string, qType domain.RecordType, content string) error {
+	var next []domain.Record
+	for _, r := range m.records {
+		if r.ZoneID == zoneID && r.Name == name && r.Type == qType && r.Content == content {
+			continue
+		}
+		next = append(next, r)
+	}
+	m.records = next
+	return nil
+}
+
+func (m *mockServerRepo) RecordZoneChange(ctx context.Context, change *domain.ZoneChange) error {
+	m.changes = append(m.changes, *change)
+	return nil
+}
+
+func (m *mockServerRepo) ListZoneChanges(ctx context.Context, zoneID string, fromSerial uint32) ([]domain.ZoneChange, error) {
+	var res []domain.ZoneChange
+	for _, c := range m.changes {
+		if c.ZoneID == zoneID && c.Serial > fromSerial {
+			res = append(res, c)
+		}
+	}
+	return res, nil
 }
 
 func (m *mockServerRepo) SaveAuditLog(ctx context.Context, log *domain.AuditLog) error {
@@ -92,6 +154,31 @@ func (m *mockServerRepo) SaveAuditLog(ctx context.Context, log *domain.AuditLog)
 
 func (m *mockServerRepo) GetAuditLogs(ctx context.Context, tenantID string) ([]domain.AuditLog, error) {
 	return nil, nil
+}
+
+func (m *mockServerRepo) CreateKey(ctx context.Context, key *domain.DNSSECKey) error {
+	m.keys = append(m.keys, *key)
+	return nil
+}
+
+func (m *mockServerRepo) ListKeysForZone(ctx context.Context, zoneID string) ([]domain.DNSSECKey, error) {
+	var res []domain.DNSSECKey
+	for _, k := range m.keys {
+		if k.ZoneID == zoneID {
+			res = append(res, k)
+		}
+	}
+	return res, nil
+}
+
+func (m *mockServerRepo) UpdateKey(ctx context.Context, key *domain.DNSSECKey) error {
+	for i, k := range m.keys {
+		if k.ID == key.ID {
+			m.keys[i] = *key
+			return nil
+		}
+	}
+	return nil
 }
 
 func (m *mockServerRepo) Ping(ctx context.Context) error { return nil }
@@ -331,3 +418,67 @@ func TestHandlePacketTruncation(t *testing.T) {
 		t.Fatalf("handlePacket failed: %v", err)
 	}
 }
+
+func TestHandleDoH(t *testing.T) {
+	repo := &mockServerRepo{
+		records: []domain.Record{
+			{Name: "doh.test.", Type: domain.TypeA, Content: "1.2.3.4", TTL: 60},
+		},
+	}
+	srv := NewServer("127.0.0.1:0", repo, nil)
+
+	req := packet.NewDnsPacket()
+	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "doh.test.", QType: packet.A})
+	reqBuf := packet.NewBytePacketBuffer()
+	req.Write(reqBuf)
+
+	w := &mockResponseWriter{}
+	r, _ := http.NewRequest("POST", "/dns-query", bytes.NewReader(reqBuf.Buf[:reqBuf.Position()]))
+	r.Header.Set("Content-Type", "application/dns-message")
+
+	srv.handleDoH(w, r)
+
+	if w.code != http.StatusOK {
+		t.Errorf("Expected 200 OK, got %d", w.code)
+	}
+	if w.header.Get("Content-Type") != "application/dns-message" {
+		t.Errorf("Expected Content-Type application/dns-message")
+	}
+}
+
+func TestSendTCPError(t *testing.T) {
+	srv := NewServer("127.0.0.1:0", nil, nil)
+	conn := &mockTCPConn{}
+	
+	srv.sendTCPError(conn, 1234, 4) // FORMERR
+
+	if len(conn.captured) != 1 {
+		t.Fatalf("Expected 1 error packet")
+	}
+	
+	p := packet.NewDnsPacket()
+	pBuf := packet.NewBytePacketBuffer()
+	pBuf.Load(conn.captured[0])
+	p.FromBuffer(pBuf)
+
+	if p.Header.ResCode != 4 || p.Header.ID != 1234 {
+		t.Errorf("Invalid TCP error response")
+	}
+}
+
+type mockResponseWriter struct {
+	http.ResponseWriter
+	code   int
+	header http.Header
+	body   []byte
+}
+
+func (m *mockResponseWriter) Header() http.Header {
+	if m.header == nil { m.header = make(http.Header) }
+	return m.header
+}
+func (m *mockResponseWriter) Write(b []byte) (int, error) {
+	m.body = append(m.body, b...)
+	return len(b), nil
+}
+func (m *mockResponseWriter) WriteHeader(statusCode int) { m.code = statusCode }
