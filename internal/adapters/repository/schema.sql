@@ -31,5 +31,30 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS dns_zone_changes (
+    id UUID PRIMARY KEY,
+    zone_id UUID REFERENCES dns_zones(id) ON DELETE CASCADE,
+    serial BIGINT NOT NULL, -- The serial after this change
+    action TEXT NOT NULL,   -- 'ADD' or 'DELETE'
+    name TEXT NOT NULL,
+    type TEXT NOT NULL,
+    content TEXT NOT NULL,
+    ttl INTEGER NOT NULL,
+    priority INTEGER,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS dnssec_keys (
+    id UUID PRIMARY KEY,
+    zone_id UUID REFERENCES dns_zones(id) ON DELETE CASCADE,
+    key_type TEXT NOT NULL, -- 'KSK' or 'ZSK'
+    algorithm INTEGER NOT NULL, -- 13 for ECDSAP256SHA256
+    private_key BYTEA NOT NULL,
+    public_key BYTEA NOT NULL,
+    active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE INDEX idx_dns_records_name ON dns_records(name);
 CREATE INDEX idx_dns_records_network ON dns_records USING gist (network inet_ops);
