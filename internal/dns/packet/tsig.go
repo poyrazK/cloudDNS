@@ -8,7 +8,7 @@ import (
 )
 
 // VerifyTSIG checks if the TSIG record in the packet matches the provided key
-func (p *DnsPacket) VerifyTSIG(rawBuffer []byte, keyName string, secret []byte) error {
+func (p *DnsPacket) VerifyTSIG(rawBuffer []byte, tsigStart int, secret []byte) error {
 	// 1. Find TSIG record (must be the last record in additional)
 	if len(p.Resources) == 0 {
 		return errors.New("no records in additional section")
@@ -18,12 +18,7 @@ func (p *DnsPacket) VerifyTSIG(rawBuffer []byte, keyName string, secret []byte) 
 		return errors.New("last record is not TSIG")
 	}
 
-	// 2. Check key name
-	if tsig.Name != keyName {
-		return errors.New("TSIG key name mismatch")
-	}
-
-	// 3. Check time drift (Fudge)
+	// 2. Check time drift (Fudge)
 	now := uint64(time.Now().Unix())
 	drift := uint64(0)
 	if now > tsig.TimeSigned {
@@ -35,26 +30,42 @@ func (p *DnsPacket) VerifyTSIG(rawBuffer []byte, keyName string, secret []byte) 
 		return errors.New("TSIG time drift exceeded")
 	}
 
-	// 4. Reconstruct original packet without TSIG for HMAC
-	// The HMAC is over: [original packet without TSIG] + [TSIG variables]
-	// According to RFC 2845, we need to strip the TSIG record and adjust ARCOUNT
-	
-	// Implementation Note: Since we have the rawBuffer, we can find where TSIG starts
-	// and take everything before it.
-	
-	// 5. Compute HMAC
+	// 3. Compute HMAC
 	h := hmac.New(md5.New, secret)
 	
-	// Add original data (we would need to adjust the ARCOUNT in the header byte 11)
-	// For simplicity in this scratch version, we assume the caller provides the correct buffer
-	h.Write(rawBuffer)
+	// Create a copy of the buffer before TSIG and adjust ARCOUNT
+	// Header is 12 bytes, ARCOUNT is at offset 10 (2 bytes)
+	prefix := make([]byte, tsigStart)
+	copy(prefix, rawBuffer[:tsigStart])
+	if len(prefix) >= 12 {
+		arCount := uint16(len(p.Resources) - 1)
+		prefix[10] = byte(arCount >> 8)
+		prefix[11] = byte(arCount & 0xFF)
+	}
+	h.Write(prefix)
 	
 	// Add TSIG variables (RFC 2845 Section 3.4.1)
-	// [Name] [Class] [TTL] [Algorithm] [Time] [Fudge] [Error] [Other]
-	// (Note: Name and Algorithm are in wire format)
+	// Note: Names and Algorithms should be in canonical wire format
+	vBuf := NewBytePacketBuffer()
+	vBuf.WriteName(tsig.Name)
+	vBuf.Writeu16(tsig.Class)
+	vBuf.Writeu32(tsig.TTL)
+	vBuf.WriteName(tsig.AlgorithmName)
+	vBuf.Writeu16(uint16(tsig.TimeSigned >> 32))
+	vBuf.Writeu32(uint32(tsig.TimeSigned & 0xFFFFFFFF))
+	vBuf.Writeu16(tsig.Fudge)
+	vBuf.Writeu16(tsig.Error)
+	vBuf.Writeu16(uint16(len(tsig.Other)))
+	vBuf.WriteRange(vBuf.Position(), tsig.Other)
 	
-	// Verification logic...
-	return nil // Skeleton for now
+	h.Write(vBuf.Buf[:vBuf.Position()])
+	
+	expectedMAC := h.Sum(nil)
+	if !hmac.Equal(tsig.MAC, expectedMAC) {
+		return errors.New("TSIG MAC mismatch")
+	}
+
+	return nil
 }
 
 func (p *DnsPacket) SignTSIG(buffer *BytePacketBuffer, keyName string, secret []byte) error {
@@ -72,14 +83,37 @@ func (p *DnsPacket) SignTSIG(buffer *BytePacketBuffer, keyName string, secret []
 
 	// 2. Compute MAC
 	h := hmac.New(md5.New, secret)
+	
 	// Write current buffer content (packet without TSIG)
 	h.Write(buffer.Buf[:buffer.Position()])
 	
-	// Add TSIG variables to HMAC...
+	// Add TSIG variables to HMAC
+	vBuf := NewBytePacketBuffer()
+	vBuf.WriteName(tsig.Name)
+	vBuf.Writeu16(tsig.Class)
+	vBuf.Writeu32(tsig.TTL)
+	vBuf.WriteName(tsig.AlgorithmName)
+	vBuf.Writeu16(uint16(tsig.TimeSigned >> 32))
+	vBuf.Writeu32(uint32(tsig.TimeSigned & 0xFFFFFFFF))
+	vBuf.Writeu16(tsig.Fudge)
+	vBuf.Writeu16(tsig.Error)
+	vBuf.Writeu16(uint16(len(tsig.Other)))
+	vBuf.WriteRange(vBuf.Position(), tsig.Other)
+	
+	h.Write(vBuf.Buf[:vBuf.Position()])
 	
 	tsig.MAC = h.Sum(nil)
 
-	// 3. Write TSIG record to buffer
+	// 3. Update the packet state before writing to buffer
+	p.Resources = append(p.Resources, tsig)
+	p.Header.ResourceEntries = uint16(len(p.Resources))
+
+	// 4. Update Header's ARCOUNT in the wire format (at offset 10)
+	buffer.Buf[10] = byte(p.Header.ResourceEntries >> 8)
+	buffer.Buf[11] = byte(p.Header.ResourceEntries & 0xFF)
+
+	// 5. Write TSIG record to buffer
+	p.TsigStart = buffer.Position()
 	_, err := tsig.Write(buffer)
 	return err
 }
