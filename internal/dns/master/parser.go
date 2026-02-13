@@ -168,3 +168,17 @@ func SortRecordsCanonically(records []domain.Record) {
 		return cmp < 0
 	})
 }
+
+func RecordTypeToQueryType(t domain.RecordType) uint16 {
+	switch t {
+	case domain.TypeA: return 1
+	case domain.TypeNS: return 2
+	case domain.TypeCNAME: return 5
+	case domain.TypeSOA: return 6
+	case domain.TypeMX: return 15
+	case domain.TypeTXT: return 16
+	case domain.TypeAAAA: return 28
+	case domain.TypePTR: return 12
+	default: return 0
+	}
+}
