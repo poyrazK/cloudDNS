@@ -1,7 +1,9 @@
 package packet
 
 import (
+	"fmt"
 	"net"
+	"github.com/poyrazK/cloudDNS/internal/core/domain"
 )
 
 type QueryType uint16
@@ -33,9 +35,91 @@ const (
 	NSEC3      QueryType = 50
 	NSEC3PARAM QueryType = 51
 	AXFR       QueryType = 252
+	IXFR       QueryType = 251
 	ANY        QueryType = 255
 	OPT        QueryType = 41
 	TSIG       QueryType = 250
+)
+
+// RFC 8914: Extended DNS Error Codes
+const (
+	EDE_OTHER               uint16 = 0
+	EDE_UNSUPPORTED_DNSKEY  uint16 = 1
+	EDE_UNSUPPORTED_DS      uint16 = 2
+	EDE_STALE_ANSWER        uint16 = 3
+	EDE_FORGED_ANSWER       uint16 = 4
+	EDE_DNSSEC_INDETERMINATE uint16 = 5
+	EDE_DNSSEC_BOGUS        uint16 = 6
+	EDE_SIGNATURE_EXPIRED   uint16 = 7
+	EDE_SIGNATURE_NOT_YET   uint16 = 8
+	EDE_MISSING_DNSKEY      uint16 = 9
+	EDE_MISSING_DS          uint16 = 10
+	EDE_UNSUPPORTED_ALG     uint16 = 11
+	EDE_PROHIBITED          uint16 = 18
+	EDE_BLOCKED             uint16 = 15
+	EDE_CENSORED            uint16 = 16
+	EDE_FILTERED            uint16 = 17
+)
+
+func RecordTypeToQueryType(t domain.RecordType) QueryType {
+	switch t {
+	case domain.TypeA: return A
+	case domain.TypeNS: return NS
+	case domain.TypeCNAME: return CNAME
+	case domain.TypeSOA: return SOA
+	case domain.TypeMX: return MX
+	case domain.TypeTXT: return TXT
+	case domain.TypeAAAA: return AAAA
+	case domain.TypePTR: return PTR
+	default: return UNKNOWN
+	}
+}
+
+func (t QueryType) String() string {
+	switch t {
+	case A: return "A"
+	case NS: return "NS"
+	case CNAME: return "CNAME"
+	case SOA: return "SOA"
+	case MX: return "MX"
+	case TXT: return "TXT"
+	case AAAA: return "AAAA"
+	case SRV: return "SRV"
+	case DS: return "DS"
+	case RRSIG: return "RRSIG"
+	case NSEC: return "NSEC"
+	case DNSKEY: return "DNSKEY"
+	case NSEC3: return "NSEC3"
+	case NSEC3PARAM: return "NSEC3PARAM"
+	case AXFR: return "AXFR"
+	case ANY: return "ANY"
+	case OPT: return "OPT"
+	case TSIG: return "TSIG"
+	case PTR: return "PTR"
+	default: return fmt.Sprintf("TYPE%d", t)
+	}
+}
+
+const (
+	OPCODE_QUERY  uint8 = 0
+	OPCODE_IQUERY uint8 = 1
+	OPCODE_STATUS uint8 = 2
+	OPCODE_NOTIFY uint8 = 4
+	OPCODE_UPDATE uint8 = 5
+)
+
+const (
+	RCODE_NOERROR  uint8 = 0
+	RCODE_FORMERR  uint8 = 1
+	RCODE_SERVFAIL uint8 = 2
+	RCODE_NXDOMAIN uint8 = 3
+	RCODE_NOTIMP   uint8 = 4
+	RCODE_REFUSED  uint8 = 5
+	RCODE_YXDOMAIN uint8 = 6
+	RCODE_YXRRSET  uint8 = 7
+	RCODE_NXRRSET  uint8 = 8
+	RCODE_NOTAUTH  uint8 = 9
+	RCODE_NOTZONE  uint8 = 10
 )
 
 type DnsHeader struct {
@@ -51,6 +135,11 @@ type DnsHeader struct {
 	Z               bool
 	RecursionAvailable bool
 
+	// RFC 2136 (Dynamic Update) field renames:
+	// Questions -> ZOCOUNT (Number of zones)
+	// Answers -> PRCOUNT (Number of prerequisites)
+	// AuthoritativeEntries -> UPCOUNT (Number of updates)
+	// ResourceEntries -> ADCOUNT (Number of additional records)
 	Questions       uint16
 	Answers         uint16
 	AuthoritativeEntries uint16
@@ -222,6 +311,14 @@ type DnsRecord struct {
 	Other         []byte
 }
 
+func (r *DnsRecord) AddEDE(code uint16, text string) {
+	data := []byte{byte(code >> 8), byte(code & 0xFF)}
+	if text != "" {
+		data = append(data, []byte(text)...)
+	}
+	r.Options = append(r.Options, EdnsOption{Code: 15, Data: data})
+}
+
 func (r *DnsRecord) Read(buffer *BytePacketBuffer) error {
 	var err error
 	r.Name, err = buffer.ReadName()
@@ -240,6 +337,8 @@ func (r *DnsRecord) Read(buffer *BytePacketBuffer) error {
 	dataLen, err := buffer.Readu16()
 	if err != nil { return err }
 	startPos := buffer.Position()
+
+	// fmt.Printf("DEBUG: Reading %v dataLen=%d\n", r.Type, dataLen)
 
 	switch r.Type {
 	case A:
@@ -341,6 +440,20 @@ func (r *DnsRecord) Read(buffer *BytePacketBuffer) error {
 		remaining := int(dataLen) - (buffer.Position() - startPos)
 		r.Digest, _ = buffer.ReadRange(buffer.Position(), remaining)
 		buffer.Step(remaining)
+	case TSIG:
+		r.AlgorithmName, _ = buffer.ReadName()
+		timeHigh, _ := buffer.Readu16()
+		timeLow, _ := buffer.Readu32()
+		r.TimeSigned = uint64(timeHigh)<<32 | uint64(timeLow)
+		r.Fudge, _ = buffer.Readu16()
+		macLen, _ := buffer.Readu16()
+		r.MAC, _ = buffer.ReadRange(buffer.Position(), int(macLen))
+		buffer.Step(int(macLen))
+		r.OriginalID, _ = buffer.Readu16()
+		r.Error, _ = buffer.Readu16()
+		otherLen, _ := buffer.Readu16()
+		r.Other, _ = buffer.ReadRange(buffer.Position(), int(otherLen))
+		buffer.Step(int(otherLen))
 	case OPT:
 		r.UDPPayloadSize = r.Class
 		r.ExtendedRcode = uint8(r.TTL >> 24)
@@ -549,6 +662,7 @@ type DnsPacket struct {
 	Answers     []DnsRecord
 	Authorities []DnsRecord
 	Resources   []DnsRecord
+	TsigStart   int // Byte offset where TSIG record starts, -1 if not present
 }
 
 func NewDnsPacket() *DnsPacket {
@@ -558,6 +672,7 @@ func NewDnsPacket() *DnsPacket {
 		Answers: []DnsRecord{},
 		Authorities: []DnsRecord{},
 		Resources: []DnsRecord{},
+		TsigStart: -1,
 	}
 }
 
@@ -579,8 +694,12 @@ func (p *DnsPacket) FromBuffer(buffer *BytePacketBuffer) error {
 		p.Authorities = append(p.Authorities, r)
 	}
 	for i := 0; i < int(p.Header.ResourceEntries); i++ {
+		start := buffer.Position()
 		var r DnsRecord
 		if err := r.Read(buffer); err != nil { return err }
+		if r.Type == TSIG {
+			p.TsigStart = start
+		}
 		p.Resources = append(p.Resources, r)
 	}
 	return nil
