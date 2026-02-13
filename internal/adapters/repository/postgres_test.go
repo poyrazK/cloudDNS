@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -130,9 +131,119 @@ func TestPostgresRepository_Integration(t *testing.T) {
 		t.Errorf("DeleteRecord failed: %v", err)
 	}
 
-	// 10. Test DeleteZone
+	// 10. Test DeleteRecordsByNameAndType
+	rid2 := "550e8400-e29b-41d4-a716-446655440003"
+	repo.CreateRecord(ctx, &domain.Record{ID: rid2, ZoneID: zoneID1, Name: "del.test.", Type: domain.TypeA, Content: "1.1.1.1", TTL: 60})
+	if err := repo.DeleteRecordsByNameAndType(ctx, zoneID1, "del.test.", domain.TypeA); err != nil {
+		t.Errorf("DeleteRecordsByNameAndType failed: %v", err)
+	}
+
+	// 11. Test DeleteRecordsByName
+	rid3 := "550e8400-e29b-41d4-a716-446655440004"
+	repo.CreateRecord(ctx, &domain.Record{ID: rid3, ZoneID: zoneID1, Name: "delname.test.", Type: domain.TypeA, Content: "1.1.1.1", TTL: 60})
+	if err := repo.DeleteRecordsByName(ctx, zoneID1, "delname.test."); err != nil {
+		t.Errorf("DeleteRecordsByName failed: %v", err)
+	}
+
+	// 12. Test DeleteRecordSpecific
+	rid4 := "550e8400-e29b-41d4-a716-446655440005"
+	repo.CreateRecord(ctx, &domain.Record{ID: rid4, ZoneID: zoneID1, Name: "specific.test.", Type: domain.TypeA, Content: "1.1.1.1", TTL: 60})
+	if err := repo.DeleteRecordSpecific(ctx, zoneID1, "specific.test.", domain.TypeA, "1.1.1.1"); err != nil {
+		t.Errorf("DeleteRecordSpecific failed: %v", err)
+	}
+
+	// 13. Test Zone Changes (IXFR)
+	changeID1 := "550e8400-e29b-41d4-a716-446655440006"
+	change := &domain.ZoneChange{
+		ID: changeID1, ZoneID: zoneID1, Serial: 100, Action: "ADD", Name: "new.test.", Type: domain.TypeA, Content: "4.4.4.4", TTL: 300, CreatedAt: time.Now(),
+	}
+	if err := repo.RecordZoneChange(ctx, change); err != nil {
+		t.Errorf("RecordZoneChange failed: %v", err)
+	}
+	changes, _ := repo.ListZoneChanges(ctx, zoneID1, 99)
+	if len(changes) != 1 || changes[0].ID != changeID1 {
+		t.Errorf("ListZoneChanges expected 1 change, got %d", len(changes))
+	}
+
+	// 14. Test Split-Horizon (Network Matching)
+	rid5 := "550e8400-e29b-41d4-a716-446655440007"
+	netStr := "192.168.1.0/24"
+	repo.CreateRecord(ctx, &domain.Record{ID: rid5, ZoneID: zoneID1, Name: "private.test.", Type: domain.TypeA, Content: "10.0.0.1", TTL: 60, Network: &netStr})
+	
+	// Should match from 192.168.1.50
+	recs, _ = repo.GetRecords(ctx, "private.test.", domain.TypeA, "192.168.1.50")
+	if len(recs) != 1 {
+		t.Errorf("Split-Horizon match failed")
+	}
+	// Should NOT match from 8.8.8.8
+	recs, _ = repo.GetRecords(ctx, "private.test.", domain.TypeA, "8.8.8.8")
+	if len(recs) != 0 {
+		t.Errorf("Split-Horizon isolation failed")
+	}
+
+	// 15. Test DeleteZone
 	if err := repo.DeleteZone(ctx, zoneID1, "t1"); err != nil {
 		t.Errorf("DeleteZone failed: %v", err)
+	}
+}
+
+func TestConvertPacketRecordToDomain(t *testing.T) {
+	zoneID := "550e8400-e29b-41d4-a716-446655440008"
+	pRec := packet.DnsRecord{
+		Name: "conv.test.",
+		Type: packet.A,
+		TTL:  300,
+		IP:   net.ParseIP("1.2.3.4"),
+	}
+	
+	dRec, err := ConvertPacketRecordToDomain(pRec, zoneID)
+	if err != nil {
+		t.Fatalf("ConvertPacketRecordToDomain failed: %v", err)
+	}
+	if dRec.Content != "1.2.3.4" || dRec.Type != domain.TypeA {
+		t.Errorf("Conversion mismatch: %+v", dRec)
+	}
+
+	// SOA
+	pSOA := packet.DnsRecord{
+		Name: "soa.test.",
+		Type: packet.SOA,
+		TTL: 3600,
+		MName: "ns1.", RName: "admin.", Serial: 1, Refresh: 2, Retry: 3, Expire: 4, Minimum: 5,
+	}
+	dSOA, _ := ConvertPacketRecordToDomain(pSOA, zoneID)
+	if dSOA.Type != domain.TypeSOA {
+		t.Errorf("SOA conversion type mismatch")
+	}
+}
+
+func TestPostgresRepository_EdgeCases(t *testing.T) {
+	if testing.Short() { t.Skip() }
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+	repo := NewPostgresRepository(db)
+	ctx := context.Background()
+
+	// 1. Test CreateZoneWithRecords
+	zID := "550e8400-e29b-41d4-a716-446655440009"
+	zone := &domain.Zone{ID: zID, Name: "batch.test.", TenantID: "t1"}
+	recs := []domain.Record{
+		{ID: "550e8400-e29b-41d4-a716-446655440010", ZoneID: zID, Name: "batch.test.", Type: domain.TypeA, Content: "1.1.1.1", TTL: 60},
+	}
+	if err := repo.CreateZoneWithRecords(ctx, zone, recs); err != nil {
+		t.Errorf("CreateZoneWithRecords failed: %v", err)
+	}
+
+	// 2. Test GetZone No Rows
+	z, err := repo.GetZone(ctx, "missing.zone.")
+	if err != nil || z != nil {
+		t.Errorf("Expected nil for missing zone, got %v", z)
+	}
+
+	// 3. Test GetRecords with empty type
+	all, _ := repo.GetRecords(ctx, "batch.test.", "", "127.0.0.1")
+	if len(all) == 0 {
+		t.Errorf("Expected records for empty type query")
 	}
 }
 
