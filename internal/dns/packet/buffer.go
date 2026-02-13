@@ -286,3 +286,15 @@ func (b *BytePacketBuffer) WriteName(name string) error {
 	}
 	return nil
 }
+
+// WriteRange writes a slice of bytes at a specific position
+func (b *BytePacketBuffer) WriteRange(start int, data []byte) error {
+	if start+len(data) > MaxPacketSize {
+		return errors.New("out of bounds")
+	}
+	copy(b.Buf[start:start+len(data)], data)
+	if start+len(data) > b.Pos {
+		b.Pos = start + len(data)
+	}
+	return nil
+}
