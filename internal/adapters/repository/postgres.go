@@ -162,8 +162,17 @@ func (r *PostgresRepository) CreateRecord(ctx context.Context, record *domain.Re
 }
 
 func (r *PostgresRepository) ListZones(ctx context.Context, tenantID string) ([]domain.Zone, error) {
-	query := `SELECT id, tenant_id, name, vpc_id, description, created_at, updated_at FROM dns_zones WHERE tenant_id = $1`
-	rows, err := r.db.QueryContext(ctx, query, tenantID)
+	query := `SELECT id, tenant_id, name, vpc_id, description, created_at, updated_at FROM dns_zones`
+	var rows *sql.Rows
+	var err error
+
+	if tenantID != "" {
+		query += " WHERE tenant_id = $1"
+		rows, err = r.db.QueryContext(ctx, query, tenantID)
+	} else {
+		rows, err = r.db.QueryContext(ctx, query)
+	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -190,6 +199,56 @@ func (r *PostgresRepository) DeleteRecord(ctx context.Context, recordID string, 
 	query := `DELETE FROM dns_records WHERE id = $1 AND zone_id = $2`
 	_, err := r.db.ExecContext(ctx, query, recordID, zoneID)
 	return err
+}
+
+func (r *PostgresRepository) DeleteRecordsByNameAndType(ctx context.Context, zoneID string, name string, qType domain.RecordType) error {
+	query := `DELETE FROM dns_records WHERE zone_id = $1 AND LOWER(name) = LOWER($2) AND type = $3`
+	_, err := r.db.ExecContext(ctx, query, zoneID, name, string(qType))
+	return err
+}
+
+func (r *PostgresRepository) DeleteRecordsByName(ctx context.Context, zoneID string, name string) error {
+	query := `DELETE FROM dns_records WHERE zone_id = $1 AND LOWER(name) = LOWER($2)`
+	_, err := r.db.ExecContext(ctx, query, zoneID, name)
+	return err
+}
+
+func (r *PostgresRepository) DeleteRecordSpecific(ctx context.Context, zoneID string, name string, qType domain.RecordType, content string) error {
+	query := `DELETE FROM dns_records WHERE zone_id = $1 AND LOWER(name) = LOWER($2) AND type = $3 AND content = $4`
+	_, err := r.db.ExecContext(ctx, query, zoneID, name, string(qType), content)
+	return err
+}
+
+func (r *PostgresRepository) RecordZoneChange(ctx context.Context, change *domain.ZoneChange) error {
+	query := `INSERT INTO dns_zone_changes (id, zone_id, serial, action, name, type, content, ttl, priority, created_at) 
+			  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
+	_, err := r.db.ExecContext(ctx, query, change.ID, change.ZoneID, change.Serial, change.Action, change.Name, string(change.Type), change.Content, change.TTL, change.Priority, change.CreatedAt)
+	return err
+}
+
+func (r *PostgresRepository) ListZoneChanges(ctx context.Context, zoneID string, fromSerial uint32) ([]domain.ZoneChange, error) {
+	query := `SELECT id, zone_id, serial, action, name, type, content, ttl, priority, created_at 
+	          FROM dns_zone_changes WHERE zone_id = $1 AND serial > $2 ORDER BY serial ASC, created_at ASC`
+	rows, err := r.db.QueryContext(ctx, query, zoneID, fromSerial)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var changes []domain.ZoneChange
+	for rows.Next() {
+		var c domain.ZoneChange
+		var priority sql.NullInt32
+		if err := rows.Scan(&c.ID, &c.ZoneID, &c.Serial, &c.Action, &c.Name, &c.Type, &c.Content, &c.TTL, &priority, &c.CreatedAt); err != nil {
+			return nil, err
+		}
+		if priority.Valid {
+			p := int(priority.Int32)
+			c.Priority = &p
+		}
+		changes = append(changes, c)
+	}
+	return changes, nil
 }
 
 func (r *PostgresRepository) SaveAuditLog(ctx context.Context, log *domain.AuditLog) error {
@@ -220,6 +279,81 @@ func (r *PostgresRepository) GetAuditLogs(ctx context.Context, tenantID string) 
 
 func (r *PostgresRepository) Ping(ctx context.Context) error {
 	return r.db.PingContext(ctx)
+}
+
+func (r *PostgresRepository) CreateKey(ctx context.Context, key *domain.DNSSECKey) error {
+	query := `INSERT INTO dnssec_keys (id, zone_id, key_type, algorithm, private_key, public_key, active, created_at, updated_at) 
+			  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
+	_, err := r.db.ExecContext(ctx, query, key.ID, key.ZoneID, key.KeyType, key.Algorithm, key.PrivateKey, key.PublicKey, key.Active, key.CreatedAt, key.UpdatedAt)
+	return err
+}
+
+func (r *PostgresRepository) ListKeysForZone(ctx context.Context, zoneID string) ([]domain.DNSSECKey, error) {
+	query := `SELECT id, zone_id, key_type, algorithm, private_key, public_key, active, created_at, updated_at FROM dnssec_keys WHERE zone_id = $1`
+	rows, err := r.db.QueryContext(ctx, query, zoneID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var keys []domain.DNSSECKey
+	for rows.Next() {
+		var k domain.DNSSECKey
+		if err := rows.Scan(&k.ID, &k.ZoneID, &k.KeyType, &k.Algorithm, &k.PrivateKey, &k.PublicKey, &k.Active, &k.CreatedAt, &k.UpdatedAt); err != nil {
+			return nil, err
+		}
+		keys = append(keys, k)
+	}
+	return keys, nil
+}
+
+func (r *PostgresRepository) UpdateKey(ctx context.Context, key *domain.DNSSECKey) error {
+	query := `UPDATE dnssec_keys SET active = $1, updated_at = $2 WHERE id = $3`
+	_, err := r.db.ExecContext(ctx, query, key.Active, key.UpdatedAt, key.ID)
+	return err
+}
+
+// ConvertPacketRecordToDomain is a helper to bridge wire format and domain model
+func ConvertPacketRecordToDomain(pRec packet.DnsRecord, zoneID string) (domain.Record, error) {
+	rec := domain.Record{
+		ZoneID: zoneID,
+		Name:   pRec.Name,
+		TTL:    int(pRec.TTL),
+	}
+
+	switch pRec.Type {
+	case packet.A, packet.AAAA:
+		rec.Type = domain.RecordType(pRec.Type.String()) // assuming QueryType has String() or I use mapping
+		rec.Content = pRec.IP.String()
+	case packet.CNAME, packet.NS, packet.PTR:
+		rec.Type = domain.RecordType(pRec.Type.String())
+		rec.Content = pRec.Host
+	case packet.MX:
+		rec.Type = domain.TypeMX
+		p := int(pRec.Priority)
+		rec.Priority = &p
+		rec.Content = pRec.Host
+	case packet.TXT:
+		rec.Type = domain.TypeTXT
+		rec.Content = pRec.Txt
+	case packet.SOA:
+		rec.Type = domain.TypeSOA
+		rec.Content = fmt.Sprintf("%s %s %d %d %d %d %d", 
+			pRec.MName, pRec.RName, pRec.Serial, pRec.Refresh, pRec.Retry, pRec.Expire, pRec.Minimum)
+	default:
+		return rec, fmt.Errorf("unsupported record type for conversion: %d", pRec.Type)
+	}
+
+	// Manual mapping if String() is not what we want
+	switch pRec.Type {
+	case packet.A: rec.Type = domain.TypeA
+	case packet.AAAA: rec.Type = domain.TypeAAAA
+	case packet.CNAME: rec.Type = domain.TypeCNAME
+	case packet.NS: rec.Type = domain.TypeNS
+	case packet.PTR: rec.Type = domain.TypePTR
+	}
+
+	return rec, nil
 }
 
 // ConvertDomainToPacketRecord is a helper to bridge domain model and wire format
