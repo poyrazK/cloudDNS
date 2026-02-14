@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"runtime"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/poyrazK/cloudDNS/internal/adapters/repository"
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
 	"github.com/poyrazK/cloudDNS/internal/core/ports"
+	"github.com/poyrazK/cloudDNS/internal/core/services"
 	"github.com/poyrazK/cloudDNS/internal/dns/master"
 	"github.com/poyrazK/cloudDNS/internal/dns/packet"
 )
@@ -26,6 +28,7 @@ type Server struct {
 	Repo        ports.DNSRepository
 	Cache       *DNSCache
 	Redis       *RedisCache
+	DNSSEC      *services.DNSSECService
 	WorkerCount int
 	udpQueue    chan udpTask
 	Logger      *slog.Logger
