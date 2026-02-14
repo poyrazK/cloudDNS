@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"log/slog"
@@ -38,7 +39,8 @@ type Server struct {
 	TsigKeys    map[string][]byte
 
 	// Testing/Chaos flags
-	SimulateDBLatency time.Duration
+	SimulateDBLatency  time.Duration
+	NotifyPortOverride int
 
 	// TLS Config for DoT and DoH
 	TLSConfig *tls.Config
@@ -186,12 +188,40 @@ func (s *Server) Run() error {
 }
 
 func (s *Server) handleDoH(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost || r.Header.Get("Content-Type") != "application/dns-message" {
-		http.Error(w, "invalid request", http.StatusBadRequest)
+	var dnsMsg []byte
+	var err error
+
+	if r.Method == http.MethodGet {
+		query := r.URL.Query().Get("dns")
+		if query == "" {
+			http.Error(w, "missing dns parameter", http.StatusBadRequest)
+			return
+		}
+		dnsMsg, err = base64.RawURLEncoding.DecodeString(query)
+		if err != nil {
+			// Try with padding if raw fails
+			dnsMsg, err = base64.URLEncoding.DecodeString(query)
+			if err != nil {
+				http.Error(w, "invalid base64", http.StatusBadRequest)
+				return
+			}
+		}
+	} else if r.Method == http.MethodPost {
+		if r.Header.Get("Content-Type") != "application/dns-message" {
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+		dnsMsg, err = io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "failed to read body", http.StatusBadRequest)
+			return
+		}
+	} else {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	body, _ := io.ReadAll(r.Body)
-	s.handlePacket(body, r.RemoteAddr, func(resp []byte) error {
+
+	s.handlePacket(dnsMsg, r.RemoteAddr, func(resp []byte) error {
 		w.Header().Set("Content-Type", "application/dns-message")
 		w.WriteHeader(http.StatusOK)
 		w.Write(resp)
@@ -878,9 +908,11 @@ func (s *Server) signResponse(ctx context.Context, zone *domain.Zone, response *
 	if len(response.Answers) > 0 {
 		groups := s.groupRecords(response.Answers)
 		for _, group := range groups {
-			sig, err := s.DNSSEC.SignRRSet(ctx, zone.Name, zone.ID, group)
-			if err == nil && sig != nil {
-				response.Answers = append(response.Answers, *sig)
+			sigs, err := s.DNSSEC.SignRRSet(ctx, zone.Name, zone.ID, group)
+			if err == nil {
+				for _, sig := range sigs {
+					response.Answers = append(response.Answers, sig)
+				}
 			}
 		}
 	}
@@ -888,9 +920,11 @@ func (s *Server) signResponse(ctx context.Context, zone *domain.Zone, response *
 	if len(response.Authorities) > 0 {
 		groups := s.groupRecords(response.Authorities)
 		for _, group := range groups {
-			sig, err := s.DNSSEC.SignRRSet(ctx, zone.Name, zone.ID, group)
-			if err == nil && sig != nil {
-				response.Authorities = append(response.Authorities, *sig)
+			sigs, err := s.DNSSEC.SignRRSet(ctx, zone.Name, zone.ID, group)
+			if err == nil {
+				for _, sig := range sigs {
+					response.Authorities = append(response.Authorities, sig)
+				}
 			}
 		}
 	}
@@ -1037,6 +1071,13 @@ func (s *Server) applyUpdate(ctx context.Context, zone *domain.Zone, up packet.D
 		if err != nil {
 			return err
 		}
+		if dRec.ID == "" {
+			dRec.ID = fmt.Sprintf("%d-%d", time.Now().UnixNano(), rand.Int())
+		}
+		if dRec.CreatedAt.IsZero() {
+			dRec.CreatedAt = time.Now()
+			dRec.UpdatedAt = time.Now()
+		}
 		return s.Repo.CreateRecord(ctx, &dRec)
 	}
 }
@@ -1062,11 +1103,18 @@ func (s *Server) notifySlaves(zoneName string) {
 		}
 
 		for _, ip := range ips {
-			if strings.HasPrefix(s.Addr, ip) {
+			// Skip logic: only skip if it's EXACTLY the same host:port
+			targetPort := 53
+			if s.NotifyPortOverride > 0 {
+				targetPort = s.NotifyPortOverride
+			}
+			
+			targetAddr := net.JoinHostPort(ip, fmt.Sprintf("%d", targetPort))
+			if s.Addr == targetAddr {
 				continue
 			}
 
-			s.Logger.Info("sending NOTIFY", "zone", zoneName, "slave", ip)
+			s.Logger.Info("sending NOTIFY", "zone", zoneName, "slave", targetAddr)
 
 			notify := packet.NewDnsPacket()
 			notify.Header.ID = uint16(rand.Intn(65535))
@@ -1081,7 +1129,7 @@ func (s *Server) notifySlaves(zoneName string) {
 			notify.Write(buf)
 			data := buf.Buf[:buf.Position()]
 
-			conn, err := net.Dial("udp", net.JoinHostPort(ip, "53"))
+			conn, err := net.Dial("udp", targetAddr)
 			if err == nil {
 				conn.Write(data)
 				conn.Close()
@@ -1108,6 +1156,10 @@ func (s *Server) generateNSEC(ctx context.Context, zone *domain.Zone, queryName 
 			seen[r.Name] = true
 		}
 		nameToTypes[r.Name] = append(nameToTypes[r.Name], r.Type)
+	}
+
+	if len(uniqueNames) == 0 {
+		return packet.DnsRecord{}, fmt.Errorf("no records in zone")
 	}
 
 	var ownerName, nextName string
@@ -1199,6 +1251,10 @@ func (s *Server) generateNSEC3(ctx context.Context, zone *domain.Zone, queryName
 	for _, name := range ownerNames {
 		h := packet.HashName(name, alg, iterations, []byte(salt))
 		hashes = append(hashes, hashEntry{name: name, hash: h})
+	}
+
+	if len(hashes) == 0 {
+		return packet.DnsRecord{}, fmt.Errorf("no records to hash for NSEC3")
 	}
 
 	sort.Slice(hashes, func(i, j int) bool {
