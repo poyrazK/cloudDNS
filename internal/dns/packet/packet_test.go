@@ -702,15 +702,105 @@ func TestReadName_MaxJumps(t *testing.T) {
 	}
 }
 
-func TestQueryTypeUtilities(t *testing.T) {
-	if qt := RecordTypeToQueryType(domain.TypeA); qt != A {
-		t.Errorf("RecordTypeToQueryType(A) failed")
+func TestQueryType_String(t *testing.T) {
+	tests := []struct {
+		qt   QueryType
+		want string
+	}{
+		{A, "A"},
+		{NS, "NS"},
+		{CNAME, "CNAME"},
+		{SOA, "SOA"},
+		{MX, "MX"},
+		{TXT, "TXT"},
+		{AAAA, "AAAA"},
+		{SRV, "SRV"},
+		{DS, "DS"},
+		{RRSIG, "RRSIG"},
+		{NSEC, "NSEC"},
+		{DNSKEY, "DNSKEY"},
+		{NSEC3, "NSEC3"},
+		{NSEC3PARAM, "NSEC3PARAM"},
+		{AXFR, "AXFR"},
+		{IXFR, "IXFR"},
+		{ANY, "ANY"},
+		{OPT, "OPT"},
+		{TSIG, "TSIG"},
+		{PTR, "PTR"},
+		{QueryType(999), "TYPE999"},
 	}
-	if s := A.String(); s != "A" {
-		t.Errorf("A.String() failed")
+	for _, tt := range tests {
+		if got := tt.qt.String(); got != tt.want {
+			t.Errorf("QueryType(%d).String() = %v, want %v", tt.qt, got, tt.want)
+		}
 	}
-	if s := QueryType(999).String(); s != "TYPE999" {
-		t.Errorf("Unknown QueryType string failed")
+}
+
+func TestDnsHeader_NewAndWrite(t *testing.T) {
+	h := NewDnsHeader()
+	h.ID = 1234
+	h.Response = true
+	h.Opcode = 0
+	h.AuthoritativeAnswer = true
+	h.TruncatedMessage = false
+	h.RecursionDesired = true
+	h.RecursionAvailable = true
+	h.Z = false
+	h.AuthedData = true
+	h.CheckingDisabled = false
+	h.ResCode = 0
+	h.Questions = 1
+	h.Answers = 0
+	h.AuthoritativeEntries = 0
+	h.ResourceEntries = 0
+
+	buf := NewBytePacketBuffer()
+	if err := h.Write(buf); err != nil {
+		t.Fatalf("Header.Write failed: %v", err)
+	}
+
+	if buf.Position() != 12 {
+		t.Errorf("Expected 12 bytes, got %d", buf.Position())
+	}
+}
+
+func TestDnsQuestion_NewAndWrite(t *testing.T) {
+	q := NewDnsQuestion("example.com.", A)
+	buf := NewBytePacketBuffer()
+	if err := q.Write(buf); err != nil {
+		t.Fatalf("Question.Write failed: %v", err)
+	}
+
+	buf.Seek(0)
+	parsed := DnsQuestion{}
+	if err := parsed.Read(buf); err != nil {
+		t.Fatalf("Question.Read failed: %v", err)
+	}
+
+	if parsed.Name != "example.com." || parsed.QType != A {
+		t.Errorf("Question mismatch: %+v", parsed)
+	}
+}
+
+func TestRecordTypeToQueryType(t *testing.T) {
+	tests := []struct {
+		rt   domain.RecordType
+		want QueryType
+	}{
+		{domain.TypeA, A},
+		{domain.TypeNS, NS},
+		{domain.TypeCNAME, CNAME},
+		{domain.TypeSOA, SOA},
+		{domain.TypeMX, MX},
+		{domain.TypeTXT, TXT},
+		{domain.TypeAAAA, AAAA},
+		{domain.TypePTR, PTR},
+		{"UNKNOWN", UNKNOWN},
+	}
+	for _, tt := range tests {
+		if got := RecordTypeToQueryType(tt.rt); got != tt.want {
+			t.Errorf("RecordTypeToQueryType(%v) = %v, want %v", tt.rt, got, tt.want)
+		}
 	}
 }
 
@@ -720,6 +810,33 @@ func TestBufferLoad(t *testing.T) {
 	buf.Load(data)
 	if val, _ := buf.Read(); val != 1 {
 		t.Errorf("Buffer Load failed")
+	}
+}
+
+func TestBuffer_EdgeCases(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	
+	// 1. Step and Seek
+	buf.Step(10)
+	if buf.Position() != 10 {
+		t.Errorf("Step(10) failed")
+	}
+	buf.Seek(5)
+	if buf.Position() != 5 {
+		t.Errorf("Seek(5) failed")
+	}
+
+	// 2. Nested Name Compression
+	buf.Reset()
+	buf.HasNames = true
+	
+	// Write "a.b.test.com."
+	buf.WriteName("a.b.test.com.")
+	// Write "b.test.com." (should reuse suffix)
+	buf.WriteName("b.test.com.")
+	
+	if buf.Position() >= 30 { // Total should be less than naive sum
+		t.Errorf("Compression not working effectively")
 	}
 }
 
