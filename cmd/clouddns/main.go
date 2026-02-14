@@ -72,5 +72,10 @@ func run() error {
 		"api_addr", apiAddr,
 	)
 
+	// For testing the full initialization path
+	if apiAddr == "test-exit" {
+		return nil
+	}
+
 	return http.ListenAndServe(apiAddr, mux)
 }
