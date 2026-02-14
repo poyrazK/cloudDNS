@@ -380,6 +380,14 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 		return err
 	}
 
+	if request.Header.Opcode == packet.OPCODE_UPDATE {
+		return s.handleUpdate(request, data, clientIP, sendFn)
+	}
+
+	if request.Header.Opcode == packet.OPCODE_NOTIFY {
+		return s.handleNotify(request, clientIP, sendFn)
+	}
+
 	if len(request.Questions) == 0 {
 		response := packet.NewDnsPacket()
 		response.Header.ID = request.Header.ID
@@ -597,6 +605,406 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 
 	s.Logger.Info("query processed", "name", q.Name, "src", source, "lat", time.Since(start).Milliseconds())
 	return sendFn(resData)
+}
+
+func (s *Server) handleNotify(request *packet.DnsPacket, clientIP string, sendFn func([]byte) error) error {
+	s.Logger.Info("received NOTIFY", "zone", request.Questions[0].Name, "from", clientIP)
+
+	response := packet.NewDnsPacket()
+	response.Header.ID = request.Header.ID
+	response.Header.Response = true
+	response.Header.Opcode = packet.OPCODE_NOTIFY
+	response.Header.AuthoritativeAnswer = true
+	if len(request.Questions) > 0 {
+		response.Questions = append(response.Questions, request.Questions[0])
+	}
+
+	// TODO: If we are a slave, trigger refresh/IXFR here.
+	// For now, we just acknowledge.
+
+	response.Header.ResCode = packet.RCODE_NOERROR
+	return s.sendUpdateResponse(response, sendFn)
+}
+
+func (s *Server) handleUpdate(request *packet.DnsPacket, rawData []byte, clientIP string, sendFn func([]byte) error) error {
+	s.Logger.Info("handling dynamic update", "id", request.Header.ID, "client", clientIP)
+
+	response := packet.NewDnsPacket()
+	response.Header.ID = request.Header.ID
+	response.Header.Response = true
+	response.Header.Opcode = packet.OPCODE_UPDATE
+
+	// 1. Validate TSIG if present
+	if request.TsigStart != -1 {
+		tsig := request.Resources[len(request.Resources)-1]
+		secret, ok := s.TsigKeys[tsig.Name]
+		if !ok {
+			s.Logger.Warn("update failed: unknown TSIG key", "key", tsig.Name)
+			response.Header.ResCode = packet.RCODE_NOTAUTH
+			return s.sendUpdateResponse(response, sendFn)
+		}
+		if err := request.VerifyTSIG(rawData, request.TsigStart, secret); err != nil {
+			s.Logger.Warn("update failed: TSIG verification failed", "error", err)
+			response.Header.ResCode = packet.RCODE_NOTAUTH
+			return s.sendUpdateResponse(response, sendFn)
+		}
+	}
+
+	// 2. Validate Zone Section (ZOCOUNT must be 1)
+	if len(request.Questions) != 1 {
+		s.Logger.Warn("update failed: ZOCOUNT != 1", "count", len(request.Questions))
+		response.Header.ResCode = packet.RCODE_FORMERR
+		return s.sendUpdateResponse(response, sendFn)
+	}
+
+	zone := request.Questions[0]
+	if !strings.HasSuffix(zone.Name, ".") {
+		zone.Name += "."
+	}
+	response.Questions = append(response.Questions, zone)
+
+	ctx := context.Background()
+	dbZone, _ := s.Repo.GetZone(ctx, zone.Name)
+	if dbZone == nil {
+		s.Logger.Warn("update failed: not authoritative for zone", "zone", zone.Name)
+		response.Header.ResCode = packet.RCODE_NOTAUTH
+		return s.sendUpdateResponse(response, sendFn)
+	}
+
+	// 2. Prerequisite Checks (PRCOUNT)
+	for _, pr := range request.Answers {
+		if err := s.checkPrerequisite(ctx, dbZone, pr); err != nil {
+			s.Logger.Warn("update failed: prerequisite mismatch", "pr", pr.Name, "error", err)
+			if uErr, ok := err.(updateError); ok {
+				response.Header.ResCode = uint8(uErr.rcode)
+			} else {
+				response.Header.ResCode = packet.RCODE_SERVFAIL
+			}
+			return s.sendUpdateResponse(response, sendFn)
+		}
+	}
+
+	// 3. Perform Updates (UPCOUNT)
+	var newSerial uint32
+	var changes []domain.ZoneChange
+
+	for _, up := range request.Authorities {
+		if err := s.applyUpdate(ctx, dbZone, up); err != nil {
+			s.Logger.Error("update failed: failed to apply record change", "up", up.Name, "error", err)
+			response.Header.ResCode = packet.RCODE_SERVFAIL
+			return s.sendUpdateResponse(response, sendFn)
+		}
+
+		// Record change for IXFR
+		change := domain.ZoneChange{
+			ID:        fmt.Sprintf("%d-%d", time.Now().UnixNano(), rand.Int()),
+			ZoneID:    dbZone.ID,
+			Name:      up.Name,
+			Type:      domain.RecordType(up.Type.String()),
+			TTL:       int(up.TTL),
+			CreatedAt: time.Now(),
+		}
+		if up.Class == 255 || up.Class == 254 {
+			change.Action = "DELETE"
+		} else {
+			change.Action = "ADD"
+			dRec, _ := repository.ConvertPacketRecordToDomain(up, dbZone.ID)
+			change.Content = dRec.Content
+			if dRec.Priority != nil {
+				change.Priority = dRec.Priority
+			}
+		}
+		changes = append(changes, change)
+	}
+
+	// 4. Increment Serial if changes occurred
+	if len(changes) > 0 {
+		soaRecords, _ := s.Repo.GetRecords(ctx, dbZone.Name, domain.TypeSOA, "")
+		if len(soaRecords) > 0 {
+			soa := soaRecords[0]
+			parts := strings.Fields(soa.Content)
+			if len(parts) >= 3 {
+				fmt.Sscanf(parts[2], "%d", &newSerial)
+				newSerial++
+				parts[2] = fmt.Sprintf("%d", newSerial)
+				soa.Content = strings.Join(parts, " ")
+				
+				// Delete old SOA and create new one (simplified update)
+				s.Repo.DeleteRecord(ctx, soa.ID, dbZone.ID)
+				s.Repo.CreateRecord(ctx, &soa)
+
+				// Persist changes with the new serial
+				for _, c := range changes {
+					c.Serial = newSerial
+					s.Repo.RecordZoneChange(ctx, &c)
+				}
+			}
+		}
+	}
+
+	// 5. Success
+	response.Header.ResCode = packet.RCODE_NOERROR
+	s.Logger.Info("dynamic update successful", "zone", zone.Name)
+	s.Cache.Flush()
+
+	// 6. Trigger NOTIFY (RFC 1996)
+	go s.notifySlaves(zone.Name)
+
+	return s.sendUpdateResponse(response, sendFn)
+}
+
+func (s *Server) sendUpdateResponse(resp *packet.DnsPacket, sendFn func([]byte) error) error {
+	resBuffer := packet.GetBuffer()
+	defer packet.PutBuffer(resBuffer)
+	resp.Write(resBuffer)
+	return sendFn(resBuffer.Buf[:resBuffer.Position()])
+}
+
+type updateError struct {
+	rcode int
+	msg   string
+}
+
+func (e updateError) Error() string { return e.msg }
+
+func (s *Server) checkPrerequisite(ctx context.Context, zone *domain.Zone, pr packet.DnsRecord) error {
+	// RFC 2136 Section 3.2
+	qTypeStr := queryTypeToRecordType(pr.Type)
+	records, err := s.Repo.GetRecords(ctx, pr.Name, qTypeStr, "")
+	if err != nil {
+		return updateError{rcode: int(packet.RCODE_SERVFAIL), msg: "failed to fetch records for prerequisite check"}
+	}
+
+	switch {
+	case pr.Class == 255: // ANY
+		if pr.Type == 255 { // ANY
+			// Name is in use
+			if len(records) == 0 {
+				return updateError{rcode: int(packet.RCODE_NXDOMAIN), msg: "name not in use"}
+			}
+		} else {
+			// RRset exists (value independent)
+			if len(records) == 0 {
+				return updateError{rcode: int(packet.RCODE_NXRRSET), msg: "rrset does not exist"}
+			}
+		}
+	case pr.Class == 254: // NONE
+		if pr.Type == 255 { // ANY
+			// Name is not in use
+			if len(records) > 0 {
+				return updateError{rcode: int(packet.RCODE_YXDOMAIN), msg: "name in use"}
+			}
+		} else {
+			// RRset does not exist
+			if len(records) > 0 {
+				return updateError{rcode: int(packet.RCODE_YXRRSET), msg: "rrset exists"}
+			}
+		}
+	default: // Value dependent check
+		// Check if RRset exists with exact values
+		// This is a simplified check: just verify at least one record matches if provided
+		if len(records) == 0 {
+			return updateError{rcode: int(packet.RCODE_NXRRSET), msg: "rrset does not exist"}
+		}
+		// TODO: Implement exact value matching for RRsets
+	}
+
+	return nil
+}
+
+func (s *Server) handleIXFR(conn net.Conn, request *packet.DnsPacket) {
+	q := request.Questions[0]
+	if !strings.HasSuffix(q.Name, ".") {
+		q.Name += "."
+	}
+
+	// RFC 1995: The client's current SOA is in the Authority section
+	if len(request.Authorities) == 0 || request.Authorities[0].Type != packet.SOA {
+		s.Logger.Warn("IXFR requested without client SOA in Authority section", "name", q.Name)
+		s.sendTCPError(conn, request.Header.ID, 1) // FORMERR
+		return
+	}
+	clientSOA := request.Authorities[0]
+	clientSerial := clientSOA.Serial
+
+	ctx := context.Background()
+	zone, _ := s.Repo.GetZone(ctx, q.Name)
+	if zone == nil {
+		s.Logger.Warn("IXFR requested for non-existent zone", "name", q.Name)
+		s.sendTCPError(conn, request.Header.ID, 3) // NXDOMAIN
+		return
+	}
+
+	// Get current SOA
+	soaRecords, _ := s.Repo.GetRecords(ctx, zone.Name, domain.TypeSOA, "")
+	if len(soaRecords) == 0 {
+		s.Logger.Error("IXFR failed: zone has no SOA", "zone", zone.Name)
+		s.sendTCPError(conn, request.Header.ID, 2)
+		return
+	}
+	currentSOA := soaRecords[0]
+	var currentSerial uint32
+	fmt.Sscanf(strings.Fields(currentSOA.Content)[2], "%d", &currentSerial)
+
+	if clientSerial == currentSerial {
+		// Client is up to date, just send current SOA
+		s.Logger.Info("IXFR client is up to date", "zone", zone.Name, "serial", clientSerial)
+		pSOA, _ := repository.ConvertDomainToPacketRecord(currentSOA)
+		s.sendSingleRecordResponse(conn, request.Header.ID, q, pSOA)
+		return
+	}
+
+	// Fetch changes since clientSerial
+	changes, err := s.Repo.ListZoneChanges(ctx, zone.ID, clientSerial)
+	if err != nil || len(changes) == 0 {
+		s.Logger.Info("IXFR history not found, falling back to AXFR", "zone", zone.Name, "client_serial", clientSerial)
+		s.handleAXFR(conn, request)
+		return
+	}
+
+	s.Logger.Info("IXFR starting", "zone", zone.Name, "from", clientSerial, "to", currentSerial)
+
+	// Send Current SOA (marks start of IXFR)
+	pCurrentSOA, _ := repository.ConvertDomainToPacketRecord(currentSOA)
+	s.sendSingleRecordResponse(conn, request.Header.ID, q, pCurrentSOA)
+
+	// Send diffs: [Old SOA, Deleted RRs, New SOA, Added RRs]
+	// Since we record changes per serial increment, we can iterate
+	currentDiffSerial := clientSerial
+	var deletions, additions []packet.DnsRecord
+
+	for _, c := range changes {
+		if c.Serial > currentDiffSerial {
+			// We moved to a new version. If we have accumulated diffs, send them.
+			if len(deletions) > 0 || len(additions) > 0 {
+				tempSOA := pCurrentSOA
+				tempSOA.Serial = currentDiffSerial
+				
+				s.sendIXFRDiff(conn, request.Header.ID, q, tempSOA, deletions, additions)
+				deletions = nil
+				additions = nil
+			}
+			currentDiffSerial = c.Serial
+		}
+
+		pRec := packet.DnsRecord{
+			Name:  c.Name,
+			Type:  packet.QueryType(master.RecordTypeToQueryType(c.Type)),
+			TTL:   uint32(c.TTL),
+			Class: 1,
+		}
+		
+		if c.Action == "DELETE" {
+			deletions = append(deletions, pRec)
+		} else {
+			additions = append(additions, pRec)
+		}
+	}
+
+	// Send last diff if any
+	if len(deletions) > 0 || len(additions) > 0 {
+		tempSOA := pCurrentSOA
+		tempSOA.Serial = currentDiffSerial
+		s.sendIXFRDiff(conn, request.Header.ID, q, tempSOA, deletions, additions)
+	}
+
+	// Send Current SOA (marks end of IXFR)
+	s.sendSingleRecordResponse(conn, request.Header.ID, q, pCurrentSOA)
+	s.Logger.Info("IXFR completed", "zone", zone.Name)
+}
+
+func (s *Server) applyUpdate(ctx context.Context, zone *domain.Zone, up packet.DnsRecord) error {
+	// RFC 2136 Section 3.4
+	switch {
+	case up.Class == 255: // ANY
+		if up.Type == 255 { // ANY
+			// Delete all RRsets from a name
+			return s.Repo.DeleteRecordsByName(ctx, zone.ID, up.Name)
+		} else {
+			// Delete an RRset
+			qTypeStr := queryTypeToRecordType(up.Type)
+			return s.Repo.DeleteRecordsByNameAndType(ctx, zone.ID, up.Name, qTypeStr)
+		}
+	case up.Class == 254: // NONE
+		// Delete an RR from an RRset
+		qTypeStr := queryTypeToRecordType(up.Type)
+		// We need the content to identify the specific record
+		// Convert UP record to domain to get content
+		dRec, err := repository.ConvertPacketRecordToDomain(up, zone.ID)
+		if err != nil { return err }
+		return s.Repo.DeleteRecordSpecific(ctx, zone.ID, up.Name, qTypeStr, dRec.Content)
+	default:
+		// Add to an RRset
+		dRec, err := repository.ConvertPacketRecordToDomain(up, zone.ID)
+		if err != nil { return err }
+		return s.Repo.CreateRecord(ctx, &dRec)
+	}
+}
+
+func (s *Server) handleNotify(request *packet.DnsPacket, clientIP string, sendFn func([]byte) error) error {
+	s.Logger.Info("received NOTIFY", "zone", request.Questions[0].Name, "from", clientIP)
+
+	response := packet.NewDnsPacket()
+	response.Header.ID = request.Header.ID
+	response.Header.Response = true
+	response.Header.Opcode = packet.OPCODE_NOTIFY
+	response.Header.AuthoritativeAnswer = true
+	if len(request.Questions) > 0 {
+		response.Questions = append(response.Questions, request.Questions[0])
+	}
+
+	// TODO: If we are a slave, trigger refresh/IXFR here.
+	// For now, we just acknowledge.
+
+	response.Header.ResCode = packet.RCODE_NOERROR
+	return s.sendUpdateResponse(response, sendFn)
+}
+
+func (s *Server) notifySlaves(zoneName string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// 1. Find the zone
+	dbZone, err := s.Repo.GetZone(ctx, zoneName)
+	if err != nil || dbZone == nil { return }
+
+	// 2. Find NS records for the zone to identify slaves
+	nsRecords, err := s.Repo.GetRecords(ctx, zoneName, domain.TypeNS, "")
+	if err != nil { return }
+
+	for _, ns := range nsRecords {
+		// 3. Resolve NS host to IP
+		ips, err := s.Repo.GetIPsForName(ctx, ns.Content, "")
+		if err != nil || len(ips) == 0 { continue }
+
+		for _, ip := range ips {
+			// Skip notifying ourself if we are listed
+			if strings.HasPrefix(s.Addr, ip) { continue }
+
+			s.Logger.Info("sending NOTIFY", "zone", zoneName, "slave", ip)
+			
+			notify := packet.NewDnsPacket()
+			notify.Header.ID = uint16(rand.Intn(65535))
+			notify.Header.Opcode = packet.OPCODE_NOTIFY
+			notify.Header.AuthoritativeAnswer = true
+			notify.Questions = append(notify.Questions, packet.DnsQuestion{
+				Name:  zoneName,
+				QType: packet.SOA,
+			})
+
+			buf := packet.GetBuffer()
+			notify.Write(buf)
+			data := buf.Buf[:buf.Position()]
+
+			// Send via UDP (RFC 1996 says MUST use UDP first)
+			conn, err := net.Dial("udp", net.JoinHostPort(ip, "53"))
+			if err == nil {
+				conn.Write(data)
+				conn.Close()
+			}
+			packet.PutBuffer(buf)
+		}
+	}
 }
 
 func (s *Server) generateNSEC(ctx context.Context, zone *domain.Zone, queryName string) (packet.DnsRecord, error) {
