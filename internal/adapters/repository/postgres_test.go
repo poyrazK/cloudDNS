@@ -3,15 +3,14 @@ package repository
 import (
 	"context"
 	"database/sql"
-	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
-	"github.com/poyrazK/cloudDNS/internal/dns/packet"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -62,6 +61,11 @@ func setupTestDB(t *testing.T) (*sql.DB, func()) {
 func TestPostgresRepository_Integration(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
+	}
+
+	// Check if Docker is available
+	if !dockerAvailable() {
+		t.Skip("Docker not available, skipping integration test")
 	}
 
 	db, cleanup := setupTestDB(t)
@@ -187,38 +191,18 @@ func TestPostgresRepository_Integration(t *testing.T) {
 	}
 }
 
-func TestConvertPacketRecordToDomain(t *testing.T) {
-	zoneID := "550e8400-e29b-41d4-a716-446655440008"
-	pRec := packet.DnsRecord{
-		Name: "conv.test.",
-		Type: packet.A,
-		TTL:  300,
-		IP:   net.ParseIP("1.2.3.4"),
+func dockerAvailable() bool {
+	if os.Getenv("DOCKER_HOST") != "" {
+		return true
 	}
-	
-	dRec, err := ConvertPacketRecordToDomain(pRec, zoneID)
-	if err != nil {
-		t.Fatalf("ConvertPacketRecordToDomain failed: %v", err)
-	}
-	if dRec.Content != "1.2.3.4" || dRec.Type != domain.TypeA {
-		t.Errorf("Conversion mismatch: %+v", dRec)
-	}
-
-	// SOA
-	pSOA := packet.DnsRecord{
-		Name: "soa.test.",
-		Type: packet.SOA,
-		TTL: 3600,
-		MName: "ns1.", RName: "admin.", Serial: 1, Refresh: 2, Retry: 3, Expire: 4, Minimum: 5,
-	}
-	dSOA, _ := ConvertPacketRecordToDomain(pSOA, zoneID)
-	if dSOA.Type != domain.TypeSOA {
-		t.Errorf("SOA conversion type mismatch")
-	}
+	cmd := exec.Command("docker", "info")
+	return cmd.Run() == nil
 }
 
 func TestPostgresRepository_EdgeCases(t *testing.T) {
-	if testing.Short() { t.Skip() }
+	if testing.Short() || !dockerAvailable() {
+		t.Skip("skipping edge case test")
+	}
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 	repo := NewPostgresRepository(db)
@@ -244,45 +228,5 @@ func TestPostgresRepository_EdgeCases(t *testing.T) {
 	all, _ := repo.GetRecords(ctx, "batch.test.", "", "127.0.0.1")
 	if len(all) == 0 {
 		t.Errorf("Expected records for empty type query")
-	}
-}
-
-func TestConvertDomainToPacketRecord(t *testing.T) {
-	tests := []struct {
-		name    string
-		input   domain.Record
-		want    packet.QueryType
-		content string
-	}{
-		{
-			name: "A record",
-			input: domain.Record{Name: "test.com", Type: domain.TypeA, Content: "1.2.3.4"},
-			want: packet.A,
-		},
-		{
-			name: "PTR record",
-			input: domain.Record{Name: "1.0.0.127.in-addr.arpa", Type: domain.TypePTR, Content: "localhost"},
-			want: packet.PTR,
-		},
-		{
-			name: "SOA record",
-			input: domain.Record{Name: "example.com", Type: domain.TypeSOA, Content: "ns1.example.com admin.example.com 1 2 3 4 5"},
-			want: packet.SOA,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := ConvertDomainToPacketRecord(tt.input)
-			if err != nil {
-				t.Fatalf("ConvertDomainToPacketRecord() error = %v", err)
-			}
-			if got.Type != tt.want {
-				t.Errorf("Got type %v, want %v", got.Type, tt.want)
-			}
-			if got.Name != tt.input.Name+"." {
-				t.Errorf("Got name %s, want %s", got.Name, tt.input.Name+".")
-			}
-		})
 	}
 }

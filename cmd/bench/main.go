@@ -194,10 +194,17 @@ func runSeed(total int) {
 	}
 	defer db.Close()
 
-	ctx := context.Background()
+	if err := seedDatabase(context.Background(), db, total); err != nil {
+		fmt.Printf("Seeding failed: %v\n", err)
+	} else {
+		fmt.Println("Seeding Completed Successfully.")
+	}
+}
+
+func seedDatabase(ctx context.Context, db *sql.DB, total int) error {
 	zoneID := uuid.New()
 	
-	fmt.Println("Preparing 10,000,000 record environment...")
+	fmt.Println("Preparing record environment...")
 	
 	db.ExecContext(ctx, "INSERT INTO dns_zones (id, tenant_id, name) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING", zoneID, "bench", "root")
 
@@ -222,15 +229,14 @@ func runSeed(total int) {
 		query := fmt.Sprintf("INSERT INTO dns_records (id, zone_id, name, type, content, ttl) VALUES %s", strings.Join(valueStrings, ","))
 		_, err := db.ExecContext(ctx, query, valueArgs...)
 		if err != nil {
-			fmt.Printf("Batch failed at %d: %v\n", i, err)
-			return
+			return err
 		}
 
-		if i%100000 == 0 {
+		if i%100000 == 0 && i > 0 {
 			fmt.Printf("Progress: %d/%d (%.1f%%)\n", i, total, float64(i)/float64(total)*100)
 		}
 	}
-	fmt.Println("Seeding Completed Successfully.")
+	return nil
 }
 
 func runScaleTest(count int, concurrency int) {
