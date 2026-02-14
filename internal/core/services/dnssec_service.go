@@ -53,83 +53,129 @@ func (s *DNSSECService) GenerateKey(ctx context.Context, zoneID string, keyType 
 }
 
 // AutomateLifecycle is a background-friendly method to ensure a zone is correctly signed
+// It implements Automated Key Rollover using a Double-Signature orchestration pattern.
 func (s *DNSSECService) AutomateLifecycle(ctx context.Context, zoneID string) error {
 	keys, err := s.repo.ListKeysForZone(ctx, zoneID)
 	if err != nil {
 		return err
 	}
 
-	// 1. Ensure we have at least one KSK and one ZSK
-	hasKSK := false
-	hasZSK := false
-	for _, k := range keys {
-		if k.KeyType == "KSK" && k.Active { hasKSK = true }
-		if k.KeyType == "ZSK" && k.Active { hasZSK = true }
+	const (
+		ZSKRolloverPeriod = 30 * 24 * time.Hour
+		ZSKOverlapPeriod  = 1 * 24 * time.Hour
+		KSKRolloverPeriod = 365 * 24 * time.Hour
+		KSKOverlapPeriod  = 2 * 24 * time.Hour
+	)
+
+	processType := func(keyType string, rollover, overlap time.Duration) error {
+		var activeKeys []domain.DNSSECKey
+		for _, k := range keys {
+			if k.KeyType == keyType && k.Active {
+				activeKeys = append(activeKeys, k)
+			}
+		}
+
+		// 1. Initial creation
+		if len(activeKeys) == 0 {
+			_, err = s.GenerateKey(ctx, zoneID, keyType)
+			return err
+		}
+
+		// 2. Rollover Orchestration
+		now := time.Now()
+		hasRecentKey := false
+		for _, k := range activeKeys {
+			if now.Sub(k.CreatedAt) < rollover {
+				hasRecentKey = true
+			}
+		}
+
+		// If no key is recent, we need a new one
+		if !hasRecentKey {
+			s.GenerateKey(ctx, zoneID, keyType)
+			return nil // We added a new key, let the next run handle deactivation
+		}
+
+		// 3. Phase out old keys
+		for _, k := range activeKeys {
+			age := now.Sub(k.CreatedAt)
+			if age > rollover+overlap {
+				k.Active = false
+				k.UpdatedAt = now
+				if err := s.repo.UpdateKey(ctx, &k); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
 	}
 
-	if !hasKSK {
-		_, err = s.GenerateKey(ctx, zoneID, "KSK")
-		if err != nil { return err }
+	if err := processType("KSK", KSKRolloverPeriod, KSKOverlapPeriod); err != nil {
+		return err
 	}
-	if !hasZSK {
-		_, err = s.GenerateKey(ctx, zoneID, "ZSK")
-		if err != nil { return err }
+	if err := processType("ZSK", ZSKRolloverPeriod, ZSKOverlapPeriod); err != nil {
+		return err
 	}
 
-	// 2. Check for signature expiration (Simplified)
-	// In a real implementation, we would query current RRSIGs and re-sign if expiring within 3 days.
-	
 	return nil
 }
 
-// GetActiveKey returns the current active key of a specific type for a zone
-func (s *DNSSECService) GetActiveKey(ctx context.Context, zoneID string, keyType string) (*domain.DNSSECKey, error) {
+// GetActiveKeys returns all currently active keys of a specific type for a zone
+func (s *DNSSECService) GetActiveKeys(ctx context.Context, zoneID string, keyType string) ([]domain.DNSSECKey, error) {
 	keys, err := s.repo.ListKeysForZone(ctx, zoneID)
 	if err != nil {
 		return nil, err
 	}
 
+	var active []domain.DNSSECKey
 	for _, k := range keys {
 		if k.KeyType == keyType && k.Active {
-			return &k, nil
+			active = append(active, k)
 		}
 	}
-	return nil, fmt.Errorf("no active %s key found", keyType)
+	if len(active) == 0 {
+		return nil, fmt.Errorf("no active %s key found", keyType)
+	}
+	return active, nil
 }
 
-// SignRRSet signs a list of packet records using the active ZSK for the zone
-func (s *DNSSECService) SignRRSet(ctx context.Context, zoneName string, zoneID string, records []packet.DnsRecord) (*packet.DnsRecord, error) {
+// SignRRSet signs a list of packet records using all active ZSKs for the zone
+func (s *DNSSECService) SignRRSet(ctx context.Context, zoneName string, zoneID string, records []packet.DnsRecord) ([]packet.DnsRecord, error) {
 	if len(records) == 0 {
 		return nil, nil
 	}
 
-	key, err := s.GetActiveKey(ctx, zoneID, "ZSK")
+	keys, err := s.GetActiveKeys(ctx, zoneID, "ZSK")
 	if err != nil {
 		return nil, err
 	}
 
-	priv, err := x509.ParseECPrivateKey(key.PrivateKey)
-	if err != nil {
-		return nil, err
+	var sigs []packet.DnsRecord
+	for _, key := range keys {
+		priv, err := x509.ParseECPrivateKey(key.PrivateKey)
+		if err != nil {
+			return nil, err
+		}
+
+		// Calculate key tag
+		tempKeyRec := packet.DnsRecord{
+			Type:      packet.DNSKEY,
+			Flags:     256, // ZSK
+			Algorithm: 13,
+			PublicKey: key.PublicKey,
+		}
+		keyTag := tempKeyRec.ComputeKeyTag()
+
+		// Calculate inception and expiration (valid for 30 days)
+		now := uint32(time.Now().Unix())
+		expiration := now + (30 * 24 * 60 * 60)
+
+		sig, err := packet.SignRRSet(records, priv, zoneName, keyTag, now, expiration)
+		if err != nil {
+			return nil, err
+		}
+		sigs = append(sigs, sig)
 	}
 
-	// Calculate key tag
-	tempKeyRec := packet.DnsRecord{
-		Type:      packet.DNSKEY,
-		Flags:     256, // ZSK
-		Algorithm: 13,
-		PublicKey: key.PublicKey,
-	}
-	keyTag := tempKeyRec.ComputeKeyTag()
-
-	// Calculate inception and expiration (valid for 30 days)
-	now := uint32(time.Now().Unix())
-	expiration := now + (30 * 24 * 60 * 60)
-
-	sig, err := packet.SignRRSet(records, priv, zoneName, keyTag, now, expiration)
-	if err != nil {
-		return nil, err
-	}
-
-	return &sig, nil
+	return sigs, nil
 }
