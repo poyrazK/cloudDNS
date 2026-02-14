@@ -141,8 +141,15 @@ func (p *MasterParser) Parse(r io.Reader) (*ZoneData, error) {
 
 // RFC 4034 Section 6.1: Canonical DNS Name Order
 func CompareNamesCanonically(a, b string) int {
-	aLabels := strings.Split(strings.TrimSuffix(strings.ToLower(a), "."), ".")
-	bLabels := strings.Split(strings.TrimSuffix(strings.ToLower(b), "."), ".")
+	a = strings.TrimSuffix(strings.ToLower(a), ".")
+	b = strings.TrimSuffix(strings.ToLower(b), ".")
+
+	if a == b { return 0 }
+	if a == "" { return -1 }
+	if b == "" { return 1 }
+
+	aLabels := strings.Split(a, ".")
+	bLabels := strings.Split(b, ".")
 
 	i := len(aLabels) - 1
 	j := len(bLabels) - 1
