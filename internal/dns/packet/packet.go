@@ -92,6 +92,7 @@ func (t QueryType) String() string {
 	case NSEC3: return "NSEC3"
 	case NSEC3PARAM: return "NSEC3PARAM"
 	case AXFR: return "AXFR"
+	case IXFR: return "IXFR"
 	case ANY: return "ANY"
 	case OPT: return "OPT"
 	case TSIG: return "TSIG"
