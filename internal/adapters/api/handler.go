@@ -20,6 +20,7 @@ func (h *APIHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /health", h.HealthCheck)
 	mux.HandleFunc("POST /zones", h.CreateZone)
 	mux.HandleFunc("GET /zones", h.ListZones)
+	mux.HandleFunc("GET /zones/{id}/records", h.ListRecordsForZone)
 	mux.HandleFunc("DELETE /zones/{id}", h.DeleteZone)
 	mux.HandleFunc("POST /zones/{id}/records", h.CreateRecord)
 	mux.HandleFunc("DELETE /zones/{zone_id}/records/{id}", h.DeleteRecord)
@@ -72,6 +73,19 @@ func (h *APIHandler) ListZones(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(zones)
+}
+
+func (h *APIHandler) ListRecordsForZone(w http.ResponseWriter, r *http.Request) {
+	zoneID := r.PathValue("id")
+	
+	records, err := h.svc.ListRecordsForZone(r.Context(), zoneID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(records)
 }
 
 func (h *APIHandler) CreateRecord(w http.ResponseWriter, r *http.Request) {
