@@ -72,3 +72,59 @@ func TestResolveRecursive_NXDOMAIN(t *testing.T) {
 		t.Errorf("Expected RCODE 3, got %d", resp.Header.ResCode)
 	}
 }
+
+func TestSendQuery(t *testing.T) {
+	// 1. Start a mock UDP DNS server
+	addr, err := net.ResolveUDPAddr("udp", "127.0.0.1:0")
+	if err != nil { t.Fatalf("ResolveUDPAddr failed: %v", err) }
+	
+	conn, err := net.ListenUDP("udp", addr)
+	if err != nil { t.Fatalf("ListenUDP failed: %v", err) }
+	defer conn.Close()
+	
+	go func() {
+		buf := make([]byte, 512)
+		n, remote, _ := conn.ReadFromUDP(buf)
+		
+		req := packet.NewDnsPacket()
+		pb := packet.NewBytePacketBuffer()
+		pb.Load(buf[:n])
+		req.FromBuffer(pb)
+		
+		resp := packet.NewDnsPacket()
+		resp.Header.ID = req.Header.ID
+		resp.Header.Response = true
+		resp.Questions = append(resp.Questions, req.Questions[0])
+		resp.Answers = append(resp.Answers, packet.DnsRecord{
+			Name: req.Questions[0].Name,
+			Type: packet.A,
+			IP:   net.ParseIP("9.9.9.9"),
+			TTL:  300,
+			Class: 1,
+		})
+		
+		resBuf := packet.NewBytePacketBuffer()
+		resp.Write(resBuf)
+		conn.WriteToUDP(resBuf.Buf[:resBuf.Position()], remote)
+	}()
+
+	// 2. Call sendQuery
+	srv := NewServer(":0", nil, nil)
+	serverAddr := conn.LocalAddr().String()
+	
+	resp, err := srv.sendQuery(serverAddr, "query.test.", packet.A)
+	if err != nil {
+		t.Fatalf("sendQuery failed: %v", err)
+	}
+	
+	if len(resp.Answers) == 0 || resp.Answers[0].IP.String() != "9.9.9.9" {
+		t.Errorf("sendQuery returned invalid response")
+	}
+}
+
+func TestNewRecursiveResolver(t *testing.T) {
+	r := newRecursiveResolver()
+	if len(r.rootHints) == 0 {
+		t.Errorf("Expected root hints to be initialized")
+	}
+}

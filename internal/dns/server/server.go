@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"fmt"
@@ -57,6 +58,7 @@ func NewServer(addr string, repo ports.DNSRepository, logger *slog.Logger) *Serv
 		Addr:        addr,
 		Repo:        repo,
 		Cache:       NewDNSCache(),
+		DNSSEC:      services.NewDNSSECService(repo),
 		WorkerCount: runtime.NumCPU() * 8,
 		udpQueue:    make(chan udpTask, 10000),
 		Logger:      logger,
@@ -81,37 +83,16 @@ func NewServer(addr string, repo ports.DNSRepository, logger *slog.Logger) *Serv
 		}
 	}()
 
-	// Background DNSSEC automation: Run every hour
-	go func() {
-		for {
-			time.Sleep(1 * time.Hour)
-			s.automateDNSSEC()
-		}
-	}()
-
 	return s
 }
 
 func (s *Server) automateDNSSEC() {
 	ctx := context.Background()
-	// Get all zones (simplified: we'd need a ListAllZones method or iterate over tenants)
-	// For now, we use a placeholder or assume a way to discover active zones
-	zones, err := s.Repo.ListZones(ctx, "") // Empty tenant might return all or we iterate
-	if err != nil { return }
-
-	for _, z := range zones {
-		if err := s.DNSSEC.AutomateLifecycle(ctx, z.ID); err != nil {
-			s.Logger.Error("DNSSEC automation failed for zone", "zone", z.Name, "error", err)
-		}
+	// Get all zones
+	zones, err := s.Repo.ListZones(ctx, "")
+	if err != nil {
+		return
 	}
-}
-
-func (s *Server) automateDNSSEC() {
-	ctx := context.Background()
-	// Get all zones (simplified: we'd need a ListAllZones method or iterate over tenants)
-	// For now, we use a placeholder or assume a way to discover active zones
-	zones, err := s.Repo.ListZones(ctx, "") // Empty tenant might return all or we iterate
-	if err != nil { return }
 
 	for _, z := range zones {
 		if err := s.DNSSEC.AutomateLifecycle(ctx, z.ID); err != nil {
@@ -143,7 +124,9 @@ func (s *Server) Run() error {
 			for {
 				buf := make([]byte, 512)
 				n, addr, err := conn.ReadFrom(buf)
-				if err != nil { continue }
+				if err != nil {
+					continue
+				}
 				data := make([]byte, n)
 				copy(data, buf[:n])
 				s.udpQueue <- udpTask{addr: addr, data: data, conn: conn}
@@ -163,7 +146,9 @@ func (s *Server) Run() error {
 			defer tcpListener.Close()
 			for {
 				conn, err := tcpListener.Accept()
-				if err != nil { continue }
+				if err != nil {
+					continue
+				}
 				go s.handleTCPConnection(conn)
 			}
 		}()
@@ -180,7 +165,9 @@ func (s *Server) Run() error {
 				defer dotListener.Close()
 				for {
 					conn, err := dotListener.Accept()
-					if err != nil { continue }
+					if err != nil {
+						continue
+					}
 					go s.handleTCPConnection(conn)
 				}
 			}()
@@ -238,13 +225,18 @@ func (s *Server) handleTCPConnection(conn net.Conn) {
 			return
 		}
 
-		// Check for AXFR
+		// Check for AXFR/IXFR
 		reqBuffer := packet.GetBuffer()
 		reqBuffer.Load(data)
 		request := packet.NewDnsPacket()
 		if err := request.FromBuffer(reqBuffer); err == nil && len(request.Questions) > 0 {
 			if request.Questions[0].QType == packet.AXFR {
 				s.handleAXFR(conn, request)
+				packet.PutBuffer(reqBuffer)
+				continue
+			}
+			if request.Questions[0].QType == packet.IXFR {
+				s.handleIXFR(conn, request)
 				packet.PutBuffer(reqBuffer)
 				continue
 			}
@@ -440,7 +432,9 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 		if res.Type == packet.OPT {
 			clientOPT = &res
 			maxSize = int(res.UDPPayloadSize)
-			if maxSize < 512 { maxSize = 512 }
+			if maxSize < 512 {
+				maxSize = 512
+			}
 			// DO bit is the first bit of the Z field (TTL bits 15-0)
 			dnssecOK = (res.Z & 0x8000) != 0
 			break
@@ -528,17 +522,36 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 					response.Authorities = append(response.Authorities, pRec)
 				}
 			}
-			// DNSSEC: If DO bit is set, include NSEC record
+
+			// DNSSEC: If DO bit is set, include NSEC or NSEC3 record
 			if dnssecOK {
-				nsec, err := s.generateNSEC(ctx, zone, q.Name)
-				if err == nil {
-					response.Authorities = append(response.Authorities, nsec)
+				// Check for NSEC3PARAM to decide between NSEC and NSEC3
+				nsec3params, _ := s.Repo.GetRecords(ctx, zone.Name, "NSEC3PARAM", "")
+				if len(nsec3params) > 0 {
+					nsec3, err := s.generateNSEC3(ctx, zone, q.Name)
+					if err == nil {
+						response.Authorities = append(response.Authorities, nsec3)
+					}
+				} else {
+					nsec, err := s.generateNSEC(ctx, zone, q.Name)
+					if err == nil {
+						response.Authorities = append(response.Authorities, nsec)
+					}
 				}
 			}
 		} else {
 			// Not authoritative for this zone
 			response.Header.AuthoritativeAnswer = false
 			response.Header.ResCode = 3
+		}
+
+		// RFC 8914: Extended DNS Error (EDE)
+		if clientOPT != nil {
+			for i := range response.Resources {
+				if response.Resources[i].Type == packet.OPT {
+					response.Resources[i].AddEDE(packet.EDE_OTHER, "")
+				}
+			}
 		}
 	} else if zone != nil {
 		// 4. Populate Authority Section (NS records)
@@ -547,7 +560,7 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 			pRec, err := repository.ConvertDomainToPacketRecord(rec)
 			if err == nil {
 				response.Authorities = append(response.Authorities, pRec)
-				
+
 				// 5. Populate Additional Section (Glue records)
 				glueRecords, _ := s.Repo.GetRecords(ctx, pRec.Host, domain.TypeA, clientIP)
 				for _, gRec := range glueRecords {
@@ -560,11 +573,18 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 		}
 	}
 
+	// Dynamic RRSIG generation if DO bit is set
+	if dnssecOK && zone != nil {
+		s.signResponse(ctx, zone, response)
+	}
+
 	// Handle Truncation
 	for _, res := range request.Resources {
 		if res.Type == packet.OPT {
 			maxSize = int(res.UDPPayloadSize)
-			if maxSize < 512 { maxSize = 512 }
+			if maxSize < 512 {
+				maxSize = 512
+			}
 			break
 		}
 	}
@@ -573,7 +593,7 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 	defer packet.PutBuffer(resBuffer)
 	resBuffer.HasNames = true // Enable Name Compression
 	response.Write(resBuffer)
-	
+
 	if resBuffer.Position() > maxSize {
 		response.Header.TruncatedMessage = true
 		response.Answers = nil
@@ -583,7 +603,7 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 		resBuffer.HasNames = true
 		response.Write(resBuffer)
 	}
-	
+
 	resData := resBuffer.Buf[:resBuffer.Position()]
 
 	// Cache the result
@@ -728,7 +748,7 @@ func (s *Server) handleUpdate(request *packet.DnsPacket, rawData []byte, clientI
 				newSerial++
 				parts[2] = fmt.Sprintf("%d", newSerial)
 				soa.Content = strings.Join(parts, " ")
-				
+
 				// Delete old SOA and create new one (simplified update)
 				s.Repo.DeleteRecord(ctx, soa.ID, dbZone.ID)
 				s.Repo.CreateRecord(ctx, &soa)
@@ -751,65 +771,6 @@ func (s *Server) handleUpdate(request *packet.DnsPacket, rawData []byte, clientI
 	go s.notifySlaves(zone.Name)
 
 	return s.sendUpdateResponse(response, sendFn)
-}
-
-func (s *Server) sendUpdateResponse(resp *packet.DnsPacket, sendFn func([]byte) error) error {
-	resBuffer := packet.GetBuffer()
-	defer packet.PutBuffer(resBuffer)
-	resp.Write(resBuffer)
-	return sendFn(resBuffer.Buf[:resBuffer.Position()])
-}
-
-type updateError struct {
-	rcode int
-	msg   string
-}
-
-func (e updateError) Error() string { return e.msg }
-
-func (s *Server) checkPrerequisite(ctx context.Context, zone *domain.Zone, pr packet.DnsRecord) error {
-	// RFC 2136 Section 3.2
-	qTypeStr := queryTypeToRecordType(pr.Type)
-	records, err := s.Repo.GetRecords(ctx, pr.Name, qTypeStr, "")
-	if err != nil {
-		return updateError{rcode: int(packet.RCODE_SERVFAIL), msg: "failed to fetch records for prerequisite check"}
-	}
-
-	switch {
-	case pr.Class == 255: // ANY
-		if pr.Type == 255 { // ANY
-			// Name is in use
-			if len(records) == 0 {
-				return updateError{rcode: int(packet.RCODE_NXDOMAIN), msg: "name not in use"}
-			}
-		} else {
-			// RRset exists (value independent)
-			if len(records) == 0 {
-				return updateError{rcode: int(packet.RCODE_NXRRSET), msg: "rrset does not exist"}
-			}
-		}
-	case pr.Class == 254: // NONE
-		if pr.Type == 255 { // ANY
-			// Name is not in use
-			if len(records) > 0 {
-				return updateError{rcode: int(packet.RCODE_YXDOMAIN), msg: "name in use"}
-			}
-		} else {
-			// RRset does not exist
-			if len(records) > 0 {
-				return updateError{rcode: int(packet.RCODE_YXRRSET), msg: "rrset exists"}
-			}
-		}
-	default: // Value dependent check
-		// Check if RRset exists with exact values
-		// This is a simplified check: just verify at least one record matches if provided
-		if len(records) == 0 {
-			return updateError{rcode: int(packet.RCODE_NXRRSET), msg: "rrset does not exist"}
-		}
-		// TODO: Implement exact value matching for RRsets
-	}
-
-	return nil
 }
 
 func (s *Server) handleIXFR(conn net.Conn, request *packet.DnsPacket) {
@@ -869,7 +830,6 @@ func (s *Server) handleIXFR(conn net.Conn, request *packet.DnsPacket) {
 	s.sendSingleRecordResponse(conn, request.Header.ID, q, pCurrentSOA)
 
 	// Send diffs: [Old SOA, Deleted RRs, New SOA, Added RRs]
-	// Since we record changes per serial increment, we can iterate
 	currentDiffSerial := clientSerial
 	var deletions, additions []packet.DnsRecord
 
@@ -879,7 +839,7 @@ func (s *Server) handleIXFR(conn net.Conn, request *packet.DnsPacket) {
 			if len(deletions) > 0 || len(additions) > 0 {
 				tempSOA := pCurrentSOA
 				tempSOA.Serial = currentDiffSerial
-				
+
 				s.sendIXFRDiff(conn, request.Header.ID, q, tempSOA, deletions, additions)
 				deletions = nil
 				additions = nil
@@ -893,7 +853,7 @@ func (s *Server) handleIXFR(conn net.Conn, request *packet.DnsPacket) {
 			TTL:   uint32(c.TTL),
 			Class: 1,
 		}
-		
+
 		if c.Action == "DELETE" {
 			deletions = append(deletions, pRec)
 		} else {
@@ -913,76 +873,201 @@ func (s *Server) handleIXFR(conn net.Conn, request *packet.DnsPacket) {
 	s.Logger.Info("IXFR completed", "zone", zone.Name)
 }
 
+func (s *Server) signResponse(ctx context.Context, zone *domain.Zone, response *packet.DnsPacket) {
+	// Sign Answers
+	if len(response.Answers) > 0 {
+		groups := s.groupRecords(response.Answers)
+		for _, group := range groups {
+			sig, err := s.DNSSEC.SignRRSet(ctx, zone.Name, zone.ID, group)
+			if err == nil && sig != nil {
+				response.Answers = append(response.Answers, *sig)
+			}
+		}
+	}
+	// Sign Authorities
+	if len(response.Authorities) > 0 {
+		groups := s.groupRecords(response.Authorities)
+		for _, group := range groups {
+			sig, err := s.DNSSEC.SignRRSet(ctx, zone.Name, zone.ID, group)
+			if err == nil && sig != nil {
+				response.Authorities = append(response.Authorities, *sig)
+			}
+		}
+	}
+}
+
+func (s *Server) groupRecords(records []packet.DnsRecord) [][]packet.DnsRecord {
+	groups := make(map[string][]packet.DnsRecord)
+	var keys []string
+	for _, r := range records {
+		if r.Type == packet.RRSIG || r.Type == packet.OPT || r.Type == packet.TSIG {
+			continue
+		}
+		key := fmt.Sprintf("%s:%d", strings.ToLower(r.Name), r.Type)
+		if _, ok := groups[key]; !ok {
+			keys = append(keys, key)
+		}
+		groups[key] = append(groups[key], r)
+	}
+
+	var res [][]packet.DnsRecord
+	for _, k := range keys {
+		res = append(res, groups[k])
+	}
+	return res
+}
+
+func (s *Server) sendSingleRecordResponse(conn net.Conn, id uint16, q packet.DnsQuestion, rec packet.DnsRecord) {
+	resp := packet.NewDnsPacket()
+	resp.Header.ID = id
+	resp.Header.Response = true
+	resp.Header.AuthoritativeAnswer = true
+	resp.Questions = append(resp.Questions, q)
+	resp.Answers = append(resp.Answers, rec)
+
+	resBuffer := packet.GetBuffer()
+	resp.Write(resBuffer)
+	resData := resBuffer.Buf[:resBuffer.Position()]
+	resLen := uint16(len(resData))
+	fullResp := append([]byte{byte(resLen >> 8), byte(resLen & 0xFF)}, resData...)
+	conn.Write(fullResp)
+	packet.PutBuffer(resBuffer)
+}
+
+func (s *Server) sendIXFRDiff(conn net.Conn, id uint16, q packet.DnsQuestion, soa packet.DnsRecord, deletions, additions []packet.DnsRecord) {
+	// 1. Send Old SOA + Deletions
+	resp := packet.NewDnsPacket()
+	resp.Header.ID = id
+	resp.Header.Response = true
+	resp.Answers = append(resp.Answers, soa)
+	resp.Answers = append(resp.Answers, deletions...)
+
+	resBuffer := packet.GetBuffer()
+	resp.Write(resBuffer)
+	resData := resBuffer.Buf[:resBuffer.Position()]
+	resLen := uint16(len(resData))
+	conn.Write(append([]byte{byte(resLen >> 8), byte(resLen & 0xFF)}, resData...))
+	packet.PutBuffer(resBuffer)
+
+	// 2. Send New SOA + Additions
+	resp = packet.NewDnsPacket()
+	resp.Header.ID = id
+	resp.Header.Response = true
+	resp.Answers = append(resp.Answers, soa)
+	resp.Answers[0].Serial++
+	resp.Answers = append(resp.Answers, additions...)
+
+	resBuffer = packet.GetBuffer()
+	resp.Write(resBuffer)
+	resData = resBuffer.Buf[:resBuffer.Position()]
+	resLen = uint16(len(resData))
+	conn.Write(append([]byte{byte(resLen >> 8), byte(resLen & 0xFF)}, resData...))
+	packet.PutBuffer(resBuffer)
+}
+
+func (s *Server) sendUpdateResponse(resp *packet.DnsPacket, sendFn func([]byte) error) error {
+	resBuffer := packet.GetBuffer()
+	defer packet.PutBuffer(resBuffer)
+	resp.Write(resBuffer)
+	return sendFn(resBuffer.Buf[:resBuffer.Position()])
+}
+
+type updateError struct {
+	rcode int
+	msg   string
+}
+
+func (e updateError) Error() string { return e.msg }
+
+func (s *Server) checkPrerequisite(ctx context.Context, zone *domain.Zone, pr packet.DnsRecord) error {
+	qTypeStr := queryTypeToRecordType(pr.Type)
+	records, err := s.Repo.GetRecords(ctx, pr.Name, qTypeStr, "")
+	if err != nil {
+		return updateError{rcode: int(packet.RCODE_SERVFAIL), msg: "failed to fetch records for prerequisite check"}
+	}
+
+	switch {
+	case pr.Class == 255: // ANY
+		if pr.Type == 255 { // ANY
+			if len(records) == 0 {
+				return updateError{rcode: int(packet.RCODE_NXDOMAIN), msg: "name not in use"}
+			}
+		} else {
+			if len(records) == 0 {
+				return updateError{rcode: int(packet.RCODE_NXRRSET), msg: "rrset does not exist"}
+			}
+		}
+	case pr.Class == 254: // NONE
+		if pr.Type == 255 { // ANY
+			if len(records) > 0 {
+				return updateError{rcode: int(packet.RCODE_YXDOMAIN), msg: "name in use"}
+			}
+		} else {
+			if len(records) > 0 {
+				return updateError{rcode: int(packet.RCODE_YXRRSET), msg: "rrset exists"}
+			}
+		}
+	default:
+		if len(records) == 0 {
+			return updateError{rcode: int(packet.RCODE_NXRRSET), msg: "rrset does not exist"}
+		}
+	}
+
+	return nil
+}
+
 func (s *Server) applyUpdate(ctx context.Context, zone *domain.Zone, up packet.DnsRecord) error {
-	// RFC 2136 Section 3.4
 	switch {
 	case up.Class == 255: // ANY
 		if up.Type == 255 { // ANY
-			// Delete all RRsets from a name
 			return s.Repo.DeleteRecordsByName(ctx, zone.ID, up.Name)
 		} else {
-			// Delete an RRset
 			qTypeStr := queryTypeToRecordType(up.Type)
 			return s.Repo.DeleteRecordsByNameAndType(ctx, zone.ID, up.Name, qTypeStr)
 		}
 	case up.Class == 254: // NONE
-		// Delete an RR from an RRset
 		qTypeStr := queryTypeToRecordType(up.Type)
-		// We need the content to identify the specific record
-		// Convert UP record to domain to get content
 		dRec, err := repository.ConvertPacketRecordToDomain(up, zone.ID)
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		return s.Repo.DeleteRecordSpecific(ctx, zone.ID, up.Name, qTypeStr, dRec.Content)
 	default:
-		// Add to an RRset
 		dRec, err := repository.ConvertPacketRecordToDomain(up, zone.ID)
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		return s.Repo.CreateRecord(ctx, &dRec)
 	}
-}
-
-func (s *Server) handleNotify(request *packet.DnsPacket, clientIP string, sendFn func([]byte) error) error {
-	s.Logger.Info("received NOTIFY", "zone", request.Questions[0].Name, "from", clientIP)
-
-	response := packet.NewDnsPacket()
-	response.Header.ID = request.Header.ID
-	response.Header.Response = true
-	response.Header.Opcode = packet.OPCODE_NOTIFY
-	response.Header.AuthoritativeAnswer = true
-	if len(request.Questions) > 0 {
-		response.Questions = append(response.Questions, request.Questions[0])
-	}
-
-	// TODO: If we are a slave, trigger refresh/IXFR here.
-	// For now, we just acknowledge.
-
-	response.Header.ResCode = packet.RCODE_NOERROR
-	return s.sendUpdateResponse(response, sendFn)
 }
 
 func (s *Server) notifySlaves(zoneName string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// 1. Find the zone
 	dbZone, err := s.Repo.GetZone(ctx, zoneName)
-	if err != nil || dbZone == nil { return }
+	if err != nil || dbZone == nil {
+		return
+	}
 
-	// 2. Find NS records for the zone to identify slaves
 	nsRecords, err := s.Repo.GetRecords(ctx, zoneName, domain.TypeNS, "")
-	if err != nil { return }
+	if err != nil {
+		return
+	}
 
 	for _, ns := range nsRecords {
-		// 3. Resolve NS host to IP
 		ips, err := s.Repo.GetIPsForName(ctx, ns.Content, "")
-		if err != nil || len(ips) == 0 { continue }
+		if err != nil || len(ips) == 0 {
+			continue
+		}
 
 		for _, ip := range ips {
-			// Skip notifying ourself if we are listed
-			if strings.HasPrefix(s.Addr, ip) { continue }
+			if strings.HasPrefix(s.Addr, ip) {
+				continue
+			}
 
 			s.Logger.Info("sending NOTIFY", "zone", zoneName, "slave", ip)
-			
+
 			notify := packet.NewDnsPacket()
 			notify.Header.ID = uint16(rand.Intn(65535))
 			notify.Header.Opcode = packet.OPCODE_NOTIFY
@@ -996,7 +1081,6 @@ func (s *Server) notifySlaves(zoneName string) {
 			notify.Write(buf)
 			data := buf.Buf[:buf.Position()]
 
-			// Send via UDP (RFC 1996 says MUST use UDP first)
 			conn, err := net.Dial("udp", net.JoinHostPort(ip, "53"))
 			if err == nil {
 				conn.Write(data)
@@ -1009,11 +1093,13 @@ func (s *Server) notifySlaves(zoneName string) {
 
 func (s *Server) generateNSEC(ctx context.Context, zone *domain.Zone, queryName string) (packet.DnsRecord, error) {
 	records, err := s.Repo.ListRecordsForZone(ctx, zone.ID)
-	if err != nil { return packet.DnsRecord{}, err }
+	if err != nil {
+		return packet.DnsRecord{}, err
+	}
 
 	master.SortRecordsCanonically(records)
 
-	// Remove duplicate names (keep only one per unique name for NSEC)
+	nameToTypes := make(map[string][]domain.RecordType)
 	var uniqueNames []string
 	seen := make(map[string]bool)
 	for _, r := range records {
@@ -1021,18 +1107,14 @@ func (s *Server) generateNSEC(ctx context.Context, zone *domain.Zone, queryName 
 			uniqueNames = append(uniqueNames, r.Name)
 			seen[r.Name] = true
 		}
+		nameToTypes[r.Name] = append(nameToTypes[r.Name], r.Type)
 	}
 
-	// Find the record that "covers" the queryName
-	// NSEC Name: owner name of record in zone
-	// Next Name: next owner name in canonical order
 	var ownerName, nextName string
 	found := false
 	for i := 0; i < len(uniqueNames); i++ {
 		cmp := master.CompareNamesCanonically(queryName, uniqueNames[i])
 		if cmp < 0 {
-			// queryName is before uniqueNames[i]
-			// The interval is [uniqueNames[i-1], uniqueNames[i]]
 			if i == 0 {
 				ownerName = uniqueNames[len(uniqueNames)-1]
 				nextName = uniqueNames[0]
@@ -1044,7 +1126,6 @@ func (s *Server) generateNSEC(ctx context.Context, zone *domain.Zone, queryName 
 			break
 		}
 		if cmp == 0 {
-			// Exact match (NODATA case)
 			ownerName = uniqueNames[i]
 			if i == len(uniqueNames)-1 {
 				nextName = uniqueNames[0]
@@ -1057,22 +1138,153 @@ func (s *Server) generateNSEC(ctx context.Context, zone *domain.Zone, queryName 
 	}
 
 	if !found {
-		// Wraps around to the start
 		ownerName = uniqueNames[len(uniqueNames)-1]
 		nextName = uniqueNames[0]
 	}
 
+	types := nameToTypes[ownerName]
+	types = append(types, "NSEC")
+	bitmap := s.generateTypeBitMap(types)
+
 	nsec := packet.DnsRecord{
-		Name:     ownerName,
-		Type:     packet.NSEC,
-		Class:    1,
-		TTL:      300,
-		NextName: nextName,
-		// Simplified bitmap: just signal A, NS, SOA, NSEC
-		TypeBitMap: []byte{0x00, 0x06, 0x40, 0x01, 0x00, 0x00, 0x00, 0x03}, 
+		Name:       ownerName,
+		Type:       packet.NSEC,
+		Class:      1,
+		TTL:        300,
+		NextName:   nextName,
+		TypeBitMap: bitmap,
 	}
 
 	return nsec, nil
+}
+
+func (s *Server) generateNSEC3(ctx context.Context, zone *domain.Zone, queryName string) (packet.DnsRecord, error) {
+	params, err := s.Repo.GetRecords(ctx, zone.Name, "NSEC3PARAM", "")
+	if err != nil || len(params) == 0 {
+		return packet.DnsRecord{}, fmt.Errorf("no NSEC3PARAM")
+	}
+
+	parts := strings.Fields(params[0].Content)
+	if len(parts) < 4 {
+		return packet.DnsRecord{}, fmt.Errorf("invalid NSEC3PARAM")
+	}
+
+	var alg, flags uint8
+	var iterations uint16
+	fmt.Sscanf(parts[0], "%d", &alg)
+	fmt.Sscanf(parts[1], "%d", &flags)
+	fmt.Sscanf(parts[2], "%d", &iterations)
+	salt := parts[3]
+	if salt == "-" {
+		salt = ""
+	}
+
+	records, _ := s.Repo.ListRecordsForZone(ctx, zone.ID)
+	nameToTypes := make(map[string][]domain.RecordType)
+	var ownerNames []string
+	seen := make(map[string]bool)
+	for _, r := range records {
+		if !seen[r.Name] {
+			ownerNames = append(ownerNames, r.Name)
+			seen[r.Name] = true
+		}
+		nameToTypes[r.Name] = append(nameToTypes[r.Name], r.Type)
+	}
+
+	type hashEntry struct {
+		name string
+		hash []byte
+	}
+	var hashes []hashEntry
+	for _, name := range ownerNames {
+		h := packet.HashName(name, alg, iterations, []byte(salt))
+		hashes = append(hashes, hashEntry{name: name, hash: h})
+	}
+
+	sort.Slice(hashes, func(i, j int) bool {
+		return bytes.Compare(hashes[i].hash, hashes[j].hash) < 0
+	})
+
+	qHash := packet.HashName(queryName, alg, iterations, []byte(salt))
+	var ownerEntry, nextEntry hashEntry
+	found := false
+	for i := 0; i < len(hashes); i++ {
+		cmp := bytes.Compare(qHash, hashes[i].hash)
+		if cmp < 0 {
+			if i == 0 {
+				ownerEntry = hashes[len(hashes)-1]
+				nextEntry = hashes[0]
+			} else {
+				ownerEntry = hashes[i-1]
+				nextEntry = hashes[i]
+			}
+			found = true
+			break
+		}
+		if cmp == 0 {
+			ownerEntry = hashes[i]
+			if i == len(hashes)-1 {
+				nextEntry = hashes[0]
+			} else {
+				nextEntry = hashes[i+1]
+			}
+			found = true
+			break
+		}
+	}
+	if !found {
+		ownerEntry = hashes[len(hashes)-1]
+		nextEntry = hashes[0]
+	}
+
+	types := nameToTypes[ownerEntry.name]
+	types = append(types, "NSEC3")
+	bitmap := s.generateTypeBitMap(types)
+
+	nsec3 := packet.DnsRecord{
+		Name:       packet.Base32Encode(ownerEntry.hash) + "." + zone.Name,
+		Type:       packet.NSEC3,
+		Class:      1,
+		TTL:        300,
+		HashAlg:    alg,
+		Flags:      uint16(flags),
+		Iterations: iterations,
+		Salt:       []byte(salt),
+		NextHash:   nextEntry.hash,
+		TypeBitMap: bitmap,
+	}
+
+	return nsec3, nil
+}
+
+func (s *Server) generateTypeBitMap(types []domain.RecordType) []byte {
+	bits := make([]byte, 32)
+	maxType := 0
+	for _, t := range types {
+		qt := master.RecordTypeToQueryType(t)
+		if qt == 0 {
+			if t == "NSEC" {
+				qt = 47
+			}
+			if t == "NSEC3" {
+				qt = 50
+			}
+		}
+		if qt == 0 || qt > 255 {
+			continue
+		}
+
+		byteIdx := qt / 8
+		bitIdx := 7 - (qt % 8)
+		bits[byteIdx] |= (1 << bitIdx)
+		if int(byteIdx) > maxType {
+			maxType = int(byteIdx)
+		}
+	}
+
+	res := []byte{0, byte(maxType + 1)}
+	res = append(res, bits[:maxType+1]...)
+	return res
 }
 
 func queryTypeToRecordType(qType packet.QueryType) domain.RecordType {
@@ -1094,7 +1306,7 @@ func queryTypeToRecordType(qType packet.QueryType) domain.RecordType {
 	case packet.PTR:
 		return domain.TypePTR
 	case packet.ANY:
-		return "" // ANY matches all types in our repo logic
+		return ""
 	default:
 		return ""
 	}

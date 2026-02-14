@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -11,9 +12,11 @@ import (
 type mockRepo struct {
 	zones   []domain.Zone
 	records []domain.Record
+	err     error
 }
 
 func (m *mockRepo) GetRecords(ctx context.Context, name string, qType domain.RecordType, clientIP string) ([]domain.Record, error) {
+	if m.err != nil { return nil, m.err }
 	var res []domain.Record
 	for _, r := range m.records {
 		if r.Name == name && (qType == "" || r.Type == qType) {
@@ -24,6 +27,7 @@ func (m *mockRepo) GetRecords(ctx context.Context, name string, qType domain.Rec
 }
 
 func (m *mockRepo) GetIPsForName(ctx context.Context, name string, clientIP string) ([]string, error) {
+	if m.err != nil { return nil, m.err }
 	var res []string
 	for _, r := range m.records {
 		if r.Name == name && r.Type == domain.TypeA {
@@ -34,6 +38,7 @@ func (m *mockRepo) GetIPsForName(ctx context.Context, name string, clientIP stri
 }
 
 func (m *mockRepo) GetZone(ctx context.Context, name string) (*domain.Zone, error) {
+	if m.err != nil { return nil, m.err }
 	for _, z := range m.zones {
 		if z.Name == name {
 			return &z, nil
@@ -43,6 +48,7 @@ func (m *mockRepo) GetZone(ctx context.Context, name string) (*domain.Zone, erro
 }
 
 func (m *mockRepo) ListRecordsForZone(ctx context.Context, zoneID string) ([]domain.Record, error) {
+	if m.err != nil { return nil, m.err }
 	var res []domain.Record
 	for _, r := range m.records {
 		if r.ZoneID == zoneID {
@@ -53,59 +59,63 @@ func (m *mockRepo) ListRecordsForZone(ctx context.Context, zoneID string) ([]dom
 }
 
 func (m *mockRepo) CreateZone(ctx context.Context, zone *domain.Zone) error {
+	if m.err != nil { return m.err }
 	m.zones = append(m.zones, *zone)
 	return nil
 }
 
 func (m *mockRepo) CreateZoneWithRecords(ctx context.Context, zone *domain.Zone, records []domain.Record) error {
+	if m.err != nil { return m.err }
 	m.zones = append(m.zones, *zone)
 	m.records = append(m.records, records...)
 	return nil
 }
 
 func (m *mockRepo) CreateRecord(ctx context.Context, record *domain.Record) error {
+	if m.err != nil { return m.err }
 	m.records = append(m.records, *record)
 	return nil
 }
 
 func (m *mockRepo) ListZones(ctx context.Context, tenantID string) ([]domain.Zone, error) {
+	if m.err != nil { return nil, m.err }
 	return m.zones, nil
 }
 
-func (m *mockRepo) DeleteZone(ctx context.Context, id, tenantID string) error   { return nil }
-func (m *mockRepo) DeleteRecord(ctx context.Context, id, zoneID string) error { return nil }
+func (m *mockRepo) DeleteZone(ctx context.Context, id, tenantID string) error   { return m.err }
+func (m *mockRepo) DeleteRecord(ctx context.Context, id, zoneID string) error { return m.err }
 
 func (m *mockRepo) DeleteRecordsByNameAndType(ctx context.Context, zoneID string, name string, qType domain.RecordType) error {
-	return nil
+	return m.err
 }
 
 func (m *mockRepo) DeleteRecordsByName(ctx context.Context, zoneID string, name string) error {
-	return nil
+	return m.err
 }
 
 func (m *mockRepo) DeleteRecordSpecific(ctx context.Context, zoneID string, name string, qType domain.RecordType, content string) error {
-	return nil
+	return m.err
 }
 
 func (m *mockRepo) RecordZoneChange(ctx context.Context, change *domain.ZoneChange) error {
-	return nil
+	return m.err
 }
 
 func (m *mockRepo) ListZoneChanges(ctx context.Context, zoneID string, fromSerial uint32) ([]domain.ZoneChange, error) {
-	return nil, nil
+	return nil, m.err
 }
 
-func (m *mockRepo) SaveAuditLog(ctx context.Context, log *domain.AuditLog) error { return nil }
+func (m *mockRepo) SaveAuditLog(ctx context.Context, log *domain.AuditLog) error { return m.err }
 func (m *mockRepo) GetAuditLogs(ctx context.Context, tenantID string) ([]domain.AuditLog, error) {
-	return nil, nil
+	return nil, m.err
 }
-func (m *mockRepo) Ping(ctx context.Context) error { return nil }
+func (m *mockRepo) Ping(ctx context.Context) error { return m.err }
 
-func (m *mockRepo) CreateKey(ctx context.Context, key *domain.DNSSECKey) error { return nil }
+func (m *mockRepo) CreateKey(ctx context.Context, key *domain.DNSSECKey) error { return m.err }
 func (m *mockRepo) ListKeysForZone(ctx context.Context, zoneID string) ([]domain.DNSSECKey, error) {
-	return nil, nil
+	return nil, m.err
 }
-func (m *mockRepo) UpdateKey(ctx context.Context, key *domain.DNSSECKey) error { return nil }
+func (m *mockRepo) UpdateKey(ctx context.Context, key *domain.DNSSECKey) error { return m.err }
 
 func TestCreateZone(t *testing.T) {
 	repo := &mockRepo{}
@@ -195,8 +205,6 @@ func TestImportZone_Error(t *testing.T) {
 	malformed := "$ORIGIN test.com.\nwww A"
 	_, err := svc.ImportZone(context.Background(), "t1", strings.NewReader(malformed))
 	
-	// Master parser currently skips lines it can't parse rather than returning error 
-	// unless io.Reader fails. But we can check if it handled correctly.
 	if err != nil {
 		t.Errorf("Expected skip/partial rather than fatal err, got %v", err)
 	}
@@ -247,5 +255,33 @@ func TestHealthCheck(t *testing.T) {
 
 	if err := svc.HealthCheck(context.Background()); err != nil {
 		t.Errorf("HealthCheck failed: %v", err)
+	}
+}
+
+func TestServiceErrorPaths(t *testing.T) {
+	repo := &mockRepo{err: errors.New("db error")}
+	svc := NewDNSService(repo)
+	ctx := context.Background()
+
+	if err := svc.CreateZone(ctx, &domain.Zone{Name: "test."}); err == nil {
+		t.Errorf("Expected error in CreateZone")
+	}
+	if err := svc.CreateRecord(ctx, &domain.Record{}); err == nil {
+		t.Errorf("Expected error in CreateRecord")
+	}
+	if _, err := svc.Resolve(ctx, "test.", domain.TypeA, ""); err == nil {
+		t.Errorf("Expected error in Resolve")
+	}
+	if _, err := svc.ListZones(ctx, ""); err == nil {
+		t.Errorf("Expected error in ListZones")
+	}
+	if err := svc.DeleteZone(ctx, "z1", ""); err == nil {
+		t.Errorf("Expected error in DeleteZone")
+	}
+	if err := svc.DeleteRecord(ctx, "r1", ""); err == nil {
+		t.Errorf("Expected error in DeleteRecord")
+	}
+	if _, err := svc.ImportZone(ctx, "", strings.NewReader("")); err == nil {
+		t.Errorf("Expected error in ImportZone")
 	}
 }

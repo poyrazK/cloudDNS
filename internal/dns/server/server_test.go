@@ -77,7 +77,7 @@ func (m *mockServerRepo) CreateRecord(ctx context.Context, record *domain.Record
 func (m *mockServerRepo) ListZones(ctx context.Context, tenantID string) ([]domain.Zone, error) {
 	var res []domain.Zone
 	for _, z := range m.zones {
-		if z.TenantID == tenantID {
+		if tenantID == "" || z.TenantID == tenantID {
 			res = append(res, z)
 		}
 	}

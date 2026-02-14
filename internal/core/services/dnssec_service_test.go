@@ -2,9 +2,11 @@ package services
 
 import (
 	"context"
+	"net"
 	"testing"
 
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
+	"github.com/poyrazK/cloudDNS/internal/dns/packet"
 )
 
 type mockDNSSECRepo struct {
@@ -100,5 +102,73 @@ func TestAutomateLifecycle(t *testing.T) {
 	}
 	if !hasKSK || !hasZSK {
 		t.Errorf("AutomateLifecycle failed to create both required key types")
+	}
+}
+
+func TestGetActiveKey(t *testing.T) {
+	repo := &mockDNSSECRepo{}
+	svc := NewDNSSECService(repo)
+	ctx := context.Background()
+
+	// Setup: One inactive, one active key
+	repo.keys = append(repo.keys, domain.DNSSECKey{
+		ID: "k1", ZoneID: "z1", KeyType: "ZSK", Active: false,
+	})
+	repo.keys = append(repo.keys, domain.DNSSECKey{
+		ID: "k2", ZoneID: "z1", KeyType: "ZSK", Active: true,
+	})
+
+	key, err := svc.GetActiveKey(ctx, "z1", "ZSK")
+	if err != nil {
+		t.Fatalf("GetActiveKey failed: %v", err)
+	}
+	if key.ID != "k2" {
+		t.Errorf("Expected k2, got %s", key.ID)
+	}
+
+	_, err = svc.GetActiveKey(ctx, "z1", "KSK")
+	if err == nil {
+		t.Errorf("Expected error for missing KSK")
+	}
+}
+
+func TestSignRRSet(t *testing.T) {
+	repo := &mockDNSSECRepo{}
+	svc := NewDNSSECService(repo)
+	ctx := context.Background()
+
+	// 1. Setup ZSK
+	_, err := svc.GenerateKey(ctx, "z1", "ZSK")
+	if err != nil {
+		t.Fatalf("GenerateKey failed: %v", err)
+	}
+
+	// 2. Sign a dummy RRSet
+	records := []packet.DnsRecord{
+		{Name: "www.example.com.", Type: packet.A, IP: net.ParseIP("1.2.3.4"), TTL: 300, Class: 1},
+	}
+
+	sig, err := svc.SignRRSet(ctx, "example.com.", "z1", records)
+	if err != nil {
+		t.Fatalf("SignRRSet failed: %v", err)
+	}
+
+	if sig == nil {
+		t.Fatalf("Expected RRSIG record, got nil")
+	}
+	if sig.Type != packet.RRSIG {
+		t.Errorf("Expected RRSIG type, got %v", sig.Type)
+	}
+	if sig.TypeCovered != uint16(packet.A) {
+		t.Errorf("Expected TypeCovered A, got %d", sig.TypeCovered)
+	}
+	if len(sig.Signature) == 0 {
+		t.Errorf("Signature is empty")
+	}
+
+	// 3. Test empty RRSet
+	sigEmpty, err := svc.SignRRSet(ctx, "example.com.", "z1", nil)
+	if err != nil || sigEmpty != nil {
+		t.Errorf("Expected (nil, nil) for empty RRSet, got (%v, %v)", sigEmpty, err)
 	}
 }
