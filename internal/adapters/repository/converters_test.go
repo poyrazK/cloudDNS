@@ -212,4 +212,90 @@ func TestConvertDomainToPacketRecord(t *testing.T) {
 	}
 }
 
+func TestConvertDomainToPacketRecord_AllTypes(t *testing.T) {
+	tests := []struct {
+		name string
+		rec  domain.Record
+		want packet.DnsRecord
+	}{
+		{
+			name: "AAAA record",
+			rec: domain.Record{
+				Name:    "v6.test.",
+				Type:    domain.TypeAAAA,
+				Content: "2001:db8::1",
+				TTL:     300,
+			},
+			want: packet.DnsRecord{
+				Name: "v6.test.",
+				Type: packet.AAAA,
+				IP:   net.ParseIP("2001:db8::1"),
+			},
+		},
+		{
+			name: "NS record",
+			rec: domain.Record{
+				Name:    "test.",
+				Type:    domain.TypeNS,
+				Content: "ns1.provider.com",
+				TTL:     3600,
+			},
+			want: packet.DnsRecord{
+				Name: "test.",
+				Type: packet.NS,
+				Host: "ns1.provider.com.",
+			},
+		},
+		{
+			name: "PTR record",
+			rec: domain.Record{
+				Name:    "1.0.0.127.in-addr.arpa.",
+				Type:    domain.TypePTR,
+				Content: "localhost.",
+				TTL:     3600,
+			},
+			want: packet.DnsRecord{
+				Name: "1.0.0.127.in-addr.arpa.",
+				Type: packet.PTR,
+				Host: "localhost.",
+			},
+		},
+		{
+			name: "TXT record",
+			rec: domain.Record{
+				Name:    "test.",
+				Type:    domain.TypeTXT,
+				Content: "simple text",
+				TTL:     300,
+			},
+			want: packet.DnsRecord{
+				Name: "test.",
+				Type: packet.TXT,
+				Txt:  "simple text",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ConvertDomainToPacketRecord(tt.rec)
+			if err != nil {
+				t.Fatalf("ConvertDomainToPacketRecord failed: %v", err)
+			}
+			if got.Type != tt.want.Type {
+				t.Errorf("Type mismatch: got %v, want %v", got.Type, tt.want.Type)
+			}
+			if tt.want.IP != nil && got.IP.String() != tt.want.IP.String() {
+				t.Errorf("IP mismatch")
+			}
+			if tt.want.Host != "" && got.Host != tt.want.Host {
+				t.Errorf("Host mismatch: got %s, want %s", got.Host, tt.want.Host)
+			}
+			if tt.want.Txt != "" && got.Txt != tt.want.Txt {
+				t.Errorf("TXT mismatch")
+			}
+		})
+	}
+}
+
 func intPtr(i int) *int { return &i }
