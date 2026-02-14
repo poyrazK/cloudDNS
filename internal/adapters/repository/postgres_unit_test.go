@@ -302,6 +302,34 @@ func TestPostgresRepository_Unit(t *testing.T) {
 		mock.ExpectQuery(`SELECT`).WillReturnError(dbErr)
 		repo.ListKeysForZone(ctx, "")
 
+		// rows.Scan failure in ListZones
+		mock.ExpectQuery(`SELECT`).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(123)) // Should be string
+		repo.ListZones(ctx, "")
+
+		// rows.Scan failure in GetRecords
+		mock.ExpectQuery(`SELECT`).WillReturnRows(sqlmock.NewRows([]string{"id", "zone_id", "name", "type", "content", "ttl", "priority", "network"}).
+			AddRow(1, 2, 3, 4, 5, 6, 7, 8))
+		repo.GetRecords(ctx, "test", "A", "")
+
+		// rows.Scan failure in ListRecordsForZone
+		mock.ExpectQuery(`SELECT`).WillReturnRows(sqlmock.NewRows([]string{"id", "zone_id", "name", "type", "content", "ttl", "priority", "network"}).
+			AddRow(1, 2, 3, 4, 5, 6, 7, 8))
+		repo.ListRecordsForZone(ctx, "z1")
+
+		// rows.Scan failure in GetIPsForName
+		mock.ExpectQuery(`SELECT content FROM dns_records`).WillReturnRows(sqlmock.NewRows([]string{"content"}).AddRow(123))
+		repo.GetIPsForName(ctx, "test", "")
+
+		// rows.Scan failure in ListZoneChanges
+		mock.ExpectQuery(`SELECT`).WillReturnRows(sqlmock.NewRows([]string{"id", "zone_id", "serial", "action", "name", "type", "content", "ttl", "priority", "created_at"}).
+			AddRow(1, 2, 3, 4, 5, 6, 7, 8, 9, 10))
+		repo.ListZoneChanges(ctx, "z1", 0)
+
+		// rows.Scan failure in GetAuditLogs
+		mock.ExpectQuery(`SELECT`).WillReturnRows(sqlmock.NewRows([]string{"id", "tenant_id", "action", "resource_type", "resource_id", "details", "created_at"}).
+			AddRow(1, 2, 3, 4, 5, 6, 7))
+		repo.GetAuditLogs(ctx, "t1")
+
 		// CreateZoneWithRecords Transaction Begin Error
 		mock.ExpectBegin().WillReturnError(dbErr)
 		repo.CreateZoneWithRecords(ctx, &domain.Zone{}, nil)
