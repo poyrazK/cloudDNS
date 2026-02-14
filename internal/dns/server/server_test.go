@@ -104,6 +104,23 @@ func (m *mockServerRepo) ListZones(ctx context.Context, tenantID string) ([]doma
 func (m *mockServerRepo) DeleteZone(ctx context.Context, zoneID string, tenantID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	
+	// 1. Delete Zone
+	var nextZones []domain.Zone
+	for _, z := range m.zones {
+		if z.ID == zoneID { continue }
+		nextZones = append(nextZones, z)
+	}
+	m.zones = nextZones
+
+	// 2. Delete associated Records
+	var nextRecords []domain.Record
+	for _, r := range m.records {
+		if r.ZoneID == zoneID { continue }
+		nextRecords = append(nextRecords, r)
+	}
+	m.records = nextRecords
+	
 	return nil
 }
 func (m *mockServerRepo) DeleteRecord(ctx context.Context, recordID string, zoneID string) error {
