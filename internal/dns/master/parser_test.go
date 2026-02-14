@@ -191,3 +191,25 @@ func TestCanonicalSorting(t *testing.T) {
 		t.Errorf("Type sorting failed for same name: got %v, %v", records[0].Type, records[1].Type)
 	}
 }
+
+func TestRecordTypeToQueryType(t *testing.T) {
+	tests := []struct {
+		rt   domain.RecordType
+		want uint16
+	}{
+		{domain.TypeA, 1},
+		{domain.TypeNS, 2},
+		{domain.TypeCNAME, 5},
+		{domain.TypeSOA, 6},
+		{domain.TypeMX, 15},
+		{domain.TypeTXT, 16},
+		{domain.TypeAAAA, 28},
+		{domain.TypePTR, 12},
+		{"UNKNOWN", 0},
+	}
+	for _, tt := range tests {
+		if got := RecordTypeToQueryType(tt.rt); got != tt.want {
+			t.Errorf("RecordTypeToQueryType(%v) = %v, want %v", tt.rt, got, tt.want)
+		}
+	}
+}
