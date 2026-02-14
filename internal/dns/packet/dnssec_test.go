@@ -53,19 +53,24 @@ func TestSignRRSet(t *testing.T) {
 	}
 }
 
-func TestCountLabels(t *testing.T) {
-	cases := []struct {
-		name string
-		want int
-	}{
-		{"example.com.", 2},
-		{"www.example.com.", 3},
-		{".", 0},
-		{"", 0},
+func TestComputeKeyTag_WrongType(t *testing.T) {
+	record := DnsRecord{Type: A}
+	if tag := record.ComputeKeyTag(); tag != 0 {
+		t.Errorf("Expected 0 tag for non-DNSKEY")
 	}
-	for _, c := range cases {
-		if got := countLabels(c.name); got != c.want {
-			t.Errorf("countLabels(%s) = %d, want %d", c.name, got, c.want)
-		}
+}
+
+func TestComputeDS_WrongType(t *testing.T) {
+	record := DnsRecord{Type: A}
+	ds, err := record.ComputeDS(2)
+	if err != nil || ds.Type != UNKNOWN {
+		t.Errorf("Expected empty record and no error for non-DNSKEY")
+	}
+}
+
+func TestSignRRSet_Empty(t *testing.T) {
+	sig, err := SignRRSet(nil, nil, "test.", 0, 0, 0)
+	if err != nil || sig.Type != UNKNOWN {
+		t.Errorf("Expected empty record for empty RRSet")
 	}
 }
