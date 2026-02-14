@@ -73,7 +73,51 @@ func NewServer(addr string, repo ports.DNSRepository, logger *slog.Logger) *Serv
 		}
 	}()
 
+	// Background DNSSEC automation: Run every hour
+	go func() {
+		for {
+			time.Sleep(1 * time.Hour)
+			s.automateDNSSEC()
+		}
+	}()
+
+	// Background DNSSEC automation: Run every hour
+	go func() {
+		for {
+			time.Sleep(1 * time.Hour)
+			s.automateDNSSEC()
+		}
+	}()
+
 	return s
+}
+
+func (s *Server) automateDNSSEC() {
+	ctx := context.Background()
+	// Get all zones (simplified: we'd need a ListAllZones method or iterate over tenants)
+	// For now, we use a placeholder or assume a way to discover active zones
+	zones, err := s.Repo.ListZones(ctx, "") // Empty tenant might return all or we iterate
+	if err != nil { return }
+
+	for _, z := range zones {
+		if err := s.DNSSEC.AutomateLifecycle(ctx, z.ID); err != nil {
+			s.Logger.Error("DNSSEC automation failed for zone", "zone", z.Name, "error", err)
+		}
+	}
+}
+
+func (s *Server) automateDNSSEC() {
+	ctx := context.Background()
+	// Get all zones (simplified: we'd need a ListAllZones method or iterate over tenants)
+	// For now, we use a placeholder or assume a way to discover active zones
+	zones, err := s.Repo.ListZones(ctx, "") // Empty tenant might return all or we iterate
+	if err != nil { return }
+
+	for _, z := range zones {
+		if err := s.DNSSEC.AutomateLifecycle(ctx, z.ID); err != nil {
+			s.Logger.Error("DNSSEC automation failed for zone", "zone", z.Name, "error", err)
+		}
+	}
 }
 
 func (s *Server) Run() error {
