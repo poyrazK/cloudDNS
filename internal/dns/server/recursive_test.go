@@ -42,7 +42,7 @@ func TestResolveRecursive(t *testing.T) {
 	}
 
 	resp, err := s.resolveRecursive("test.com.", packet.A)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Recursive resolve failed: %v", err)
 	}
 
@@ -64,7 +64,7 @@ func TestResolveRecursive_NXDOMAIN(t *testing.T) {
 	}
 
 	resp, err := s.resolveRecursive("nonexistent.io.", packet.A)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Expected no error for NXDOMAIN, got %v", err)
 	}
 
@@ -84,7 +84,7 @@ func TestRecursive_NoNextNS(t *testing.T) {
 	}
 
 	resp, err := s.resolveRecursive("deadend.test.", packet.A)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
 	if len(resp.Answers) != 0 {
@@ -95,10 +95,10 @@ func TestRecursive_NoNextNS(t *testing.T) {
 func TestSendQuery(t *testing.T) {
 	// 1. Start a mock UDP DNS server
 	addr, err := net.ResolveUDPAddr("udp", "127.0.0.1:0")
-	if err != nil { t.Fatalf("ResolveUDPAddr failed: %v", err) }
+	if errScan != nil { t.Fatalf("ResolveUDPAddr failed: %v", err) }
 	
 	conn, err := net.ListenUDP("udp", addr)
-	if err != nil { t.Fatalf("ListenUDP failed: %v", err) }
+	if errScan != nil { t.Fatalf("ListenUDP failed: %v", err) }
 	defer conn.Close()
 	
 	go func() {
@@ -132,7 +132,7 @@ func TestSendQuery(t *testing.T) {
 	serverAddr := conn.LocalAddr().String()
 	
 	resp, err := srv.sendQuery(serverAddr, "query.test.", packet.A)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("sendQuery failed: %v", err)
 	}
 	

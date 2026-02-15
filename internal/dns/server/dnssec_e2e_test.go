@@ -44,7 +44,7 @@ func TestEndToEndDNSSEC_Lifecycle(t *testing.T) {
 	zoneReq := domain.Zone{Name: "dnssec.e2e.", TenantID: "admin"}
 	body, _ := json.Marshal(zoneReq)
 	resp, err := http.Post(fmt.Sprintf("http://%s/zones", apiAddr), "application/json", bytes.NewBuffer(body))
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Failed to create zone via API: %v", err)
 	}
 	var createdZone domain.Zone
@@ -64,7 +64,7 @@ func TestEndToEndDNSSEC_Lifecycle(t *testing.T) {
 	// 3. Trigger DNSSEC Automation
 	// Force the lifecycle management to generate keys for the new zone
 	err = dnsSrv.DNSSEC.AutomateLifecycle(context.Background(), createdZone.ID)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("DNSSEC automation failed: %v", err)
 	}
 
@@ -97,7 +97,7 @@ func TestEndToEndDNSSEC_Lifecycle(t *testing.T) {
 	query.Write(qBuf)
 
 	conn, err := net.Dial("udp", dnsAddr)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Failed to connect to DNS server: %v", err)
 	}
 	defer conn.Close()
@@ -106,7 +106,7 @@ func TestEndToEndDNSSEC_Lifecycle(t *testing.T) {
 	
 	resBuf := make([]byte, 2048)
 	n, err := conn.Read(resBuf)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Failed to read from DNS server: %v", err)
 	}
 	

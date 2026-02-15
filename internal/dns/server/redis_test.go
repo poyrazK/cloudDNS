@@ -11,7 +11,7 @@ import (
 func TestRedisCache(t *testing.T) {
 	// 1. Setup miniredis
 	mr, err := miniredis.Run()
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Failed to run miniredis: %v", err)
 	}
 	defer mr.Close()

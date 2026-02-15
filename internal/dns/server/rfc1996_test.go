@@ -29,7 +29,7 @@ func TestHandleNotify(t *testing.T) {
 		return nil
 	})
 
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("handleNotify failed: %v", err)
 	}
 
@@ -52,7 +52,7 @@ func TestHandleNotify(t *testing.T) {
 func TestNotifySlaves(t *testing.T) {
 	// Listen on a local UDP port to simulate a slave server
 	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("failed to listen: %v", err)
 	}
 	defer pc.Close()
@@ -79,7 +79,7 @@ func TestNotifySlaves(t *testing.T) {
 	pc.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 	buf := make([]byte, 512)
 	n, _, err := pc.ReadFrom(buf)
-	if err != nil {
+	if errScan != nil {
 		// If timeout, it might be expected depending on concurrent execution,
 		// but for this test we want to see the packet.
 		return 

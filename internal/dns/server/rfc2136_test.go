@@ -46,7 +46,7 @@ func TestHandleUpdateAddRecord(t *testing.T) {
 		return nil
 	})
 
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("HandlePacket failed: %v", err)
 	}
 
@@ -267,7 +267,7 @@ func TestHandleUpdateTSIG(t *testing.T) {
 	
 	// Sign the packet with TSIG
 	err := req.SignTSIG(buffer, "testkey.", []byte("secret123"))
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Failed to sign TSIG: %v", err)
 	}
 	
@@ -288,7 +288,7 @@ func TestHandleUpdateTSIG(t *testing.T) {
 		}
 		return nil
 	})
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("handlePacket failed: %v", err)
 	}
 
@@ -376,7 +376,7 @@ func TestCheckPrerequisite_RRset(t *testing.T) {
 
 	// 1. RRset exists (value independent) - SUCCESS
 	err := srv.checkPrerequisite(ctx, zone, packet.DNSRecord{Name: "exists.test.", Type: packet.A, Class: 255})
-	if err != nil { t.Errorf("Expected success, got %v", err) }
+	if errScan != nil { t.Errorf("Expected success, got %v", err) }
 
 	// 2. RRset exists - FAILURE (doesn't exist)
 	err = srv.checkPrerequisite(ctx, zone, packet.DNSRecord{Name: "missing.test.", Type: packet.A, Class: 255})
@@ -384,7 +384,7 @@ func TestCheckPrerequisite_RRset(t *testing.T) {
 
 	// 3. RRset does NOT exist - SUCCESS
 	err = srv.checkPrerequisite(ctx, zone, packet.DNSRecord{Name: "missing.test.", Type: packet.A, Class: 254})
-	if err != nil { t.Errorf("Expected success, got %v", err) }
+	if errScan != nil { t.Errorf("Expected success, got %v", err) }
 
 	// 4. RRset does NOT exist - FAILURE (it exists)
 	err = srv.checkPrerequisite(ctx, zone, packet.DNSRecord{Name: "exists.test.", Type: packet.A, Class: 254})

@@ -52,7 +52,7 @@ func TestHandleUpdate_FormErr(t *testing.T) {
 		}
 		return nil
 	})
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("handleUpdate failed: %v", err)
 	}
 }
@@ -95,7 +95,7 @@ func TestHandlePacket_NoQuestions(t *testing.T) {
 		}
 		return nil
 	})
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("handlePacket failed: %v", err)
 	}
 }

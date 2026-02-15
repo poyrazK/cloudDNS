@@ -26,7 +26,7 @@ mail 1800 IN MX 10 mail.example.com.
 
 	parser := NewMasterParser()
 	data, err := parser.Parse(strings.NewReader(zoneFile))
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Failed to parse zone: %v", err)
 	}
 
@@ -138,7 +138,7 @@ $ORIGIN multi.
 		t.Run(tt.name, func(t *testing.T) {
 			p := NewMasterParser()
 			got, err := p.Parse(strings.NewReader(tt.zoneFile))
-			if err != nil {
+			if errScan != nil {
 				t.Fatalf("Parse failed: %v", err)
 			}
 			if len(got.Records) != len(tt.want) {

@@ -18,7 +18,7 @@ func TestHeaderSerialization(t *testing.T) {
 
 	buffer := NewBytePacketBuffer()
 	err := header.Write(buffer)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Failed to write header: %v", err)
 	}
 
@@ -29,7 +29,7 @@ func TestHeaderSerialization(t *testing.T) {
 	buffer.Seek(0)
 	readHeader := DNSHeader{}
 	err = readHeader.Read(buffer)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Failed to read header: %v", err)
 	}
 
@@ -49,13 +49,13 @@ func TestNameSerialization(t *testing.T) {
 	name := "google.com."
 	
 	err := buffer.WriteName(name)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Failed to write name: %v", err)
 	}
 
 	buffer.Seek(0)
 	readName, err := buffer.ReadName()
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Failed to read name: %v", err)
 	}
 
@@ -82,14 +82,14 @@ func TestFullPacket(t *testing.T) {
 
 	buffer := NewBytePacketBuffer()
 	err := packet.Write(buffer)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Failed to write packet: %v", err)
 	}
 
 	buffer.Seek(0)
 	parsedPacket := NewDNSPacket()
 	err = parsedPacket.FromBuffer(buffer)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Failed to parse packet: %v", err)
 	}
 
@@ -114,14 +114,14 @@ func TestTXTRecordSerialization(t *testing.T) {
 
 	buffer := NewBytePacketBuffer()
 	_, err := record.Write(buffer)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Failed to write TXT record: %v", err)
 	}
 
 	buffer.Seek(0)
 	parsed := DNSRecord{}
 	err = parsed.Read(buffer)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Failed to read record: %v", err)
 	}
 	if parsed.Txt != record.Txt {
@@ -145,14 +145,14 @@ func TestSOARecordSerialization(t *testing.T) {
 
 	buffer := NewBytePacketBuffer()
 	_, err := record.Write(buffer)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Failed to write SOA record: %v", err)
 	}
 
 	buffer.Seek(0)
 	parsed := DNSRecord{}
 	err = parsed.Read(buffer)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Failed to read SOA record: %v", err)
 	}
 	if parsed.Serial != record.Serial {
@@ -164,7 +164,7 @@ func TestBufferOverflow(t *testing.T) {
 	buffer := NewBytePacketBuffer()
 	buffer.Pos = MaxPacketSize - 1
 	err := buffer.Write(1)
-	if err != nil {
+	if errScan != nil {
 		t.Errorf("Should be able to write at MaxPacketSize - 1")
 	}
 	err = buffer.Write(2)
@@ -177,13 +177,13 @@ func TestReadWriteU32(t *testing.T) {
 	buffer := NewBytePacketBuffer()
 	val := uint32(0x12345678)
 	err := buffer.Writeu32(val)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Writeu32 failed: %v", err)
 	}
 
 	buffer.Seek(0)
 	read, err := buffer.Readu32()
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Readu32 failed: %v", err)
 	}
 
@@ -197,7 +197,7 @@ func TestLabelLengthLimit(t *testing.T) {
 	// 63 characters is the limit for a single label
 	longLabel := "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabc"
 	err := buffer.WriteName(longLabel + ".com.")
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Should allow 63 char label: %v", err)
 	}
 
@@ -211,7 +211,7 @@ func TestLabelLengthLimit(t *testing.T) {
 func TestEmptyName(t *testing.T) {
 	buffer := NewBytePacketBuffer()
 	err := buffer.WriteName("")
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Failed to write empty name")
 	}
 	// Position should be 1 (just the null terminator)
@@ -237,14 +237,14 @@ func TestMXRecordSerialization(t *testing.T) {
 
 	buffer := NewBytePacketBuffer()
 	_, err := record.Write(buffer)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Failed to write MX record: %v", err)
 	}
 
 	buffer.Seek(0)
 	parsed := DNSRecord{}
 	err = parsed.Read(buffer)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Failed to read MX record: %v", err)
 	}
 
@@ -266,14 +266,14 @@ func TestCNAMERecordSerialization(t *testing.T) {
 
 	buffer := NewBytePacketBuffer()
 	_, err := record.Write(buffer)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Failed to write CNAME record: %v", err)
 	}
 
 	buffer.Seek(0)
 	parsed := DNSRecord{}
 	err = parsed.Read(buffer)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Failed to read CNAME record: %v", err)
 	}
 
@@ -295,7 +295,7 @@ func TestReadWriteAllTypes(t *testing.T) {
 	for _, rec := range records {
 		buffer := NewBytePacketBuffer()
 		_, err := rec.Write(buffer)
-		if err != nil {
+		if errScan != nil {
 			t.Errorf("Failed to write %v: %v", rec.Type, err)
 			continue
 		}
@@ -303,7 +303,7 @@ func TestReadWriteAllTypes(t *testing.T) {
 		buffer.Seek(0)
 		parsed := DNSRecord{}
 		err = parsed.Read(buffer)
-		if err != nil {
+		if errScan != nil {
 			t.Errorf("Failed to read %v: %v", rec.Type, err)
 			continue
 		}
@@ -360,14 +360,14 @@ func TestDNSKEYRecordSerialization(t *testing.T) {
 
 	buffer := NewBytePacketBuffer()
 	_, err := record.Write(buffer)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Failed to write DNSKEY record: %v", err)
 	}
 
 	buffer.Seek(0)
 	parsed := DNSRecord{}
 	err = parsed.Read(buffer)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Failed to read DNSKEY record: %v", err)
 	}
 
@@ -397,14 +397,14 @@ func TestRRSIGRecordSerialization(t *testing.T) {
 
 	buffer := NewBytePacketBuffer()
 	_, err := record.Write(buffer)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Failed to write RRSIG record: %v", err)
 	}
 
 	buffer.Seek(0)
 	parsed := DNSRecord{}
 	err = parsed.Read(buffer)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Failed to read RRSIG record: %v", err)
 	}
 
@@ -427,14 +427,14 @@ func TestNSECRecordSerialization(t *testing.T) {
 
 	buffer := NewBytePacketBuffer()
 	_, err := record.Write(buffer)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Failed to write NSEC record: %v", err)
 	}
 
 	buffer.Seek(0)
 	parsed := DNSRecord{}
 	err = parsed.Read(buffer)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Failed to read NSEC record: %v", err)
 	}
 
@@ -454,14 +454,14 @@ func TestHINFORecordSerialization(t *testing.T) {
 
 	buffer := NewBytePacketBuffer()
 	_, err := record.Write(buffer)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Failed to write HINFO record: %v", err)
 	}
 
 	buffer.Seek(0)
 	parsed := DNSRecord{}
 	err = parsed.Read(buffer)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Failed to read HINFO record: %v", err)
 	}
 
@@ -481,14 +481,14 @@ func TestMINFORecordSerialization(t *testing.T) {
 
 	buffer := NewBytePacketBuffer()
 	_, err := record.Write(buffer)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Failed to write MINFO record: %v", err)
 	}
 
 	buffer.Seek(0)
 	parsed := DNSRecord{}
 	err = parsed.Read(buffer)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Failed to read MINFO record: %v", err)
 	}
 
@@ -512,14 +512,14 @@ func TestNSEC3RecordSerialization(t *testing.T) {
 
 	buffer := NewBytePacketBuffer()
 	_, err := record.Write(buffer)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Failed to write NSEC3 record: %v", err)
 	}
 
 	buffer.Seek(0)
 	parsed := DNSRecord{}
 	err = parsed.Read(buffer)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Failed to read NSEC3 record: %v", err)
 	}
 
@@ -544,14 +544,14 @@ func TestNSEC3PARAMRecordSerialization(t *testing.T) {
 
 	buffer := NewBytePacketBuffer()
 	_, err := record.Write(buffer)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Failed to write NSEC3PARAM record: %v", err)
 	}
 
 	buffer.Seek(0)
 	parsed := DNSRecord{}
 	err = parsed.Read(buffer)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Failed to read NSEC3PARAM record: %v", err)
 	}
 
@@ -576,14 +576,14 @@ func TestDSRecordSerialization(t *testing.T) {
 
 	buffer := NewBytePacketBuffer()
 	_, err := record.Write(buffer)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Failed to write DS record: %v", err)
 	}
 
 	buffer.Seek(0)
 	parsed := DNSRecord{}
 	err = parsed.Read(buffer)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Failed to read DS record: %v", err)
 	}
 
@@ -605,14 +605,14 @@ func TestEDERecordSerialization(t *testing.T) {
 
 	buffer := NewBytePacketBuffer()
 	_, err := record.Write(buffer)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Failed to write OPT with EDE: %v", err)
 	}
 
 	buffer.Seek(0)
 	parsed := DNSRecord{}
 	err = parsed.Read(buffer)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("Failed to read record: %v", err)
 	}
 
@@ -755,7 +755,7 @@ func TestDNSHeader_NewAndWrite(t *testing.T) {
 	h.ResourceEntries = 0
 
 	buf := NewBytePacketBuffer()
-	if err := h.Write(buf); err != nil {
+	if err := h.Write(buf); errScan != nil {
 		t.Fatalf("Header.Write failed: %v", err)
 	}
 
@@ -767,13 +767,13 @@ func TestDNSHeader_NewAndWrite(t *testing.T) {
 func TestDNSQuestion_NewAndWrite(t *testing.T) {
 	q := NewDNSQuestion("example.com.", A)
 	buf := NewBytePacketBuffer()
-	if err := q.Write(buf); err != nil {
+	if err := q.Write(buf); errScan != nil {
 		t.Fatalf("Question.Write failed: %v", err)
 	}
 
 	buf.Seek(0)
 	parsed := DNSQuestion{}
-	if err := parsed.Read(buf); err != nil {
+	if err := parsed.Read(buf); errScan != nil {
 		t.Fatalf("Question.Read failed: %v", err)
 	}
 
@@ -851,12 +851,12 @@ func TestTSIG_SignVerify(t *testing.T) {
 	
 	// 2. Proactively write the packet to the buffer (WITHOUT TSIG yet)
 	// RFC 2845: MAC is computed over the wire-format DNS message.
-	if err := p.Write(buf); err != nil {
+	if err := p.Write(buf); errScan != nil {
 		t.Fatalf("Failed to write packet: %v", err)
 	}
 	
 	// 3. Append the TSIG signature to the message
-	if err := p.SignTSIG(buf, "key.", secret); err != nil {
+	if err := p.SignTSIG(buf, "key.", secret); errScan != nil {
 		t.Fatalf("SignTSIG failed: %v", err)
 	}
 	
@@ -865,7 +865,7 @@ func TestTSIG_SignVerify(t *testing.T) {
 	parsed := NewDNSPacket()
 	pBuf := NewBytePacketBuffer()
 	pBuf.Load(data)
-	if err := parsed.FromBuffer(pBuf); err != nil {
+	if err := parsed.FromBuffer(pBuf); errScan != nil {
 		t.Fatalf("FromBuffer failed: %v", err)
 	}
 	
@@ -875,7 +875,7 @@ func TestTSIG_SignVerify(t *testing.T) {
 	}
 	
 	// 6. Perform HMAC verification
-	if err := parsed.VerifyTSIG(data, parsed.TSIGStart, secret); err != nil {
+	if err := parsed.VerifyTSIG(data, parsed.TSIGStart, secret); errScan != nil {
 		t.Errorf("VerifyTSIG validation failed: %v", err)
 	}
 }
