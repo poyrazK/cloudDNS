@@ -47,8 +47,8 @@ func (r *PostgresRepository) GetRecords(ctx context.Context, name string, qType 
 	for rows.Next() {
 		var rec domain.Record
 		var priority sql.NullInt32
-		if err := rows.Scan(&rec.ID, &rec.ZoneID, &rec.Name, &rec.Type, &rec.Content, &rec.TTL, &priority, &rec.Network); err != nil {
-			return nil, err
+		if errScan := rows.Scan(&rec.ID, &rec.ZoneID, &rec.Name, &rec.Type, &rec.Content, &rec.TTL, &priority, &rec.Network); errScan != nil {
+			return nil, errScan
 		}
 		if priority.Valid {
 			p := int(priority.Int32)
