@@ -29,7 +29,7 @@ func TestComputeDS(t *testing.T) {
 		PublicKey: []byte{0x01, 0x02, 0x03, 0x04},
 	}
 	ds, err := record.ComputeDS(2) // SHA-256
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("ComputeDS failed: %v", err)
 	}
 	if ds.Type != DS || len(ds.Digest) == 0 {
@@ -44,7 +44,7 @@ func TestSignRRSet(t *testing.T) {
 	}
 	
 	sig, err := SignRRSet(records, privKey, "test.", 1234, 1600000000, 1700000000)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("SignRRSet failed: %v", err)
 	}
 	
