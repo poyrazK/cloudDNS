@@ -4,9 +4,9 @@ run:
 linters:
   enable-all: true
   disable:
-    - depguard # Requires manual dependency whitelist configuration
-    - lll      # Line length is often a matter of taste
-    - wsl      # Extremely pedantic about white space
+    - depguard
+    - lll
+    - wsl
 
 issues:
   exclude-use-default: false
