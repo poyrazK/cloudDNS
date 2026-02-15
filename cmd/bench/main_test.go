@@ -122,3 +122,15 @@ func TestSeedDatabase(t *testing.T) {
 		t.Errorf("seedDatabase failed: %v", err)
 	}
 }
+
+func TestRunRealisticWorker_ConnError(t *testing.T) {
+	stats := &Stats{}
+	// Use an unreachable port
+	runRealisticWorker("127.0.0.1:1", 1, 0, 100, 1.1, 100, stats)
+	// Should just return silently after printing error
+}
+
+func TestRunSeed_InvalidDB(t *testing.T) {
+	// Should not panic, just print error
+	runSeed(10) 
+}
