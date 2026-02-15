@@ -37,3 +37,5 @@ issues:
     - path: _test\.go
       linters:
         - gosec
+        - unparam
+        - prealloc
