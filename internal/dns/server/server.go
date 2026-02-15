@@ -699,8 +699,8 @@ func (s *Server) handleUpdate(request *packet.DNSPacket, rawData []byte, clientI
 			response.Header.ResCode = packet.RCODE_NOTAUTH
 			return s.sendUpdateResponse(response, sendFn)
 		}
-		if err := request.VerifyTSIG(rawData, request.TSIGStart, secret); err != nil {
-			s.Logger.Warn("update failed: TSIG verification failed", "error", err)
+		if errVerify := request.VerifyTSIG(rawData, request.TSIGStart, secret); errVerify != nil {
+			s.Logger.Warn("update failed: TSIG verification failed", "error", errVerify)
 			response.Header.ResCode = packet.RCODE_NOTAUTH
 			return s.sendUpdateResponse(response, sendFn)
 		}
@@ -729,9 +729,9 @@ func (s *Server) handleUpdate(request *packet.DNSPacket, rawData []byte, clientI
 
 	// 2. Prerequisite Checks (PRCOUNT)
 	for _, pr := range request.Answers {
-		if err := s.checkPrerequisite(ctx, dbZone, pr); err != nil {
-			s.Logger.Warn("update failed: prerequisite mismatch", "pr", pr.Name, "error", err)
-			if uErr, ok := err.(updateError); ok {
+		if errPrereq := s.checkPrerequisite(ctx, dbZone, pr); errPrereq != nil {
+			s.Logger.Warn("update failed: prerequisite mismatch", "pr", pr.Name, "error", errPrereq)
+			if uErr, ok := errPrereq.(updateError); ok {
 				response.Header.ResCode = uint8(uErr.rcode)
 			} else {
 				response.Header.ResCode = packet.RCODE_SERVFAIL
@@ -745,8 +745,8 @@ func (s *Server) handleUpdate(request *packet.DNSPacket, rawData []byte, clientI
 	var changes []domain.ZoneChange
 
 	for _, up := range request.Authorities {
-		if err := s.applyUpdate(ctx, dbZone, up); err != nil {
-			s.Logger.Error("update failed: failed to apply record change", "up", up.Name, "error", err)
+		if errApply := s.applyUpdate(ctx, dbZone, up); errApply != nil {
+			s.Logger.Error("update failed: failed to apply record change", "up", up.Name, "error", errApply)
 			response.Header.ResCode = packet.RCODE_SERVFAIL
 			return s.sendUpdateResponse(response, sendFn)
 		}
