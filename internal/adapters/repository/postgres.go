@@ -299,8 +299,8 @@ func (r *PostgresRepository) ListKeysForZone(ctx context.Context, zoneID string)
 	var keys []domain.DNSSECKey
 	for rows.Next() {
 		var k domain.DNSSECKey
-		if err := rows.Scan(&k.ID, &k.ZoneID, &k.KeyType, &k.Algorithm, &k.PrivateKey, &k.PublicKey, &k.Active, &k.CreatedAt, &k.UpdatedAt); err != nil {
-			return nil, err
+		if errScan := rows.Scan(&k.ID, &k.ZoneID, &k.KeyType, &k.Algorithm, &k.PrivateKey, &k.PublicKey, &k.Active, &k.CreatedAt, &k.UpdatedAt); errScan != nil {
+			return nil, errScan
 		}
 		keys = append(keys, k)
 	}
