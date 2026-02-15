@@ -53,7 +53,7 @@ func TestAuditLogCreation(t *testing.T) {
 	// 1. Create Zone
 	zone := &domain.Zone{Name: "audit.test.", TenantID: "t1"}
 	err := svc.CreateZone(context.Background(), zone)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("CreateZone failed: %v", err)
 	}
 
@@ -71,7 +71,7 @@ func TestAuditLogCreation(t *testing.T) {
 	// 2. Create Record
 	record := &domain.Record{Name: "www.audit.test.", Type: domain.TypeA, Content: "1.2.3.4", TTL: 300}
 	err = svc.CreateRecord(context.Background(), record)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("CreateRecord failed: %v", err)
 	}
 

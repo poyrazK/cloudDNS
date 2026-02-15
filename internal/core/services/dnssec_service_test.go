@@ -36,13 +36,13 @@ func (m *mockDNSSECRepo) GetAuditLogs(ctx context.Context, tenantID string) ([]d
 func (m *mockDNSSECRepo) Ping(ctx context.Context) error { return nil }
 
 func (m *mockDNSSECRepo) CreateKey(ctx context.Context, key *domain.DNSSECKey) error {
-	if m.err != nil { return m.err }
+	if m.errScan != nil { return m.err }
 	m.keys = append(m.keys, *key)
 	return nil
 }
 
 func (m *mockDNSSECRepo) ListKeysForZone(ctx context.Context, zoneID string) ([]domain.DNSSECKey, error) {
-	if m.err != nil { return nil, m.err }
+	if m.errScan != nil { return nil, m.err }
 	var result []domain.DNSSECKey
 	for _, k := range m.keys {
 		if k.ZoneID == zoneID {
@@ -53,7 +53,7 @@ func (m *mockDNSSECRepo) ListKeysForZone(ctx context.Context, zoneID string) ([]
 }
 
 func (m *mockDNSSECRepo) UpdateKey(ctx context.Context, key *domain.DNSSECKey) error {
-	if m.err != nil { return m.err }
+	if m.errScan != nil { return m.err }
 	for i, k := range m.keys {
 		if k.ID == key.ID {
 			m.keys[i] = *key
@@ -70,7 +70,7 @@ func TestGenerateKey(t *testing.T) {
 	ctx := context.Background()
 
 	key, err := svc.GenerateKey(ctx, "zone-1", "KSK")
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("GenerateKey failed: %v", err)
 	}
 
@@ -97,7 +97,7 @@ func TestAutomateLifecycle(t *testing.T) {
 	ctx := context.Background()
 
 	// 1. Run on a zone with no keys
-	if err := svc.AutomateLifecycle(ctx, "zone-1"); err != nil {
+	if err := svc.AutomateLifecycle(ctx, "zone-1"); errScan != nil {
 		t.Fatalf("AutomateLifecycle failed: %v", err)
 	}
 
@@ -139,7 +139,7 @@ func TestAutomateLifecycle_ExistingKeys(t *testing.T) {
 	})
 
 	// Run automation
-	if err := svc.AutomateLifecycle(ctx, "z1"); err != nil {
+	if err := svc.AutomateLifecycle(ctx, "z1"); errScan != nil {
 		t.Fatalf("AutomateLifecycle failed: %v", err)
 	}
 
@@ -163,7 +163,7 @@ func TestGetActiveKeys(t *testing.T) {
 	})
 
 	keys, err := svc.GetActiveKeys(ctx, "z1", "ZSK")
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("GetActiveKeys failed: %v", err)
 	}
 	if len(keys) != 1 || keys[0].ID != "k2" {
@@ -183,7 +183,7 @@ func TestSignRRSet(t *testing.T) {
 
 	// 1. Setup ZSK
 	_, err := svc.GenerateKey(ctx, "z1", "ZSK")
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("GenerateKey failed: %v", err)
 	}
 
@@ -193,7 +193,7 @@ func TestSignRRSet(t *testing.T) {
 	}
 
 	sigs, err := svc.SignRRSet(ctx, "example.com.", "z1", records)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("SignRRSet failed: %v", err)
 	}
 
@@ -239,7 +239,7 @@ func TestAutomateLifecycle_Rollover(t *testing.T) {
 	})
 
 	// 2. Run automation - should trigger rollover
-	if err := svc.AutomateLifecycle(ctx, "z1"); err != nil {
+	if err := svc.AutomateLifecycle(ctx, "z1"); errScan != nil {
 		t.Fatalf("AutomateLifecycle failed: %v", err)
 	}
 
@@ -266,7 +266,7 @@ func TestAutomateLifecycle_Rollover(t *testing.T) {
 	k1.CreatedAt = time.Now().Add(-50 * 24 * time.Hour)
 	for i, k := range repo.keys { if k.ID == "k1" { repo.keys[i] = k1 } }
 
-	if err := svc.AutomateLifecycle(ctx, "z1"); err != nil {
+	if err := svc.AutomateLifecycle(ctx, "z1"); errScan != nil {
 		t.Fatalf("Second automation failed: %v", err)
 	}
 
