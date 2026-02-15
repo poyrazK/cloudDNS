@@ -72,6 +72,7 @@ func TestEndToEnd_RFC_Extensions(t *testing.T) {
 	body, _ := json.Marshal(zoneReq)
 	resp, err := http.Post(fmt.Sprintf("http://%s/zones", apiAddr), "application/json", bytes.NewBuffer(body))
 	if err != nil { t.Fatalf("POST /zones failed: %v", err) }
+	defer resp.Body.Close()
 	var createdZone domain.Zone
 	if err := json.NewDecoder(resp.Body).Decode(&createdZone); err != nil {
 		t.Fatalf("Failed to decode created zone: %v", err)
@@ -83,14 +84,16 @@ func TestEndToEnd_RFC_Extensions(t *testing.T) {
 		Name: "rfc.test.", Type: domain.TypeNS, Content: "ns-slave.rfc.test.", ZoneID: createdZone.ID,
 	}
 	nb, _ := json.Marshal(nsRec)
-	http.Post(fmt.Sprintf("http://%s/zones/%s/records", apiAddr, createdZone.ID), "application/json", bytes.NewBuffer(nb))
+	respNS, err := http.Post(fmt.Sprintf("http://%s/zones/%s/records", apiAddr, createdZone.ID), "application/json", bytes.NewBuffer(nb))
+	if err == nil { respNS.Body.Close() }
 	
 	// Add Glue record for the slave NS so notifySlaves can resolve it
 	glueRec := domain.Record{
 		Name: "ns-slave.rfc.test.", Type: domain.TypeA, Content: "127.0.0.1", ZoneID: createdZone.ID,
 	}
 	gb, _ := json.Marshal(glueRec)
-	http.Post(fmt.Sprintf("http://%s/zones/%s/records", apiAddr, createdZone.ID), "application/json", bytes.NewBuffer(gb))
+	respGlue, err := http.Post(fmt.Sprintf("http://%s/zones/%s/records", apiAddr, createdZone.ID), "application/json", bytes.NewBuffer(gb))
+	if err == nil { respGlue.Body.Close() }
 
 	// Get the starting serial
 	recs, _ := repo.GetRecords(context.Background(), "rfc.test.", domain.TypeSOA, "")
@@ -142,10 +145,11 @@ func TestEndToEnd_RFC_Extensions(t *testing.T) {
 	}
 
 	// 5. Verify change via API
-	resp, err = http.Get(fmt.Sprintf("http://%s/zones/%s/records?tenant_id=admin", apiAddr, createdZone.ID))
+	respRecs, err := http.Get(fmt.Sprintf("http://%s/zones/%s/records?tenant_id=admin", apiAddr, createdZone.ID))
 	if err != nil { t.Fatalf("GET records failed: %v", err) }
+	defer respRecs.Body.Close()
 	var zoneRecs []domain.Record
-	json.NewDecoder(resp.Body).Decode(&zoneRecs)
+	json.NewDecoder(respRecs.Body).Decode(&zoneRecs)
 	foundDynamic := false
 	for _, r := range zoneRecs {
 		if r.Name == "dynamic.rfc.test." { foundDynamic = true }

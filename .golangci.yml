@@ -2,11 +2,35 @@ run:
   timeout: 5m
 
 linters:
-  enable-all: true
-  disable:
-    - depguard
-    - lll
-    - wsl
+  disable-all: true
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - revive
+    - gosec
+    - bodyclose
+    - gocritic
+    - dupl
+    - errorlint
+    - unconvert
+    - misspell
+    - dogsled
+
+linters-settings:
+  revive:
+    # Set confidence to avoid too many minor style warnings initially
+    confidence: 0.8
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - experimental
+      - opinionated
+      - performance
+      - style
 
 issues:
   exclude-use-default: false

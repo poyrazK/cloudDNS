@@ -59,17 +59,17 @@ func TestDoH_E2E(t *testing.T) {
 
 	// 2. Valid Query (GET)
 	b64Query := base64.RawURLEncoding.EncodeToString(reqData)
-	resp, err = http.Get(ts.URL + "/dns-query?dns=" + b64Query)
+	respGET, err := http.Get(ts.URL + "/dns-query?dns=" + b64Query)
 	if err != nil {
 		t.Fatalf("DoH GET failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer respGET.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("Expected 200 OK for GET, got %d", resp.StatusCode)
+	if respGET.StatusCode != http.StatusOK {
+		t.Errorf("Expected 200 OK for GET, got %d", respGET.StatusCode)
 	}
 	
-	resBody, _ = io.ReadAll(resp.Body)
+	resBody, _ = io.ReadAll(respGET.Body)
 	resPacket = packet.NewDnsPacket()
 	resBuf = packet.NewBytePacketBuffer()
 	resBuf.Load(resBody)
@@ -79,27 +79,31 @@ func TestDoH_E2E(t *testing.T) {
 	}
 
 	// 3. Invalid Content-Type (POST)
-	resp, _ = http.Post(ts.URL+"/dns-query", "text/plain", bytes.NewReader(reqData))
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("Expected 400 Bad Request for invalid content-type, got %d", resp.StatusCode)
+	respInv, err := http.Post(ts.URL+"/dns-query", "text/plain", bytes.NewReader(reqData))
+	if err == nil { respInv.Body.Close() }
+	if respInv != nil && respInv.StatusCode != http.StatusBadRequest {
+		t.Errorf("Expected 400 Bad Request for invalid content-type, got %d", respInv.StatusCode)
 	}
 
 	// 4. Invalid Method
-	req2, _ := http.NewRequest("PUT", ts.URL+"/dns-query", nil)
-	resp, _ = http.DefaultClient.Do(req2)
-	if resp.StatusCode != http.StatusMethodNotAllowed {
-		t.Errorf("Expected 405 Method Not Allowed for PUT, got %d", resp.StatusCode)
+	reqReq, _ := http.NewRequest("PUT", ts.URL+"/dns-query", nil)
+	respMeth, err := http.DefaultClient.Do(reqReq)
+	if err == nil { respMeth.Body.Close() }
+	if respMeth != nil && respMeth.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("Expected 405 Method Not Allowed for PUT, got %d", respMeth.StatusCode)
 	}
 
 	// 5. Missing 'dns' parameter (GET)
-	resp, _ = http.Get(ts.URL + "/dns-query")
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("Expected 400 Bad Request for missing dns param, got %d", resp.StatusCode)
+	respMiss, err := http.Get(ts.URL + "/dns-query")
+	if err == nil { respMiss.Body.Close() }
+	if respMiss != nil && respMiss.StatusCode != http.StatusBadRequest {
+		t.Errorf("Expected 400 Bad Request for missing dns param, got %d", respMiss.StatusCode)
 	}
 
 	// 6. Invalid base64 (GET)
-	resp, _ = http.Get(ts.URL + "/dns-query?dns=!!!")
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("Expected 400 Bad Request for invalid base64, got %d", resp.StatusCode)
+	respB64, err := http.Get(ts.URL + "/dns-query?dns=!!!")
+	if err == nil { respB64.Body.Close() }
+	if respB64 != nil && respB64.StatusCode != http.StatusBadRequest {
+		t.Errorf("Expected 400 Bad Request for invalid base64, got %d", respB64.StatusCode)
 	}
 }
