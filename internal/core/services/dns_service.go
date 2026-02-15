@@ -134,6 +134,10 @@ func (s *dnsService) ListZones(ctx context.Context, tenantID string) ([]domain.Z
 	return s.repo.ListZones(ctx, tenantID)
 }
 
+func (s *dnsService) ListRecordsForZone(ctx context.Context, zoneID string) ([]domain.Record, error) {
+	return s.repo.ListRecordsForZone(ctx, zoneID)
+}
+
 func (s *dnsService) DeleteZone(ctx context.Context, zoneID string, tenantID string) error {
 	if err := s.repo.DeleteZone(ctx, zoneID, tenantID); err != nil {
 		return err

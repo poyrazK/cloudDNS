@@ -121,19 +121,20 @@ func TestCreateZone(t *testing.T) {
 	repo := &mockRepo{}
 	svc := NewDNSService(repo)
 
+	// Case 1: Name with dot
 	zone := &domain.Zone{Name: "example.com.", TenantID: "t1"}
 	err := svc.CreateZone(context.Background(), zone)
+	if err != nil { t.Fatalf("Expected no error, got %v", err) }
+	if zone.Name != "example.com." { t.Errorf("Expected example.com., got %s", zone.Name) }
 
-	if err != nil {
-		t.Fatalf("Expected no error, got %v", err)
-	}
+	// Case 2: Name without dot
+	zone2 := &domain.Zone{Name: "nodot.com", TenantID: "t1"}
+	err = svc.CreateZone(context.Background(), zone2)
+	if err != nil { t.Fatalf("Expected no error, got %v", err) }
+	if zone2.Name != "nodot.com." { t.Errorf("Expected nodot.com., got %s", zone2.Name) }
 
 	if zone.ID == "" {
 		t.Errorf("Expected UUID to be generated")
-	}
-
-	if zone.Name != "example.com." {
-		t.Errorf("Expected trailing dot, got %s", zone.Name)
 	}
 }
 

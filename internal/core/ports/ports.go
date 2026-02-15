@@ -37,6 +37,7 @@ type DNSService interface {
 	CreateRecord(ctx context.Context, record *domain.Record) error
 	Resolve(ctx context.Context, name string, qType domain.RecordType, clientIP string) ([]domain.Record, error)
 	ListZones(ctx context.Context, tenantID string) ([]domain.Zone, error)
+	ListRecordsForZone(ctx context.Context, zoneID string) ([]domain.Record, error)
 	DeleteZone(ctx context.Context, zoneID string, tenantID string) error
 	DeleteRecord(ctx context.Context, recordID string, zoneID string) error
 	ImportZone(ctx context.Context, tenantID string, r io.Reader) (*domain.Zone, error)
