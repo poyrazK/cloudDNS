@@ -7,7 +7,7 @@ cloudDNS is a high-performance, authoritative, and recursive DNS server built fr
 ![Tests](https://img.shields.io/badge/tests-passing-brightgreen)
 ![Coverage](https://img.shields.io/badge/coverage-86%25-brightgreen)
 
-## 🚀 Key Features
+## Key Features
 
 ### Core Protocol & Performance
 *   **Manual Wire Format (RFC 1035)**: Custom binary parser and serializer for maximum control over DNS packets.
@@ -36,7 +36,7 @@ cloudDNS is a high-performance, authoritative, and recursive DNS server built fr
 *   **Split-Horizon DNS**: Intelligent resolution providing different answers based on client source IP (CIDR).
 *   **Rate Limiting**: Token-bucket based DoS protection per client IP.
 
-## 🛠️ Architecture
+## Architecture
 
 cloudDNS follows a strict Hexagonal (Ports & Adapters) architecture:
 
@@ -46,7 +46,7 @@ cloudDNS follows a strict Hexagonal (Ports & Adapters) architecture:
     *   **Primary (Driving)**: DNS Server (UDP/TCP/DoH), REST API (HTTP).
     *   **Secondary (Driven)**: PostgreSQL Repository, Redis Cache.
 
-## 📦 Getting Started
+## Getting Started
 
 ### Prerequisites
 *   Go 1.21+
@@ -82,7 +82,7 @@ export DATABASE_URL="postgres://user:pass@localhost:5432/clouddns?sslmode=disabl
 go run cmd/clouddns/main.go
 ```
 
-## 🧪 Testing
+## Testing
 
 cloudDNS maintains a high standard of code quality with **86%+ test coverage**.
 
@@ -99,7 +99,7 @@ The test suite includes:
 *   **Integration Tests**: Database interactions using `pgx`.
 *   **E2E Tests**: Full server protocol verification (DNSSEC, DoH, AXFR/IXFR) using mock network connections.
 
-## 📝 API Usage
+## API Usage
 
 ### Create a Zone
 ```bash
@@ -126,6 +126,6 @@ curl -X POST http://localhost:8080/zones/{zone_id}/records
 curl "http://localhost:443/dns-query?dns=q80BAAABAAAAAAAAA3d3dwdleGFtcGxlA2NvbQAAAQAB"
 ```
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
