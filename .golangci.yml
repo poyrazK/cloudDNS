@@ -16,23 +16,32 @@ linters:
     - gocritic
     - dupl
     - errorlint
-    - unconvert
     - misspell
     - dogsled
+    - whitespace
+    - unparam
+    - nakedret
+    - prealloc
 
 linters-settings:
   revive:
-    # Set confidence to avoid too many minor style warnings initially
     confidence: 0.8
   gocritic:
     enabled-tags:
       - diagnostic
-      - experimental
-      - opinionated
       - performance
       - style
+  govet:
+    enable-all: true
 
 issues:
   exclude-use-default: false
   max-issues-per-linter: 0
   max-same-issues: 0
+  # Exclude common test-related noise
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
+        - dupl
+        - gosec
