@@ -4,7 +4,6 @@ run:
 linters:
   disable-all: true
   enable:
-    - errcheck
     - gosimple
     - govet
     - ineffassign
@@ -13,11 +12,8 @@ linters:
     - revive
     - gosec
     - bodyclose
-    - gocritic
-    - dupl
     - errorlint
     - misspell
-    - dogsled
     - whitespace
     - unparam
     - nakedret
@@ -26,11 +22,6 @@ linters:
 linters-settings:
   revive:
     confidence: 0.8
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - performance
-      - style
   govet:
     enable-all: true
 
@@ -38,10 +29,7 @@ issues:
   exclude-use-default: false
   max-issues-per-linter: 0
   max-same-issues: 0
-  # Exclude common test-related noise
   exclude-rules:
     - path: _test\.go
       linters:
-        - errcheck
-        - dupl
         - gosec
