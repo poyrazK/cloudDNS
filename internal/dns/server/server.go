@@ -914,8 +914,8 @@ func (s *Server) signResponse(ctx context.Context, zone *domain.Zone, response *
 	if len(response.Answers) > 0 {
 		groups := s.groupRecords(response.Answers)
 		for _, group := range groups {
-			sigs, err := s.DNSSEC.SignRRSet(ctx, zone.Name, zone.ID, group)
-			if err == nil {
+			sigs, errSign := s.DNSSEC.SignRRSet(ctx, zone.Name, zone.ID, group)
+			if errSign == nil {
 				for _, sig := range sigs {
 					response.Answers = append(response.Answers, sig)
 				}
@@ -926,8 +926,8 @@ func (s *Server) signResponse(ctx context.Context, zone *domain.Zone, response *
 	if len(response.Authorities) > 0 {
 		groups := s.groupRecords(response.Authorities)
 		for _, group := range groups {
-			sigs, err := s.DNSSEC.SignRRSet(ctx, zone.Name, zone.ID, group)
-			if err == nil {
+			sigs, errSign := s.DNSSEC.SignRRSet(ctx, zone.Name, zone.ID, group)
+			if errSign == nil {
 				for _, sig := range sigs {
 					response.Authorities = append(response.Authorities, sig)
 				}
