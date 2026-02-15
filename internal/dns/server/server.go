@@ -334,9 +334,9 @@ func (s *Server) handleAXFR(conn net.Conn, request *packet.DNSPacket) {
 	s.Logger.Info("AXFR starting", "zone", zone.Name, "records", len(stream))
 
 	for i, rec := range stream {
-		pRec, err := repository.ConvertDomainToPacketRecord(rec)
-		if err != nil {
-			s.Logger.Error("AXFR failed to convert record", "type", rec.Type, "error", err)
+		pRec, errConv := repository.ConvertDomainToPacketRecord(rec)
+		if errConv != nil {
+			s.Logger.Error("AXFR failed to convert record", "type", rec.Type, "error", errConv)
 			continue
 		}
 
@@ -349,8 +349,8 @@ func (s *Server) handleAXFR(conn net.Conn, request *packet.DNSPacket) {
 
 		resBuffer := packet.GetBuffer()
 		resBuffer.HasNames = true
-		if err := response.Write(resBuffer); err != nil {
-			s.Logger.Error("AXFR failed to write response", "error", err)
+		if errWrite := response.Write(resBuffer); errWrite != nil {
+			s.Logger.Error("AXFR failed to write response", "error", errWrite)
 			packet.PutBuffer(resBuffer)
 			continue
 		}
@@ -358,8 +358,8 @@ func (s *Server) handleAXFR(conn net.Conn, request *packet.DNSPacket) {
 
 		resLen := uint16(len(resData))
 		fullResp := append([]byte{byte(resLen >> 8), byte(resLen & 0xFF)}, resData...)
-		if _, err := conn.Write(fullResp); err != nil {
-			s.Logger.Error("AXFR connection broken", "error", err)
+		if _, errW := conn.Write(fullResp); errW != nil {
+			s.Logger.Error("AXFR connection broken", "error", errW)
 			packet.PutBuffer(resBuffer)
 			return
 		}
