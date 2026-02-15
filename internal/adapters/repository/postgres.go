@@ -269,8 +269,8 @@ func (r *PostgresRepository) GetAuditLogs(ctx context.Context, tenantID string) 
 	var logs []domain.AuditLog
 	for rows.Next() {
 		var l domain.AuditLog
-		if err := rows.Scan(&l.ID, &l.TenantID, &l.Action, &l.ResourceType, &l.ResourceID, &l.Details, &l.CreatedAt); err != nil {
-			return nil, err
+		if errScan := rows.Scan(&l.ID, &l.TenantID, &l.Action, &l.ResourceType, &l.ResourceID, &l.Details, &l.CreatedAt); errScan != nil {
+			return nil, errScan
 		}
 		logs = append(logs, l)
 	}
