@@ -19,8 +19,8 @@ func TestRFC1034_CaseInsensitivity(t *testing.T) {
 	srv := NewServer("127.0.0.1:0", repo, nil)
 
 	// Query with mixed case: WwW.ExAmPlE.CoM.
-	req := packet.NewDnsPacket()
-	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "WwW.ExAmPlE.CoM.", QType: packet.A})
+	req := packet.NewDNSPacket()
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "WwW.ExAmPlE.CoM.", QType: packet.A})
 	reqBuf := packet.NewBytePacketBuffer()
 	req.Write(reqBuf)
 
@@ -30,7 +30,7 @@ func TestRFC1034_CaseInsensitivity(t *testing.T) {
 		return nil
 	})
 
-	resPacket := packet.NewDnsPacket()
+	resPacket := packet.NewDNSPacket()
 	resBuf := packet.NewBytePacketBuffer()
 	copy(resBuf.Buf, capturedResp)
 	resPacket.FromBuffer(resBuf)
@@ -54,8 +54,8 @@ func TestRFC1034_WildcardMatching(t *testing.T) {
 	srv := NewServer("127.0.0.1:0", repo, nil)
 
 	// Query for sub.example.com. -> should match *.example.com.
-	req := packet.NewDnsPacket()
-	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "sub.example.com.", QType: packet.A})
+	req := packet.NewDNSPacket()
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "sub.example.com.", QType: packet.A})
 	reqBuf := packet.NewBytePacketBuffer()
 	req.Write(reqBuf)
 
@@ -65,7 +65,7 @@ func TestRFC1034_WildcardMatching(t *testing.T) {
 		return nil
 	})
 
-	resPacket := packet.NewDnsPacket()
+	resPacket := packet.NewDNSPacket()
 	resBuf := packet.NewBytePacketBuffer()
 	copy(resBuf.Buf, capturedResp)
 	resPacket.FromBuffer(resBuf)
@@ -87,20 +87,20 @@ func TestRFC1034_Recursion(t *testing.T) {
 	s := NewServer(":0", nil, nil)
 
 	// Mock queryFn to simulate iterative lookups: Root -> TLD -> Authoritative
-	s.queryFn = func(server string, name string, qtype packet.QueryType) (*packet.DnsPacket, error) {
-		resp := packet.NewDnsPacket()
+	s.queryFn = func(server string, name string, qtype packet.QueryType) (*packet.DNSPacket, error) {
+		resp := packet.NewDNSPacket()
 		resp.Header.ID = 1234
 		resp.Header.Response = true
 
 		if server == "198.41.0.4:53" { // Root
-			resp.Authorities = append(resp.Authorities, packet.DnsRecord{
+			resp.Authorities = append(resp.Authorities, packet.DNSRecord{
 				Name: "com.", Type: packet.NS, Host: "ns1.tld.",
 			})
-			resp.Resources = append(resp.Resources, packet.DnsRecord{
+			resp.Resources = append(resp.Resources, packet.DNSRecord{
 				Name: "ns1.tld.", Type: packet.A, IP: net.ParseIP("1.1.1.1"),
 			})
 		} else if server == "1.1.1.1:53" { // TLD
-			resp.Answers = append(resp.Answers, packet.DnsRecord{
+			resp.Answers = append(resp.Answers, packet.DNSRecord{
 				Name: name, Type: qtype, TTL: 300, IP: net.ParseIP("10.20.30.40"),
 			})
 		}

@@ -38,12 +38,12 @@ func TestQueryTypeToRecordType_All(t *testing.T) {
 // number of zones (ZOCOUNT != 1) returns a FORMERR response.
 func TestHandleUpdate_FormErr(t *testing.T) {
 	srv := NewServer("127.0.0.1:0", &mockServerRepo{}, nil)
-	req := packet.NewDnsPacket()
+	req := packet.NewDNSPacket()
 	req.Header.Opcode = packet.OPCODE_UPDATE
 	// No questions (ZOCOUNT = 0)
 	
 	err := srv.handleUpdate(req, nil, "127.0.0.1", func(resp []byte) error {
-		p := packet.NewDnsPacket()
+		p := packet.NewDNSPacket()
 		pb := packet.NewBytePacketBuffer()
 		pb.Load(resp)
 		p.FromBuffer(pb)
@@ -61,8 +61,8 @@ func TestHandleUpdate_FormErr(t *testing.T) {
 // client's current SOA in the Authority section returns a FORMERR.
 func TestHandleIXFR_NoAuthority(t *testing.T) {
 	srv := NewServer("127.0.0.1:0", &mockServerRepo{}, nil)
-	req := packet.NewDnsPacket()
-	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "test.", QType: packet.IXFR})
+	req := packet.NewDNSPacket()
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "test.", QType: packet.IXFR})
 	
 	// No Authority section
 	srv.handleIXFR(&mockConn{}, req)
@@ -79,14 +79,14 @@ func (m *mockConn) Close() error                { return nil }
 // returns a FORMERR response as per RFC standards.
 func TestHandlePacket_NoQuestions(t *testing.T) {
 	srv := NewServer("127.0.0.1:0", &mockServerRepo{}, nil)
-	req := packet.NewDnsPacket()
+	req := packet.NewDNSPacket()
 	req.Header.ID = 123
 	
 	buf := packet.NewBytePacketBuffer()
 	req.Write(buf)
 	
 	err := srv.handlePacket(buf.Buf[:buf.Position()], "127.0.0.1:1", func(resp []byte) error {
-		p := packet.NewDnsPacket()
+		p := packet.NewDNSPacket()
 		pb := packet.NewBytePacketBuffer()
 		pb.Load(resp)
 		p.FromBuffer(pb)

@@ -34,7 +34,7 @@ type Server struct {
 	WorkerCount int
 	udpQueue    chan udpTask
 	Logger      *slog.Logger
-	queryFn     func(server string, name string, qtype packet.QueryType) (*packet.DnsPacket, error)
+	queryFn     func(server string, name string, qtype packet.QueryType) (*packet.DNSPacket, error)
 	limiter     *rateLimiter
 	TsigKeys    map[string][]byte
 
@@ -258,7 +258,7 @@ func (s *Server) handleTCPConnection(conn net.Conn) {
 		// Check for AXFR/IXFR
 		reqBuffer := packet.GetBuffer()
 		reqBuffer.Load(data)
-		request := packet.NewDnsPacket()
+		request := packet.NewDNSPacket()
 		if err := request.FromBuffer(reqBuffer); err == nil && len(request.Questions) > 0 {
 			if request.Questions[0].QType == packet.AXFR {
 				s.handleAXFR(conn, request)
@@ -282,7 +282,7 @@ func (s *Server) handleTCPConnection(conn net.Conn) {
 	}
 }
 
-func (s *Server) handleAXFR(conn net.Conn, request *packet.DnsPacket) {
+func (s *Server) handleAXFR(conn net.Conn, request *packet.DNSPacket) {
 	q := request.Questions[0]
 	if !strings.HasSuffix(q.Name, ".") {
 		q.Name += "."
@@ -338,7 +338,7 @@ func (s *Server) handleAXFR(conn net.Conn, request *packet.DnsPacket) {
 			continue
 		}
 
-		response := packet.NewDnsPacket()
+		response := packet.NewDNSPacket()
 		response.Header.ID = request.Header.ID
 		response.Header.Response = true
 		response.Header.AuthoritativeAnswer = true
@@ -364,7 +364,7 @@ func (s *Server) handleAXFR(conn net.Conn, request *packet.DnsPacket) {
 }
 
 func (s *Server) sendTCPError(conn net.Conn, id uint16, rcode uint8) {
-	response := packet.NewDnsPacket()
+	response := packet.NewDNSPacket()
 	response.Header.ID = id
 	response.Header.Response = true
 	response.Header.ResCode = rcode
@@ -396,7 +396,7 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 	defer packet.PutBuffer(reqBuffer)
 	reqBuffer.Load(data)
 
-	request := packet.NewDnsPacket()
+	request := packet.NewDNSPacket()
 	if err := request.FromBuffer(reqBuffer); err != nil {
 		s.Logger.Error("failed to parse packet", "error", err)
 		return err
@@ -411,7 +411,7 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 	}
 
 	if len(request.Questions) == 0 {
-		response := packet.NewDnsPacket()
+		response := packet.NewDNSPacket()
 		response.Header.ID = request.Header.ID
 		response.Header.Response = true
 		response.Header.ResCode = 4 // FORMERR
@@ -457,7 +457,7 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 	// EDNS(0) Support (RFC 6891)
 	maxSize := 512
 	dnssecOK := false
-	var clientOPT *packet.DnsRecord
+	var clientOPT *packet.DNSRecord
 	for _, res := range request.Resources {
 		if res.Type == packet.OPT {
 			clientOPT = &res
@@ -471,7 +471,7 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 		}
 	}
 
-	response := packet.NewDnsPacket()
+	response := packet.NewDNSPacket()
 	response.Header.ID = request.Header.ID
 	response.Header.Response = true
 	response.Header.AuthoritativeAnswer = true
@@ -479,7 +479,7 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 
 	// If query had EDNS, response MUST have EDNS
 	if clientOPT != nil {
-		opt := packet.DnsRecord{
+		opt := packet.DNSRecord{
 			Name:           ".",
 			Type:           packet.OPT,
 			UDPPayloadSize: 4096, // Our server's supported buffer size
@@ -657,10 +657,10 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 	return sendFn(resData)
 }
 
-func (s *Server) handleNotify(request *packet.DnsPacket, clientIP string, sendFn func([]byte) error) error {
+func (s *Server) handleNotify(request *packet.DNSPacket, clientIP string, sendFn func([]byte) error) error {
 	s.Logger.Info("received NOTIFY", "zone", request.Questions[0].Name, "from", clientIP)
 
-	response := packet.NewDnsPacket()
+	response := packet.NewDNSPacket()
 	response.Header.ID = request.Header.ID
 	response.Header.Response = true
 	response.Header.Opcode = packet.OPCODE_NOTIFY
@@ -676,16 +676,16 @@ func (s *Server) handleNotify(request *packet.DnsPacket, clientIP string, sendFn
 	return s.sendUpdateResponse(response, sendFn)
 }
 
-func (s *Server) handleUpdate(request *packet.DnsPacket, rawData []byte, clientIP string, sendFn func([]byte) error) error {
+func (s *Server) handleUpdate(request *packet.DNSPacket, rawData []byte, clientIP string, sendFn func([]byte) error) error {
 	s.Logger.Info("handling dynamic update", "id", request.Header.ID, "client", clientIP)
 
-	response := packet.NewDnsPacket()
+	response := packet.NewDNSPacket()
 	response.Header.ID = request.Header.ID
 	response.Header.Response = true
 	response.Header.Opcode = packet.OPCODE_UPDATE
 
 	// 1. Validate TSIG if present
-	if request.TsigStart != -1 {
+	if request.TSIGStart != -1 {
 		tsig := request.Resources[len(request.Resources)-1]
 		secret, ok := s.TsigKeys[tsig.Name]
 		if !ok {
@@ -693,7 +693,7 @@ func (s *Server) handleUpdate(request *packet.DnsPacket, rawData []byte, clientI
 			response.Header.ResCode = packet.RCODE_NOTAUTH
 			return s.sendUpdateResponse(response, sendFn)
 		}
-		if err := request.VerifyTSIG(rawData, request.TsigStart, secret); err != nil {
+		if err := request.VerifyTSIG(rawData, request.TSIGStart, secret); err != nil {
 			s.Logger.Warn("update failed: TSIG verification failed", "error", err)
 			response.Header.ResCode = packet.RCODE_NOTAUTH
 			return s.sendUpdateResponse(response, sendFn)
@@ -803,7 +803,7 @@ func (s *Server) handleUpdate(request *packet.DnsPacket, rawData []byte, clientI
 	return s.sendUpdateResponse(response, sendFn)
 }
 
-func (s *Server) handleIXFR(conn net.Conn, request *packet.DnsPacket) {
+func (s *Server) handleIXFR(conn net.Conn, request *packet.DNSPacket) {
 	q := request.Questions[0]
 	if !strings.HasSuffix(q.Name, ".") {
 		q.Name += "."
@@ -861,7 +861,7 @@ func (s *Server) handleIXFR(conn net.Conn, request *packet.DnsPacket) {
 
 	// Send diffs: [Old SOA, Deleted RRs, New SOA, Added RRs]
 	currentDiffSerial := clientSerial
-	var deletions, additions []packet.DnsRecord
+	var deletions, additions []packet.DNSRecord
 
 	for _, c := range changes {
 		if c.Serial > currentDiffSerial {
@@ -877,7 +877,7 @@ func (s *Server) handleIXFR(conn net.Conn, request *packet.DnsPacket) {
 			currentDiffSerial = c.Serial
 		}
 
-		pRec := packet.DnsRecord{
+		pRec := packet.DNSRecord{
 			Name:  c.Name,
 			Type:  packet.QueryType(master.RecordTypeToQueryType(c.Type)),
 			TTL:   uint32(c.TTL),
@@ -903,7 +903,7 @@ func (s *Server) handleIXFR(conn net.Conn, request *packet.DnsPacket) {
 	s.Logger.Info("IXFR completed", "zone", zone.Name)
 }
 
-func (s *Server) signResponse(ctx context.Context, zone *domain.Zone, response *packet.DnsPacket) {
+func (s *Server) signResponse(ctx context.Context, zone *domain.Zone, response *packet.DNSPacket) {
 	// Sign Answers
 	if len(response.Answers) > 0 {
 		groups := s.groupRecords(response.Answers)
@@ -930,8 +930,8 @@ func (s *Server) signResponse(ctx context.Context, zone *domain.Zone, response *
 	}
 }
 
-func (s *Server) groupRecords(records []packet.DnsRecord) [][]packet.DnsRecord {
-	groups := make(map[string][]packet.DnsRecord)
+func (s *Server) groupRecords(records []packet.DNSRecord) [][]packet.DNSRecord {
+	groups := make(map[string][]packet.DNSRecord)
 	var keys []string
 	for _, r := range records {
 		if r.Type == packet.RRSIG || r.Type == packet.OPT || r.Type == packet.TSIG {
@@ -944,15 +944,15 @@ func (s *Server) groupRecords(records []packet.DnsRecord) [][]packet.DnsRecord {
 		groups[key] = append(groups[key], r)
 	}
 
-	var res [][]packet.DnsRecord
+	var res [][]packet.DNSRecord
 	for _, k := range keys {
 		res = append(res, groups[k])
 	}
 	return res
 }
 
-func (s *Server) sendSingleRecordResponse(conn net.Conn, id uint16, q packet.DnsQuestion, rec packet.DnsRecord) {
-	resp := packet.NewDnsPacket()
+func (s *Server) sendSingleRecordResponse(conn net.Conn, id uint16, q packet.DNSQuestion, rec packet.DNSRecord) {
+	resp := packet.NewDNSPacket()
 	resp.Header.ID = id
 	resp.Header.Response = true
 	resp.Header.AuthoritativeAnswer = true
@@ -968,9 +968,9 @@ func (s *Server) sendSingleRecordResponse(conn net.Conn, id uint16, q packet.Dns
 	packet.PutBuffer(resBuffer)
 }
 
-func (s *Server) sendIXFRDiff(conn net.Conn, id uint16, q packet.DnsQuestion, soa packet.DnsRecord, deletions, additions []packet.DnsRecord) {
+func (s *Server) sendIXFRDiff(conn net.Conn, id uint16, q packet.DNSQuestion, soa packet.DNSRecord, deletions, additions []packet.DNSRecord) {
 	// 1. Send Old SOA + Deletions
-	resp := packet.NewDnsPacket()
+	resp := packet.NewDNSPacket()
 	resp.Header.ID = id
 	resp.Header.Response = true
 	resp.Answers = append(resp.Answers, soa)
@@ -984,7 +984,7 @@ func (s *Server) sendIXFRDiff(conn net.Conn, id uint16, q packet.DnsQuestion, so
 	packet.PutBuffer(resBuffer)
 
 	// 2. Send New SOA + Additions
-	resp = packet.NewDnsPacket()
+	resp = packet.NewDNSPacket()
 	resp.Header.ID = id
 	resp.Header.Response = true
 	resp.Answers = append(resp.Answers, soa)
@@ -999,7 +999,7 @@ func (s *Server) sendIXFRDiff(conn net.Conn, id uint16, q packet.DnsQuestion, so
 	packet.PutBuffer(resBuffer)
 }
 
-func (s *Server) sendUpdateResponse(resp *packet.DnsPacket, sendFn func([]byte) error) error {
+func (s *Server) sendUpdateResponse(resp *packet.DNSPacket, sendFn func([]byte) error) error {
 	resBuffer := packet.GetBuffer()
 	defer packet.PutBuffer(resBuffer)
 	resp.Write(resBuffer)
@@ -1013,7 +1013,7 @@ type updateError struct {
 
 func (e updateError) Error() string { return e.msg }
 
-func (s *Server) checkPrerequisite(ctx context.Context, zone *domain.Zone, pr packet.DnsRecord) error {
+func (s *Server) checkPrerequisite(ctx context.Context, zone *domain.Zone, pr packet.DNSRecord) error {
 	qTypeStr := queryTypeToRecordType(pr.Type)
 	records, err := s.Repo.GetRecords(ctx, pr.Name, qTypeStr, "")
 	if err != nil {
@@ -1050,7 +1050,7 @@ func (s *Server) checkPrerequisite(ctx context.Context, zone *domain.Zone, pr pa
 	return nil
 }
 
-func (s *Server) applyUpdate(ctx context.Context, zone *domain.Zone, up packet.DnsRecord) error {
+func (s *Server) applyUpdate(ctx context.Context, zone *domain.Zone, up packet.DNSRecord) error {
 	switch {
 	case up.Class == 255: // ANY
 		if up.Type == 255 { // ANY
@@ -1116,11 +1116,11 @@ func (s *Server) notifySlaves(zoneName string) {
 
 			s.Logger.Info("sending NOTIFY", "zone", zoneName, "slave", targetAddr)
 
-			notify := packet.NewDnsPacket()
+			notify := packet.NewDNSPacket()
 			notify.Header.ID = uint16(rand.Intn(65535))
 			notify.Header.Opcode = packet.OPCODE_NOTIFY
 			notify.Header.AuthoritativeAnswer = true
-			notify.Questions = append(notify.Questions, packet.DnsQuestion{
+			notify.Questions = append(notify.Questions, packet.DNSQuestion{
 				Name:  zoneName,
 				QType: packet.SOA,
 			})
@@ -1139,10 +1139,10 @@ func (s *Server) notifySlaves(zoneName string) {
 	}
 }
 
-func (s *Server) generateNSEC(ctx context.Context, zone *domain.Zone, queryName string) (packet.DnsRecord, error) {
+func (s *Server) generateNSEC(ctx context.Context, zone *domain.Zone, queryName string) (packet.DNSRecord, error) {
 	records, err := s.Repo.ListRecordsForZone(ctx, zone.ID)
 	if err != nil {
-		return packet.DnsRecord{}, err
+		return packet.DNSRecord{}, err
 	}
 
 	master.SortRecordsCanonically(records)
@@ -1159,7 +1159,7 @@ func (s *Server) generateNSEC(ctx context.Context, zone *domain.Zone, queryName 
 	}
 
 	if len(uniqueNames) == 0 {
-		return packet.DnsRecord{}, fmt.Errorf("no records in zone")
+		return packet.DNSRecord{}, fmt.Errorf("no records in zone")
 	}
 
 	var ownerName, nextName string
@@ -1198,7 +1198,7 @@ func (s *Server) generateNSEC(ctx context.Context, zone *domain.Zone, queryName 
 	types = append(types, "NSEC")
 	bitmap := s.generateTypeBitMap(types)
 
-	nsec := packet.DnsRecord{
+	nsec := packet.DNSRecord{
 		Name:       ownerName,
 		Type:       packet.NSEC,
 		Class:      1,
@@ -1210,15 +1210,15 @@ func (s *Server) generateNSEC(ctx context.Context, zone *domain.Zone, queryName 
 	return nsec, nil
 }
 
-func (s *Server) generateNSEC3(ctx context.Context, zone *domain.Zone, queryName string) (packet.DnsRecord, error) {
+func (s *Server) generateNSEC3(ctx context.Context, zone *domain.Zone, queryName string) (packet.DNSRecord, error) {
 	params, err := s.Repo.GetRecords(ctx, zone.Name, "NSEC3PARAM", "")
 	if err != nil || len(params) == 0 {
-		return packet.DnsRecord{}, fmt.Errorf("no NSEC3PARAM")
+		return packet.DNSRecord{}, fmt.Errorf("no NSEC3PARAM")
 	}
 
 	parts := strings.Fields(params[0].Content)
 	if len(parts) < 4 {
-		return packet.DnsRecord{}, fmt.Errorf("invalid NSEC3PARAM")
+		return packet.DNSRecord{}, fmt.Errorf("invalid NSEC3PARAM")
 	}
 
 	var alg, flags uint8
@@ -1254,7 +1254,7 @@ func (s *Server) generateNSEC3(ctx context.Context, zone *domain.Zone, queryName
 	}
 
 	if len(hashes) == 0 {
-		return packet.DnsRecord{}, fmt.Errorf("no records to hash for NSEC3")
+		return packet.DNSRecord{}, fmt.Errorf("no records to hash for NSEC3")
 	}
 
 	sort.Slice(hashes, func(i, j int) bool {
@@ -1297,7 +1297,7 @@ func (s *Server) generateNSEC3(ctx context.Context, zone *domain.Zone, queryName
 	types = append(types, "NSEC3")
 	bitmap := s.generateTypeBitMap(types)
 
-	nsec3 := packet.DnsRecord{
+	nsec3 := packet.DNSRecord{
 		Name:       packet.Base32Encode(ownerEntry.hash) + "." + zone.Name,
 		Type:       packet.NSEC3,
 		Class:      1,

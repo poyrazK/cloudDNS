@@ -123,7 +123,7 @@ const (
 	RCODE_NOTZONE  uint8 = 10
 )
 
-type DnsHeader struct {
+type DNSHeader struct {
 	ID             uint16
 	RecursionDesired bool
 	TruncatedMessage bool
@@ -147,11 +147,11 @@ type DnsHeader struct {
 	ResourceEntries uint16
 }
 
-func NewDnsHeader() *DnsHeader {
-	return &DnsHeader{}
+func NewDNSHeader() *DNSHeader {
+	return &DNSHeader{}
 }
 
-func (h *DnsHeader) Read(buffer *BytePacketBuffer) error {
+func (h *DNSHeader) Read(buffer *BytePacketBuffer) error {
 	var err error
 	h.ID, err = buffer.Readu16()
 	if err != nil { return err }
@@ -186,7 +186,7 @@ func (h *DnsHeader) Read(buffer *BytePacketBuffer) error {
 	return nil
 }
 
-func (h *DnsHeader) Write(buffer *BytePacketBuffer) error {
+func (h *DNSHeader) Write(buffer *BytePacketBuffer) error {
 	if err := buffer.Writeu16(h.ID); err != nil { return err }
 
 	var flags uint16 = 0
@@ -210,19 +210,19 @@ func (h *DnsHeader) Write(buffer *BytePacketBuffer) error {
 	return nil
 }
 
-type DnsQuestion struct {
+type DNSQuestion struct {
 	Name  string
 	QType QueryType
 }
 
-func NewDnsQuestion(name string, qtype QueryType) *DnsQuestion {
-	return &DnsQuestion{
+func NewDNSQuestion(name string, qtype QueryType) *DNSQuestion {
+	return &DNSQuestion{
 		Name:  name,
 		QType: qtype,
 	}
 }
 
-func (q *DnsQuestion) Read(buffer *BytePacketBuffer) error {
+func (q *DNSQuestion) Read(buffer *BytePacketBuffer) error {
 	var err error
 	q.Name, err = buffer.ReadName()
 	if err != nil { return err }
@@ -237,7 +237,7 @@ func (q *DnsQuestion) Read(buffer *BytePacketBuffer) error {
 	return nil
 }
 
-func (q *DnsQuestion) Write(buffer *BytePacketBuffer) error {
+func (q *DNSQuestion) Write(buffer *BytePacketBuffer) error {
 	if err := buffer.WriteName(q.Name); err != nil { return err }
 	if err := buffer.Writeu16(uint16(q.QType)); err != nil { return err }
 	if err := buffer.Writeu16(1); err != nil { return err } // CLASS IN
@@ -249,7 +249,7 @@ type EdnsOption struct {
 	Data []byte
 }
 
-type DnsRecord struct {
+type DNSRecord struct {
 	Name     string
 	Type     QueryType
 	Class    uint16
@@ -312,7 +312,7 @@ type DnsRecord struct {
 	Other         []byte
 }
 
-func (r *DnsRecord) AddEDE(code uint16, text string) {
+func (r *DNSRecord) AddEDE(code uint16, text string) {
 	data := []byte{byte(code >> 8), byte(code & 0xFF)}
 	if text != "" {
 		data = append(data, []byte(text)...)
@@ -320,7 +320,7 @@ func (r *DnsRecord) AddEDE(code uint16, text string) {
 	r.Options = append(r.Options, EdnsOption{Code: 15, Data: data})
 }
 
-func (r *DnsRecord) Read(buffer *BytePacketBuffer) error {
+func (r *DNSRecord) Read(buffer *BytePacketBuffer) error {
 	var err error
 	r.Name, err = buffer.ReadName()
 	if err != nil { return err }
@@ -476,7 +476,7 @@ func (r *DnsRecord) Read(buffer *BytePacketBuffer) error {
 	return nil
 }
 
-func (r *DnsRecord) Write(buffer *BytePacketBuffer) (int, error) {
+func (r *DNSRecord) Write(buffer *BytePacketBuffer) (int, error) {
 	startPos := buffer.Position()
 	if r.Type == OPT {
 		buffer.Write(0)
@@ -657,56 +657,56 @@ func (r *DnsRecord) Write(buffer *BytePacketBuffer) (int, error) {
 	return buffer.Position() - startPos, nil
 }
 
-type DnsPacket struct {
-	Header      DnsHeader
-	Questions   []DnsQuestion
-	Answers     []DnsRecord
-	Authorities []DnsRecord
-	Resources   []DnsRecord
-	TsigStart   int // Byte offset where TSIG record starts, -1 if not present
+type DNSPacket struct {
+	Header      DNSHeader
+	Questions   []DNSQuestion
+	Answers     []DNSRecord
+	Authorities []DNSRecord
+	Resources   []DNSRecord
+	TSIGStart   int // Byte offset where TSIG record starts, -1 if not present
 }
 
-func NewDnsPacket() *DnsPacket {
-	return &DnsPacket{
-		Header: DnsHeader{},
-		Questions: []DnsQuestion{},
-		Answers: []DnsRecord{},
-		Authorities: []DnsRecord{},
-		Resources: []DnsRecord{},
-		TsigStart: -1,
+func NewDNSPacket() *DNSPacket {
+	return &DNSPacket{
+		Header: DNSHeader{},
+		Questions: []DNSQuestion{},
+		Answers: []DNSRecord{},
+		Authorities: []DNSRecord{},
+		Resources: []DNSRecord{},
+		TSIGStart: -1,
 	}
 }
 
-func (p *DnsPacket) FromBuffer(buffer *BytePacketBuffer) error {
+func (p *DNSPacket) FromBuffer(buffer *BytePacketBuffer) error {
 	if err := p.Header.Read(buffer); err != nil { return err }
 	for i := 0; i < int(p.Header.Questions); i++ {
-		var q DnsQuestion
+		var q DNSQuestion
 		if err := q.Read(buffer); err != nil { return err }
 		p.Questions = append(p.Questions, q)
 	}
 	for i := 0; i < int(p.Header.Answers); i++ {
-		var r DnsRecord
+		var r DNSRecord
 		if err := r.Read(buffer); err != nil { return err }
 		p.Answers = append(p.Answers, r)
 	}
 	for i := 0; i < int(p.Header.AuthoritativeEntries); i++ {
-		var r DnsRecord
+		var r DNSRecord
 		if err := r.Read(buffer); err != nil { return err }
 		p.Authorities = append(p.Authorities, r)
 	}
 	for i := 0; i < int(p.Header.ResourceEntries); i++ {
 		start := buffer.Position()
-		var r DnsRecord
+		var r DNSRecord
 		if err := r.Read(buffer); err != nil { return err }
 		if r.Type == TSIG {
-			p.TsigStart = start
+			p.TSIGStart = start
 		}
 		p.Resources = append(p.Resources, r)
 	}
 	return nil
 }
 
-func (p *DnsPacket) Write(buffer *BytePacketBuffer) error {
+func (p *DNSPacket) Write(buffer *BytePacketBuffer) error {
 	p.Header.Questions = uint16(len(p.Questions))
 	p.Header.Answers = uint16(len(p.Answers))
 	p.Header.AuthoritativeEntries = uint16(len(p.Authorities))

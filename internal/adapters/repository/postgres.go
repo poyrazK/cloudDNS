@@ -314,7 +314,7 @@ func (r *PostgresRepository) UpdateKey(ctx context.Context, key *domain.DNSSECKe
 }
 
 // ConvertPacketRecordToDomain is a helper to bridge wire format and domain model
-func ConvertPacketRecordToDomain(pRec packet.DnsRecord, zoneID string) (domain.Record, error) {
+func ConvertPacketRecordToDomain(pRec packet.DNSRecord, zoneID string) (domain.Record, error) {
 	rec := domain.Record{
 		ZoneID: zoneID,
 		Name:   pRec.Name,
@@ -357,13 +357,13 @@ func ConvertPacketRecordToDomain(pRec packet.DnsRecord, zoneID string) (domain.R
 }
 
 // ConvertDomainToPacketRecord is a helper to bridge domain model and wire format
-func ConvertDomainToPacketRecord(rec domain.Record) (packet.DnsRecord, error) {
+func ConvertDomainToPacketRecord(rec domain.Record) (packet.DNSRecord, error) {
 	name := rec.Name
 	if !strings.HasSuffix(name, ".") {
 		name += "."
 	}
 
-	pRec := packet.DnsRecord{
+	pRec := packet.DNSRecord{
 		Name:  name,
 		TTL:   uint32(rec.TTL),
 		Class: 1, // IN

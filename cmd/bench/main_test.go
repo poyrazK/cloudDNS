@@ -55,12 +55,12 @@ func TestRunBenchmark(t *testing.T) {
 			n, remote, err := conn.ReadFromUDP(buf)
 			if err != nil { return }
 			
-			req := packet.NewDnsPacket()
+			req := packet.NewDNSPacket()
 			pb := packet.NewBytePacketBuffer()
 			pb.Load(buf[:n])
 			req.FromBuffer(pb)
 			
-			resp := packet.NewDnsPacket()
+			resp := packet.NewDNSPacket()
 			resp.Header.ID = req.Header.ID
 			resp.Header.Response = true
 			resBuf := packet.NewBytePacketBuffer()
@@ -86,12 +86,12 @@ func TestRunRealisticWorker(t *testing.T) {
 			n, remote, err := conn.ReadFromUDP(buf)
 			if err != nil { return }
 			
-			req := packet.NewDnsPacket()
+			req := packet.NewDNSPacket()
 			pb := packet.NewBytePacketBuffer()
 			pb.Load(buf[:n])
 			req.FromBuffer(pb)
 			
-			resp := packet.NewDnsPacket()
+			resp := packet.NewDNSPacket()
 			resp.Header.ID = req.Header.ID
 			resp.Header.Response = true
 			resBuf := packet.NewBytePacketBuffer()

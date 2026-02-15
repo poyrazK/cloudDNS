@@ -19,11 +19,11 @@ func TestRFC6891_EDNS0(t *testing.T) {
 	srv := NewServer("127.0.0.1:0", repo, nil)
 
 	// 1. Test query with OPT record
-	req := packet.NewDnsPacket()
-	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "www.example.com.", QType: packet.A})
+	req := packet.NewDNSPacket()
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "www.example.com.", QType: packet.A})
 	
 	// Add OPT record with 4096 buffer size and DO bit set
-	optReq := packet.DnsRecord{
+	optReq := packet.DNSRecord{
 		Name:           ".",
 		Type:           packet.OPT,
 		UDPPayloadSize: 4096,
@@ -40,7 +40,7 @@ func TestRFC6891_EDNS0(t *testing.T) {
 		return nil
 	})
 
-	resPacket := packet.NewDnsPacket()
+	resPacket := packet.NewDNSPacket()
 	resBuf := packet.NewBytePacketBuffer()
 	copy(resBuf.Buf, capturedResp)
 	resPacket.FromBuffer(resBuf)
@@ -80,9 +80,9 @@ func TestRFC6891_LargePayload(t *testing.T) {
 	srv := NewServer("127.0.0.1:0", repo, nil)
 
 	// Query WITH EDNS (4096)
-	req := packet.NewDnsPacket()
-	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "big.test.", QType: packet.TXT})
-	req.Resources = append(req.Resources, packet.DnsRecord{
+	req := packet.NewDNSPacket()
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "big.test.", QType: packet.TXT})
+	req.Resources = append(req.Resources, packet.DNSRecord{
 		Name: ".", Type: packet.OPT, UDPPayloadSize: 4096,
 	})
 	
@@ -95,7 +95,7 @@ func TestRFC6891_LargePayload(t *testing.T) {
 		return nil
 	})
 
-	resPacket := packet.NewDnsPacket()
+	resPacket := packet.NewDNSPacket()
 	resBuf := packet.NewBytePacketBuffer()
 	copy(resBuf.Buf, capturedResp)
 	resPacket.FromBuffer(resBuf)

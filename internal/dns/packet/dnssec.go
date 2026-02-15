@@ -9,7 +9,7 @@ import (
 )
 
 // RFC 4034 Appendix B: Key Tag Calculation
-func (r *DnsRecord) ComputeKeyTag() uint16 {
+func (r *DNSRecord) ComputeKeyTag() uint16 {
 	if r.Type != DNSKEY {
 		return 0
 	}
@@ -36,9 +36,9 @@ func (r *DnsRecord) ComputeKeyTag() uint16 {
 }
 
 // RFC 4034 Section 5.2: DS RDATA Calculation
-func (r *DnsRecord) ComputeDS(digestType uint8) (DnsRecord, error) {
+func (r *DNSRecord) ComputeDS(digestType uint8) (DNSRecord, error) {
 	if r.Type != DNSKEY {
-		return DnsRecord{}, nil
+		return DNSRecord{}, nil
 	}
 
 	// 1. Prepare Buffer: owner name | RDATA
@@ -59,10 +59,10 @@ func (r *DnsRecord) ComputeDS(digestType uint8) (DnsRecord, error) {
 		digest = hashed[:]
 	default:
 		// Unsupported or fallback
-		return DnsRecord{}, nil
+		return DNSRecord{}, nil
 	}
 
-	return DnsRecord{
+	return DNSRecord{
 		Name:       r.Name,
 		Type:       DS,
 		Class:      1,
@@ -76,12 +76,12 @@ func (r *DnsRecord) ComputeDS(digestType uint8) (DnsRecord, error) {
 
 // SignRRSet generates an RRSIG for a set of records
 // Simplified implementation for ECDSA P-256 (Algorithm 13)
-func SignRRSet(records []DnsRecord, privKey *ecdsa.PrivateKey, signerName string, keyTag uint16, inception, expiration uint32) (DnsRecord, error) {
+func SignRRSet(records []DNSRecord, privKey *ecdsa.PrivateKey, signerName string, keyTag uint16, inception, expiration uint32) (DNSRecord, error) {
 	if len(records) == 0 {
-		return DnsRecord{}, nil
+		return DNSRecord{}, nil
 	}
 
-	sig := DnsRecord{
+	sig := DNSRecord{
 		Name:        records[0].Name,
 		Type:        RRSIG,
 		Class:       1,
@@ -120,7 +120,7 @@ func SignRRSet(records []DnsRecord, privKey *ecdsa.PrivateKey, signerName string
 
 	rb, sb, err := ecdsa.Sign(rand.Reader, privKey, h)
 	if err != nil {
-		return DnsRecord{}, err
+		return DNSRecord{}, err
 	}
 
 	rBytes := rb.Bytes()

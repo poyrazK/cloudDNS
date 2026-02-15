@@ -25,9 +25,9 @@ func TestDoH_E2E(t *testing.T) {
 	defer ts.Close()
 
 	// 1. Valid Query (POST)
-	req := packet.NewDnsPacket()
+	req := packet.NewDNSPacket()
 	req.Header.ID = 1234
-	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "doh-e2e.test.", QType: packet.A})
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "doh-e2e.test.", QType: packet.A})
 	reqBuf := packet.NewBytePacketBuffer()
 	req.Write(reqBuf)
 	reqData := reqBuf.Buf[:reqBuf.Position()]
@@ -46,7 +46,7 @@ func TestDoH_E2E(t *testing.T) {
 	}
 
 	resBody, _ := io.ReadAll(resp.Body)
-	resPacket := packet.NewDnsPacket()
+	resPacket := packet.NewDNSPacket()
 	resBuf := packet.NewBytePacketBuffer()
 	resBuf.Load(resBody)
 	if err := resPacket.FromBuffer(resBuf); err != nil {
@@ -70,7 +70,7 @@ func TestDoH_E2E(t *testing.T) {
 	}
 	
 	resBody, _ = io.ReadAll(respGET.Body)
-	resPacket = packet.NewDnsPacket()
+	resPacket = packet.NewDNSPacket()
 	resBuf = packet.NewBytePacketBuffer()
 	resBuf.Load(resBody)
 	resPacket.FromBuffer(resBuf)

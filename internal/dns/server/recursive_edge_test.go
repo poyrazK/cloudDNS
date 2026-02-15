@@ -10,7 +10,7 @@ import (
 // used by the recursive resolver to discover authoritative servers.
 func TestFindNextNS_Logic(t *testing.T) {
 	srv := &Server{}
-	resp := packet.NewDnsPacket()
+	resp := packet.NewDNSPacket()
 	
 	// 1. Case: No authorities
 	if _, found := srv.findNextNS(resp); found {
@@ -18,10 +18,10 @@ func TestFindNextNS_Logic(t *testing.T) {
 	}
 
 	// 2. Case: Authority present with glue
-	resp.Authorities = append(resp.Authorities, packet.DnsRecord{
+	resp.Authorities = append(resp.Authorities, packet.DNSRecord{
 		Name: "test.", Type: packet.NS, Host: "ns1.test.",
 	})
-	resp.Resources = append(resp.Resources, packet.DnsRecord{
+	resp.Resources = append(resp.Resources, packet.DNSRecord{
 		Name: "ns1.test.", Type: packet.A, IP: []byte{1, 2, 3, 4},
 	})
 	

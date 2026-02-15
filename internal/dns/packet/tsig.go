@@ -8,7 +8,7 @@ import (
 )
 
 // VerifyTSIG checks if the TSIG record in the packet matches the provided key
-func (p *DnsPacket) VerifyTSIG(rawBuffer []byte, tsigStart int, secret []byte) error {
+func (p *DNSPacket) VerifyTSIG(rawBuffer []byte, tsigStart int, secret []byte) error {
 	// 1. Find TSIG record (must be the last record in additional)
 	if len(p.Resources) == 0 {
 		return errors.New("no records in additional section")
@@ -68,9 +68,9 @@ func (p *DnsPacket) VerifyTSIG(rawBuffer []byte, tsigStart int, secret []byte) e
 	return nil
 }
 
-func (p *DnsPacket) SignTSIG(buffer *BytePacketBuffer, keyName string, secret []byte) error {
+func (p *DNSPacket) SignTSIG(buffer *BytePacketBuffer, keyName string, secret []byte) error {
 	// 1. Prepare TSIG Record (without MAC yet)
-	tsig := DnsRecord{
+	tsig := DNSRecord{
 		Name:          keyName,
 		Type:          TSIG,
 		Class:         255, // ANY
@@ -113,7 +113,7 @@ func (p *DnsPacket) SignTSIG(buffer *BytePacketBuffer, keyName string, secret []
 	buffer.Buf[11] = byte(p.Header.ResourceEntries & 0xFF)
 
 	// 5. Write TSIG record to buffer
-	p.TsigStart = buffer.Position()
+	p.TSIGStart = buffer.Position()
 	_, err := tsig.Write(buffer)
 	return err
 }

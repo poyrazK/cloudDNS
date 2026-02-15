@@ -18,8 +18,8 @@ func TestRFC4035_ADBit(t *testing.T) {
 	}
 	srv := NewServer("127.0.0.1:0", repo, nil)
 
-	req := packet.NewDnsPacket()
-	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "www.secure.test.", QType: packet.A})
+	req := packet.NewDNSPacket()
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "www.secure.test.", QType: packet.A})
 	req.Header.AuthedData = true
 	
 	reqBuf := packet.NewBytePacketBuffer()
@@ -31,7 +31,7 @@ func TestRFC4035_ADBit(t *testing.T) {
 		return nil
 	})
 
-	resPacket := packet.NewDnsPacket()
+	resPacket := packet.NewDNSPacket()
 	resBuf := packet.NewBytePacketBuffer()
 	copy(resBuf.Buf, capturedResp)
 	resPacket.FromBuffer(resBuf)
@@ -51,10 +51,10 @@ func TestRFC4035_NSEC(t *testing.T) {
 	}
 	srv := NewServer("127.0.0.1:0", repo, nil)
 
-	req := packet.NewDnsPacket()
-	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "m.example.test.", QType: packet.A})
+	req := packet.NewDNSPacket()
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "m.example.test.", QType: packet.A})
 	// Set DO bit
-	req.Resources = append(req.Resources, packet.DnsRecord{
+	req.Resources = append(req.Resources, packet.DNSRecord{
 		Type: packet.OPT,
 		Z:    0x8000,
 	})
@@ -68,7 +68,7 @@ func TestRFC4035_NSEC(t *testing.T) {
 		return nil
 	})
 
-	res := packet.NewDnsPacket()
+	res := packet.NewDNSPacket()
 	resBuf := packet.NewBytePacketBuffer()
 	copy(resBuf.Buf, capturedResp)
 	res.FromBuffer(resBuf)
@@ -103,9 +103,9 @@ func TestRFC4035_NSEC3(t *testing.T) {
 	}
 	srv := NewServer("127.0.0.1:0", repo, nil)
 
-	req := packet.NewDnsPacket()
-	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "missing.nsec3.test.", QType: packet.A})
-	req.Resources = append(req.Resources, packet.DnsRecord{
+	req := packet.NewDNSPacket()
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "missing.nsec3.test.", QType: packet.A})
+	req.Resources = append(req.Resources, packet.DNSRecord{
 		Type: packet.OPT,
 		Z:    0x8000,
 	})
@@ -119,7 +119,7 @@ func TestRFC4035_NSEC3(t *testing.T) {
 		return nil
 	})
 
-	res := packet.NewDnsPacket()
+	res := packet.NewDNSPacket()
 	resBuf := packet.NewBytePacketBuffer()
 	copy(resBuf.Buf, capturedResp)
 	res.FromBuffer(resBuf)

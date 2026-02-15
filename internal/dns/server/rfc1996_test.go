@@ -15,10 +15,10 @@ func TestHandleNotify(t *testing.T) {
 	repo := &mockServerRepo{}
 	srv := NewServer("127.0.0.1:0", repo, nil)
 
-	req := packet.NewDnsPacket()
+	req := packet.NewDNSPacket()
 	req.Header.ID = 789
 	req.Header.Opcode = packet.OPCODE_NOTIFY
-	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "notify.test.", QType: packet.SOA})
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "notify.test.", QType: packet.SOA})
 
 	reqBuf := packet.NewBytePacketBuffer()
 	req.Write(reqBuf)
@@ -33,7 +33,7 @@ func TestHandleNotify(t *testing.T) {
 		t.Fatalf("handleNotify failed: %v", err)
 	}
 
-	resp := packet.NewDnsPacket()
+	resp := packet.NewDNSPacket()
 	resBuf := packet.NewBytePacketBuffer()
 	copy(resBuf.Buf, capturedResp)
 	resp.FromBuffer(resBuf)
@@ -85,7 +85,7 @@ func TestNotifySlaves(t *testing.T) {
 		return 
 	}
 
-	p := packet.NewDnsPacket()
+	p := packet.NewDNSPacket()
 	pBuf := packet.NewBytePacketBuffer()
 	pBuf.Load(buf[:n])
 	p.FromBuffer(pBuf)

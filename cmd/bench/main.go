@@ -111,9 +111,9 @@ func runRealisticWorker(target string, count int, workerID int, rangeLimit uint6
 		idx := zipf.Uint64()
 		currentDomain := fmt.Sprintf("host-%d.%s", idx, tlds[idx%uint64(len(tlds))])
 
-		p := packet.NewDnsPacket()
+		p := packet.NewDNSPacket()
 		p.Header.ID = uint16(r.Uint32())
-		p.Questions = append(p.Questions, packet.DnsQuestion{Name: currentDomain, QType: packet.A})
+		p.Questions = append(p.Questions, packet.DNSQuestion{Name: currentDomain, QType: packet.A})
 
 		buf := packet.NewBytePacketBuffer()
 		p.Write(buf)

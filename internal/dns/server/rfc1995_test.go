@@ -19,11 +19,11 @@ func TestHandleIXFR_UpToDate(t *testing.T) {
 	}
 	srv := NewServer("127.0.0.1:0", repo, nil)
 
-	req := packet.NewDnsPacket()
+	req := packet.NewDNSPacket()
 	req.Header.ID = 123
-	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "example.test.", QType: packet.IXFR})
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "example.test.", QType: packet.IXFR})
 	// Client SOA with serial 100
-	req.Authorities = append(req.Authorities, packet.DnsRecord{
+	req.Authorities = append(req.Authorities, packet.DNSRecord{
 		Name: "example.test.",
 		Type: packet.SOA,
 		Serial: 100,
@@ -41,7 +41,7 @@ func TestHandleIXFR_UpToDate(t *testing.T) {
 		t.Fatalf("Expected 1 response packet, got %d", len(conn.captured))
 	}
 	
-	resp := packet.NewDnsPacket()
+	resp := packet.NewDNSPacket()
 	pBuf := packet.NewBytePacketBuffer()
 	pBuf.Load(conn.captured[0])
 	resp.FromBuffer(pBuf)
@@ -70,10 +70,10 @@ func TestHandleIXFR_WithChanges(t *testing.T) {
 
 	srv := NewServer("127.0.0.1:0", repo, nil)
 
-	req := packet.NewDnsPacket()
+	req := packet.NewDNSPacket()
 	req.Header.ID = 456
-	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "example.test.", QType: packet.IXFR})
-	req.Authorities = append(req.Authorities, packet.DnsRecord{
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "example.test.", QType: packet.IXFR})
+	req.Authorities = append(req.Authorities, packet.DNSRecord{
 		Name: "example.test.",
 		Type: packet.SOA,
 		Serial: 100,
@@ -89,7 +89,7 @@ func TestHandleIXFR_WithChanges(t *testing.T) {
 	}
 
 	// First packet should be current SOA
-	resp1 := packet.NewDnsPacket()
+	resp1 := packet.NewDNSPacket()
 	pBuf1 := packet.NewBytePacketBuffer()
 	pBuf1.Load(conn.captured[0])
 	resp1.FromBuffer(pBuf1)

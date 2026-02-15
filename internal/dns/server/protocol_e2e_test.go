@@ -43,7 +43,7 @@ func TestEndToEnd_RFC_Extensions(t *testing.T) {
 	go apiSrv.ListenAndServe()
 
 	// Setup a mock "slave" to receive NOTIFY
-	notifyReceived := make(chan *packet.DnsPacket, 1)
+	notifyReceived := make(chan *packet.DNSPacket, 1)
 	slaveConn, err := net.ListenPacket("udp", slaveAddr)
 	if err != nil { t.Fatalf("Failed to listen on slave addr: %v", err) }
 	defer slaveConn.Close()
@@ -52,7 +52,7 @@ func TestEndToEnd_RFC_Extensions(t *testing.T) {
 		for {
 			n, _, err := slaveConn.ReadFrom(buf)
 			if err != nil { return }
-			p := packet.NewDnsPacket()
+			p := packet.NewDNSPacket()
 			pb := packet.NewBytePacketBuffer()
 			pb.Load(buf[:n])
 			if err := p.FromBuffer(pb); err == nil {
@@ -102,10 +102,10 @@ func TestEndToEnd_RFC_Extensions(t *testing.T) {
 	fmt.Sscanf(strings.Fields(recs[0].Content)[2], "%d", &startSerial)
 
 	// 3. Perform Authenticated Dynamic Update via DNS
-	update := packet.NewDnsPacket()
+	update := packet.NewDNSPacket()
 	update.Header.Opcode = packet.OPCODE_UPDATE
-	update.Questions = append(update.Questions, packet.DnsQuestion{Name: "rfc.test.", QType: packet.SOA})
-	update.Authorities = append(update.Authorities, packet.DnsRecord{
+	update.Questions = append(update.Questions, packet.DNSQuestion{Name: "rfc.test.", QType: packet.SOA})
+	update.Authorities = append(update.Authorities, packet.DNSRecord{
 		Name: "dynamic.rfc.test.", Type: packet.A, Class: 1, TTL: 300, IP: net.ParseIP("5.5.5.5"),
 	})
 	
@@ -123,7 +123,7 @@ func TestEndToEnd_RFC_Extensions(t *testing.T) {
 	n, err := dnsConn.Read(resBuf)
 	if err != nil { t.Fatalf("Read DNS response failed: %v", err) }
 	
-	resUpdate := packet.NewDnsPacket()
+	resUpdate := packet.NewDNSPacket()
 	resPb := packet.NewBytePacketBuffer()
 	resPb.Load(resBuf[:n])
 	resUpdate.FromBuffer(resPb)
@@ -165,10 +165,10 @@ func TestEndToEnd_RFC_Extensions(t *testing.T) {
 	if err != nil { t.Fatalf("Dial TCP DNS failed: %v", err) }
 	defer tcpConn.Close()
 	
-	ixfr := packet.NewDnsPacket()
-	ixfr.Questions = append(ixfr.Questions, packet.DnsQuestion{Name: "rfc.test.", QType: packet.IXFR})
+	ixfr := packet.NewDNSPacket()
+	ixfr.Questions = append(ixfr.Questions, packet.DNSQuestion{Name: "rfc.test.", QType: packet.IXFR})
 	// Current SOA in Authority section
-	ixfr.Authorities = append(ixfr.Authorities, packet.DnsRecord{
+	ixfr.Authorities = append(ixfr.Authorities, packet.DNSRecord{
 		Name: "rfc.test.", Type: packet.SOA, Serial: startSerial,
 	})
 	
@@ -191,7 +191,7 @@ func TestEndToEnd_RFC_Extensions(t *testing.T) {
 	_, err = io.ReadFull(tcpConn, ixfrRData)
 	if err != nil { t.Fatalf("Read IXFR data failed: %v", err) }
 	
-	resIXFR := packet.NewDnsPacket()
+	resIXFR := packet.NewDNSPacket()
 	ixPb := packet.NewBytePacketBuffer()
 	ixPb.Load(ixfrRData)
 	resIXFR.FromBuffer(ixPb)

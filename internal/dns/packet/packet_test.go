@@ -9,7 +9,7 @@ import (
 )
 
 func TestHeaderSerialization(t *testing.T) {
-	header := DnsHeader{
+	header := DNSHeader{
 		ID:                  1234,
 		Response:            true,
 		AuthoritativeAnswer: true,
@@ -27,7 +27,7 @@ func TestHeaderSerialization(t *testing.T) {
 	}
 
 	buffer.Seek(0)
-	readHeader := DnsHeader{}
+	readHeader := DNSHeader{}
 	err = readHeader.Read(buffer)
 	if err != nil {
 		t.Fatalf("Failed to read header: %v", err)
@@ -65,14 +65,14 @@ func TestNameSerialization(t *testing.T) {
 }
 
 func TestFullPacket(t *testing.T) {
-	packet := NewDnsPacket()
+	packet := NewDNSPacket()
 	packet.Header.ID = 666
 	packet.Header.Response = true
-	packet.Questions = append(packet.Questions, DnsQuestion{
+	packet.Questions = append(packet.Questions, DNSQuestion{
 		Name:  "test.com.",
 		QType: A,
 	})
-	packet.Answers = append(packet.Answers, DnsRecord{
+	packet.Answers = append(packet.Answers, DNSRecord{
 		Name:  "test.com.",
 		Type:  A,
 		Class: 1,
@@ -87,7 +87,7 @@ func TestFullPacket(t *testing.T) {
 	}
 
 	buffer.Seek(0)
-	parsedPacket := NewDnsPacket()
+	parsedPacket := NewDNSPacket()
 	err = parsedPacket.FromBuffer(buffer)
 	if err != nil {
 		t.Fatalf("Failed to parse packet: %v", err)
@@ -105,7 +105,7 @@ func TestFullPacket(t *testing.T) {
 }
 
 func TestTXTRecordSerialization(t *testing.T) {
-	record := DnsRecord{
+	record := DNSRecord{
 		Name: "test.com.",
 		Type: TXT,
 		TTL:  300,
@@ -119,7 +119,7 @@ func TestTXTRecordSerialization(t *testing.T) {
 	}
 
 	buffer.Seek(0)
-	parsed := DnsRecord{}
+	parsed := DNSRecord{}
 	err = parsed.Read(buffer)
 	if err != nil {
 		t.Fatalf("Failed to read record: %v", err)
@@ -130,7 +130,7 @@ func TestTXTRecordSerialization(t *testing.T) {
 }
 
 func TestSOARecordSerialization(t *testing.T) {
-	record := DnsRecord{
+	record := DNSRecord{
 		Name:    "example.com.",
 		Type:    SOA,
 		TTL:     3600,
@@ -150,7 +150,7 @@ func TestSOARecordSerialization(t *testing.T) {
 	}
 
 	buffer.Seek(0)
-	parsed := DnsRecord{}
+	parsed := DNSRecord{}
 	err = parsed.Read(buffer)
 	if err != nil {
 		t.Fatalf("Failed to read SOA record: %v", err)
@@ -227,7 +227,7 @@ func TestEmptyName(t *testing.T) {
 }
 
 func TestMXRecordSerialization(t *testing.T) {
-	record := DnsRecord{
+	record := DNSRecord{
 		Name:     "test.com.",
 		Type:     MX,
 		TTL:      300,
@@ -242,7 +242,7 @@ func TestMXRecordSerialization(t *testing.T) {
 	}
 
 	buffer.Seek(0)
-	parsed := DnsRecord{}
+	parsed := DNSRecord{}
 	err = parsed.Read(buffer)
 	if err != nil {
 		t.Fatalf("Failed to read MX record: %v", err)
@@ -257,7 +257,7 @@ func TestMXRecordSerialization(t *testing.T) {
 }
 
 func TestCNAMERecordSerialization(t *testing.T) {
-	record := DnsRecord{
+	record := DNSRecord{
 		Name: "alias.test.com.",
 		Type: CNAME,
 		TTL:  300,
@@ -271,7 +271,7 @@ func TestCNAMERecordSerialization(t *testing.T) {
 	}
 
 	buffer.Seek(0)
-	parsed := DnsRecord{}
+	parsed := DNSRecord{}
 	err = parsed.Read(buffer)
 	if err != nil {
 		t.Fatalf("Failed to read CNAME record: %v", err)
@@ -283,7 +283,7 @@ func TestCNAMERecordSerialization(t *testing.T) {
 }
 
 func TestReadWriteAllTypes(t *testing.T) {
-	records := []DnsRecord{
+	records := []DNSRecord{
 		{Name: "a.test.", Type: A, TTL: 300, IP: net.ParseIP("1.2.3.4")},
 		{Name: "aaaa.test.", Type: AAAA, TTL: 300, IP: net.ParseIP("2001:db8::1")},
 		{Name: "ns.test.", Type: NS, TTL: 300, Host: "ns1.test."},
@@ -301,7 +301,7 @@ func TestReadWriteAllTypes(t *testing.T) {
 		}
 
 		buffer.Seek(0)
-		parsed := DnsRecord{}
+		parsed := DNSRecord{}
 		err = parsed.Read(buffer)
 		if err != nil {
 			t.Errorf("Failed to read %v: %v", rec.Type, err)
@@ -349,7 +349,7 @@ func TestReadName_InfiniteLoop(t *testing.T) {
 }
 
 func TestDNSKEYRecordSerialization(t *testing.T) {
-	record := DnsRecord{
+	record := DNSRecord{
 		Name:      "example.com.",
 		Type:      DNSKEY,
 		TTL:       3600,
@@ -365,7 +365,7 @@ func TestDNSKEYRecordSerialization(t *testing.T) {
 	}
 
 	buffer.Seek(0)
-	parsed := DnsRecord{}
+	parsed := DNSRecord{}
 	err = parsed.Read(buffer)
 	if err != nil {
 		t.Fatalf("Failed to read DNSKEY record: %v", err)
@@ -380,7 +380,7 @@ func TestDNSKEYRecordSerialization(t *testing.T) {
 }
 
 func TestRRSIGRecordSerialization(t *testing.T) {
-	record := DnsRecord{
+	record := DNSRecord{
 		Name:        "example.com.",
 		Type:        RRSIG,
 		TTL:         3600,
@@ -402,7 +402,7 @@ func TestRRSIGRecordSerialization(t *testing.T) {
 	}
 
 	buffer.Seek(0)
-	parsed := DnsRecord{}
+	parsed := DNSRecord{}
 	err = parsed.Read(buffer)
 	if err != nil {
 		t.Fatalf("Failed to read RRSIG record: %v", err)
@@ -417,7 +417,7 @@ func TestRRSIGRecordSerialization(t *testing.T) {
 }
 
 func TestNSECRecordSerialization(t *testing.T) {
-	record := DnsRecord{
+	record := DNSRecord{
 		Name:       "a.example.com.",
 		Type:       NSEC,
 		TTL:        3600,
@@ -432,7 +432,7 @@ func TestNSECRecordSerialization(t *testing.T) {
 	}
 
 	buffer.Seek(0)
-	parsed := DnsRecord{}
+	parsed := DNSRecord{}
 	err = parsed.Read(buffer)
 	if err != nil {
 		t.Fatalf("Failed to read NSEC record: %v", err)
@@ -444,7 +444,7 @@ func TestNSECRecordSerialization(t *testing.T) {
 }
 
 func TestHINFORecordSerialization(t *testing.T) {
-	record := DnsRecord{
+	record := DNSRecord{
 		Name: "host.test.",
 		Type: HINFO,
 		TTL:  300,
@@ -459,7 +459,7 @@ func TestHINFORecordSerialization(t *testing.T) {
 	}
 
 	buffer.Seek(0)
-	parsed := DnsRecord{}
+	parsed := DNSRecord{}
 	err = parsed.Read(buffer)
 	if err != nil {
 		t.Fatalf("Failed to read HINFO record: %v", err)
@@ -471,7 +471,7 @@ func TestHINFORecordSerialization(t *testing.T) {
 }
 
 func TestMINFORecordSerialization(t *testing.T) {
-	record := DnsRecord{
+	record := DNSRecord{
 		Name:    "mail.test.",
 		Type:    MINFO,
 		TTL:     300,
@@ -486,7 +486,7 @@ func TestMINFORecordSerialization(t *testing.T) {
 	}
 
 	buffer.Seek(0)
-	parsed := DnsRecord{}
+	parsed := DNSRecord{}
 	err = parsed.Read(buffer)
 	if err != nil {
 		t.Fatalf("Failed to read MINFO record: %v", err)
@@ -498,7 +498,7 @@ func TestMINFORecordSerialization(t *testing.T) {
 }
 
 func TestNSEC3RecordSerialization(t *testing.T) {
-	record := DnsRecord{
+	record := DNSRecord{
 		Name:       "example.com.",
 		Type:       NSEC3,
 		TTL:        300,
@@ -517,7 +517,7 @@ func TestNSEC3RecordSerialization(t *testing.T) {
 	}
 
 	buffer.Seek(0)
-	parsed := DnsRecord{}
+	parsed := DNSRecord{}
 	err = parsed.Read(buffer)
 	if err != nil {
 		t.Fatalf("Failed to read NSEC3 record: %v", err)
@@ -532,7 +532,7 @@ func TestNSEC3RecordSerialization(t *testing.T) {
 }
 
 func TestNSEC3PARAMRecordSerialization(t *testing.T) {
-	record := DnsRecord{
+	record := DNSRecord{
 		Name:       "example.com.",
 		Type:       NSEC3PARAM,
 		TTL:        300,
@@ -549,7 +549,7 @@ func TestNSEC3PARAMRecordSerialization(t *testing.T) {
 	}
 
 	buffer.Seek(0)
-	parsed := DnsRecord{}
+	parsed := DNSRecord{}
 	err = parsed.Read(buffer)
 	if err != nil {
 		t.Fatalf("Failed to read NSEC3PARAM record: %v", err)
@@ -564,7 +564,7 @@ func TestNSEC3PARAMRecordSerialization(t *testing.T) {
 }
 
 func TestDSRecordSerialization(t *testing.T) {
-	record := DnsRecord{
+	record := DNSRecord{
 		Name:       "example.com.",
 		Type:       DS,
 		TTL:        3600,
@@ -581,7 +581,7 @@ func TestDSRecordSerialization(t *testing.T) {
 	}
 
 	buffer.Seek(0)
-	parsed := DnsRecord{}
+	parsed := DNSRecord{}
 	err = parsed.Read(buffer)
 	if err != nil {
 		t.Fatalf("Failed to read DS record: %v", err)
@@ -596,7 +596,7 @@ func TestDSRecordSerialization(t *testing.T) {
 }
 
 func TestEDERecordSerialization(t *testing.T) {
-	record := DnsRecord{
+	record := DNSRecord{
 		Name:           ".",
 		Type:           OPT,
 		UDPPayloadSize: 4096,
@@ -610,7 +610,7 @@ func TestEDERecordSerialization(t *testing.T) {
 	}
 
 	buffer.Seek(0)
-	parsed := DnsRecord{}
+	parsed := DNSRecord{}
 	err = parsed.Read(buffer)
 	if err != nil {
 		t.Fatalf("Failed to read record: %v", err)
@@ -736,8 +736,8 @@ func TestQueryType_String(t *testing.T) {
 	}
 }
 
-func TestDnsHeader_NewAndWrite(t *testing.T) {
-	h := NewDnsHeader()
+func TestDNSHeader_NewAndWrite(t *testing.T) {
+	h := NewDNSHeader()
 	h.ID = 1234
 	h.Response = true
 	h.Opcode = 0
@@ -764,15 +764,15 @@ func TestDnsHeader_NewAndWrite(t *testing.T) {
 	}
 }
 
-func TestDnsQuestion_NewAndWrite(t *testing.T) {
-	q := NewDnsQuestion("example.com.", A)
+func TestDNSQuestion_NewAndWrite(t *testing.T) {
+	q := NewDNSQuestion("example.com.", A)
 	buf := NewBytePacketBuffer()
 	if err := q.Write(buf); err != nil {
 		t.Fatalf("Question.Write failed: %v", err)
 	}
 
 	buf.Seek(0)
-	parsed := DnsQuestion{}
+	parsed := DNSQuestion{}
 	if err := parsed.Read(buf); err != nil {
 		t.Fatalf("Question.Read failed: %v", err)
 	}
@@ -842,9 +842,9 @@ func TestBuffer_EdgeCases(t *testing.T) {
 
 func TestTSIG_SignVerify(t *testing.T) {
 	// 1. Create a standard DNS query
-	p := NewDnsPacket()
+	p := NewDNSPacket()
 	p.Header.ID = 1234
-	p.Questions = append(p.Questions, DnsQuestion{Name: "test.com.", QType: A})
+	p.Questions = append(p.Questions, DNSQuestion{Name: "test.com.", QType: A})
 	
 	buf := NewBytePacketBuffer()
 	secret := []byte("secret")
@@ -862,7 +862,7 @@ func TestTSIG_SignVerify(t *testing.T) {
 	
 	// 4. Capture the final signed data and parse it back into a new packet
 	data := buf.Buf[:buf.Position()]
-	parsed := NewDnsPacket()
+	parsed := NewDNSPacket()
 	pBuf := NewBytePacketBuffer()
 	pBuf.Load(data)
 	if err := parsed.FromBuffer(pBuf); err != nil {
@@ -870,12 +870,12 @@ func TestTSIG_SignVerify(t *testing.T) {
 	}
 	
 	// 5. Verify the TSIG starting position was correctly tracked during parsing
-	if parsed.TsigStart == -1 {
+	if parsed.TSIGStart == -1 {
 		t.Fatalf("TSIG record not found or incorrectly tracked in parsed packet")
 	}
 	
 	// 6. Perform HMAC verification
-	if err := parsed.VerifyTSIG(data, parsed.TsigStart, secret); err != nil {
+	if err := parsed.VerifyTSIG(data, parsed.TSIGStart, secret); err != nil {
 		t.Errorf("VerifyTSIG validation failed: %v", err)
 	}
 }

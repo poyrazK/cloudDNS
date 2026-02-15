@@ -140,7 +140,7 @@ func (s *DNSSECService) GetActiveKeys(ctx context.Context, zoneID string, keyTyp
 }
 
 // SignRRSet signs a list of packet records using all active ZSKs for the zone
-func (s *DNSSECService) SignRRSet(ctx context.Context, zoneName string, zoneID string, records []packet.DnsRecord) ([]packet.DnsRecord, error) {
+func (s *DNSSECService) SignRRSet(ctx context.Context, zoneName string, zoneID string, records []packet.DNSRecord) ([]packet.DNSRecord, error) {
 	if len(records) == 0 {
 		return nil, nil
 	}
@@ -150,7 +150,7 @@ func (s *DNSSECService) SignRRSet(ctx context.Context, zoneName string, zoneID s
 		return nil, err
 	}
 
-	var sigs []packet.DnsRecord
+	var sigs []packet.DNSRecord
 	for _, key := range keys {
 		priv, err := x509.ParseECPrivateKey(key.PrivateKey)
 		if err != nil {
@@ -158,7 +158,7 @@ func (s *DNSSECService) SignRRSet(ctx context.Context, zoneName string, zoneID s
 		}
 
 		// Calculate key tag
-		tempKeyRec := packet.DnsRecord{
+		tempKeyRec := packet.DNSRecord{
 			Type:      packet.DNSKEY,
 			Flags:     256, // ZSK
 			Algorithm: 13,

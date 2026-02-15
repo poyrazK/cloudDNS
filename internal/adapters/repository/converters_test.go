@@ -13,13 +13,13 @@ func TestConvertPacketRecordToDomain(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		pRec    packet.DnsRecord
+		pRec    packet.DNSRecord
 		want    domain.Record
 		wantErr bool
 	}{
 		{
 			name: "A record",
-			pRec: packet.DnsRecord{
+			pRec: packet.DNSRecord{
 				Name: "www.test.",
 				Type: packet.A,
 				TTL:  300,
@@ -35,7 +35,7 @@ func TestConvertPacketRecordToDomain(t *testing.T) {
 		},
 		{
 			name: "MX record",
-			pRec: packet.DnsRecord{
+			pRec: packet.DNSRecord{
 				Name:     "test.",
 				Type:     packet.MX,
 				TTL:      600,
@@ -53,7 +53,7 @@ func TestConvertPacketRecordToDomain(t *testing.T) {
 		},
 		{
 			name: "TXT record",
-			pRec: packet.DnsRecord{
+			pRec: packet.DNSRecord{
 				Name: "test.",
 				Type: packet.TXT,
 				TTL:  300,
@@ -69,7 +69,7 @@ func TestConvertPacketRecordToDomain(t *testing.T) {
 		},
 		{
 			name: "SOA record",
-			pRec: packet.DnsRecord{
+			pRec: packet.DNSRecord{
 				Name:    "test.",
 				Type:    packet.SOA,
 				TTL:     300,
@@ -91,7 +91,7 @@ func TestConvertPacketRecordToDomain(t *testing.T) {
 		},
 		{
 			name: "Unsupported type",
-			pRec: packet.DnsRecord{
+			pRec: packet.DNSRecord{
 				Type: packet.QueryType(999),
 			},
 			wantErr: true,
@@ -123,7 +123,7 @@ func TestConvertDomainToPacketRecord(t *testing.T) {
 	tests := []struct {
 		name    string
 		rec     domain.Record
-		want    packet.DnsRecord
+		want    packet.DNSRecord
 		wantErr bool
 	}{
 		{
@@ -134,7 +134,7 @@ func TestConvertDomainToPacketRecord(t *testing.T) {
 				Content: "1.2.3.4",
 				TTL:     300,
 			},
-			want: packet.DnsRecord{
+			want: packet.DNSRecord{
 				Name: "www.test.",
 				Type: packet.A,
 				IP:   net.ParseIP("1.2.3.4"),
@@ -149,7 +149,7 @@ func TestConvertDomainToPacketRecord(t *testing.T) {
 				Content: "target.test",
 				TTL:     300,
 			},
-			want: packet.DnsRecord{
+			want: packet.DNSRecord{
 				Name: "alias.",
 				Type: packet.CNAME,
 				Host: "target.test.",
@@ -164,7 +164,7 @@ func TestConvertDomainToPacketRecord(t *testing.T) {
 				Content: "ns1.test admin.test 1 3600 600 604800 300",
 				TTL:     300,
 			},
-			want: packet.DnsRecord{
+			want: packet.DNSRecord{
 				Name:    "test.",
 				Type:    packet.SOA,
 				MName:   "ns1.test.",
@@ -216,7 +216,7 @@ func TestConvertDomainToPacketRecord_AllTypes(t *testing.T) {
 	tests := []struct {
 		name string
 		rec  domain.Record
-		want packet.DnsRecord
+		want packet.DNSRecord
 	}{
 		{
 			name: "AAAA record",
@@ -226,7 +226,7 @@ func TestConvertDomainToPacketRecord_AllTypes(t *testing.T) {
 				Content: "2001:db8::1",
 				TTL:     300,
 			},
-			want: packet.DnsRecord{
+			want: packet.DNSRecord{
 				Name: "v6.test.",
 				Type: packet.AAAA,
 				IP:   net.ParseIP("2001:db8::1"),
@@ -240,7 +240,7 @@ func TestConvertDomainToPacketRecord_AllTypes(t *testing.T) {
 				Content: "ns1.provider.com",
 				TTL:     3600,
 			},
-			want: packet.DnsRecord{
+			want: packet.DNSRecord{
 				Name: "test.",
 				Type: packet.NS,
 				Host: "ns1.provider.com.",
@@ -254,7 +254,7 @@ func TestConvertDomainToPacketRecord_AllTypes(t *testing.T) {
 				Content: "localhost.",
 				TTL:     3600,
 			},
-			want: packet.DnsRecord{
+			want: packet.DNSRecord{
 				Name: "1.0.0.127.in-addr.arpa.",
 				Type: packet.PTR,
 				Host: "localhost.",
@@ -268,7 +268,7 @@ func TestConvertDomainToPacketRecord_AllTypes(t *testing.T) {
 				Content: "simple text",
 				TTL:     300,
 			},
-			want: packet.DnsRecord{
+			want: packet.DNSRecord{
 				Name: "test.",
 				Type: packet.TXT,
 				Txt:  "simple text",

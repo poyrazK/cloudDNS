@@ -52,8 +52,8 @@ func TestEndToEndDNS_Advanced(t *testing.T) {
 	}
 
 	// 3. Test Wildcard Resolution
-	query := packet.NewDnsPacket()
-	query.Questions = append(query.Questions, packet.DnsQuestion{Name: "anything.advanced.test.", QType: packet.TXT})
+	query := packet.NewDNSPacket()
+	query.Questions = append(query.Questions, packet.DNSQuestion{Name: "anything.advanced.test.", QType: packet.TXT})
 	qBuf := packet.NewBytePacketBuffer()
 	query.Write(qBuf)
 
@@ -62,7 +62,7 @@ func TestEndToEndDNS_Advanced(t *testing.T) {
 	resBuf := make([]byte, 1024)
 	n, _ := conn.Read(resBuf)
 	
-	res := packet.NewDnsPacket()
+	res := packet.NewDNSPacket()
 	pBuf := packet.NewBytePacketBuffer()
 	copy(pBuf.Buf, resBuf[:n])
 	res.FromBuffer(pBuf)
@@ -73,9 +73,9 @@ func TestEndToEndDNS_Advanced(t *testing.T) {
 
 	// 4. Test AXFR over TCP
 	tcpConn, _ := net.Dial("tcp", dnsAddr)
-	axfrQuery := packet.NewDnsPacket()
+	axfrQuery := packet.NewDNSPacket()
 	axfrQuery.Header.ID = 0x1234
-	axfrQuery.Questions = append(axfrQuery.Questions, packet.DnsQuestion{Name: "advanced.test.", QType: packet.AXFR})
+	axfrQuery.Questions = append(axfrQuery.Questions, packet.DNSQuestion{Name: "advanced.test.", QType: packet.AXFR})
 	aqBuf := packet.NewBytePacketBuffer()
 	axfrQuery.Write(aqBuf)
 
@@ -92,7 +92,7 @@ func TestEndToEndDNS_Advanced(t *testing.T) {
 	axfrRData := make([]byte, axfrRLen)
 	tcpConn.Read(axfrRData)
 	
-	axfrRes := packet.NewDnsPacket()
+	axfrRes := packet.NewDNSPacket()
 	arb := packet.NewBytePacketBuffer()
 	copy(arb.Buf, axfrRData)
 	axfrRes.FromBuffer(arb)
@@ -104,9 +104,9 @@ func TestEndToEndDNS_Advanced(t *testing.T) {
 
 	// 5. Test EDNS(0) + NSEC (Authenticated Denial)
 	conn2, _ := net.Dial("udp", dnsAddr)
-	query2 := packet.NewDnsPacket()
-	query2.Questions = append(query2.Questions, packet.DnsQuestion{Name: "missing.advanced.test.", QType: packet.A})
-	query2.Resources = append(query2.Resources, packet.DnsRecord{
+	query2 := packet.NewDNSPacket()
+	query2.Questions = append(query2.Questions, packet.DNSQuestion{Name: "missing.advanced.test.", QType: packet.A})
+	query2.Resources = append(query2.Resources, packet.DNSRecord{
 		Name: ".", Type: packet.OPT, UDPPayloadSize: 4096, Z: 0x8000,
 	})
 	qBuf2 := packet.NewBytePacketBuffer()
@@ -114,7 +114,7 @@ func TestEndToEndDNS_Advanced(t *testing.T) {
 	conn2.Write(qBuf2.Buf[:qBuf2.Position()])
 	
 	n2, _ := conn2.Read(resBuf)
-	res2 := packet.NewDnsPacket()
+	res2 := packet.NewDNSPacket()
 	pBuf2 := packet.NewBytePacketBuffer()
 	copy(pBuf2.Buf, resBuf[:n2])
 	res2.FromBuffer(pBuf2)

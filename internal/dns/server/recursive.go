@@ -18,7 +18,7 @@ func newRecursiveResolver() *recursiveResolver {
 	}
 }
 
-func (s *Server) resolveRecursive(name string, qtype packet.QueryType) (*packet.DnsPacket, error) {
+func (s *Server) resolveRecursive(name string, qtype packet.QueryType) (*packet.DNSPacket, error) {
 	// 1. Start with a root server (a.root-servers.net)
 	ns := "198.41.0.4"
 
@@ -53,18 +53,18 @@ func (s *Server) resolveRecursive(name string, qtype packet.QueryType) (*packet.
 	}
 }
 
-func (s *Server) sendQuery(server string, name string, qtype packet.QueryType) (*packet.DnsPacket, error) {
+func (s *Server) sendQuery(server string, name string, qtype packet.QueryType) (*packet.DNSPacket, error) {
 	conn, err := net.DialTimeout("udp", server, 5*time.Second)
 	if err != nil {
 		return nil, err
 	}
 	defer conn.Close()
 
-	req := packet.NewDnsPacket()
+	req := packet.NewDNSPacket()
 	req.Header.ID = 1234
 	req.Header.Questions = 1
 	req.Header.RecursionDesired = false // Iterative
-	req.Questions = append(req.Questions, *packet.NewDnsQuestion(name, qtype))
+	req.Questions = append(req.Questions, *packet.NewDNSQuestion(name, qtype))
 
 	buffer := packet.NewBytePacketBuffer()
 	if err := req.Write(buffer); err != nil {
@@ -84,7 +84,7 @@ func (s *Server) sendQuery(server string, name string, qtype packet.QueryType) (
 	}
 	resBuffer.Buf = resBuffer.Buf[:n]
 
-	resp := packet.NewDnsPacket()
+	resp := packet.NewDNSPacket()
 	if err := resp.FromBuffer(resBuffer); err != nil {
 		return nil, err
 	}
@@ -92,7 +92,7 @@ func (s *Server) sendQuery(server string, name string, qtype packet.QueryType) (
 	return resp, nil
 }
 
-func (s *Server) findNextNS(resp *packet.DnsPacket) (string, bool) {
+func (s *Server) findNextNS(resp *packet.DNSPacket) (string, bool) {
 	for _, auth := range resp.Authorities {
 		if auth.Type == packet.NS {
 			for _, res := range resp.Resources {

@@ -11,10 +11,10 @@ func TestRFC8914_EDE(t *testing.T) {
 	repo := &mockServerRepo{} // Empty repo
 	srv := NewServer("127.0.0.1:0", repo, nil)
 
-	req := packet.NewDnsPacket()
-	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "not-here.test.", QType: packet.A})
+	req := packet.NewDNSPacket()
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "not-here.test.", QType: packet.A})
 	// Include OPT to enable EDE
-	req.Resources = append(req.Resources, packet.DnsRecord{
+	req.Resources = append(req.Resources, packet.DNSRecord{
 		Type: packet.OPT,
 		UDPPayloadSize: 4096,
 	})
@@ -28,7 +28,7 @@ func TestRFC8914_EDE(t *testing.T) {
 		return nil
 	})
 
-	res := packet.NewDnsPacket()
+	res := packet.NewDNSPacket()
 	resBuf := packet.NewBytePacketBuffer()
 	copy(resBuf.Buf, capturedResp)
 	res.FromBuffer(resBuf)

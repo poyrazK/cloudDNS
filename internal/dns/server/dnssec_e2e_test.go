@@ -81,12 +81,12 @@ func TestEndToEndDNSSEC_Lifecycle(t *testing.T) {
 	}
 
 	// 5. Query with DO bit and verify dynamic signing (RRSIG)
-	query := packet.NewDnsPacket()
+	query := packet.NewDNSPacket()
 	query.Header.ID = 0xABCD
-	query.Questions = append(query.Questions, packet.DnsQuestion{Name: "www.dnssec.e2e.", QType: packet.A})
+	query.Questions = append(query.Questions, packet.DNSQuestion{Name: "www.dnssec.e2e.", QType: packet.A})
 	
 	// Add OPT record with DO bit (DNSSEC OK)
-	query.Resources = append(query.Resources, packet.DnsRecord{
+	query.Resources = append(query.Resources, packet.DNSRecord{
 		Name:           ".",
 		Type:           packet.OPT,
 		UDPPayloadSize: 4096,
@@ -110,7 +110,7 @@ func TestEndToEndDNSSEC_Lifecycle(t *testing.T) {
 		t.Fatalf("Failed to read from DNS server: %v", err)
 	}
 	
-	res := packet.NewDnsPacket()
+	res := packet.NewDNSPacket()
 	pBuf := packet.NewBytePacketBuffer()
 	copy(pBuf.Buf, resBuf[:n])
 	res.FromBuffer(pBuf)
@@ -131,9 +131,9 @@ func TestEndToEndDNSSEC_Lifecycle(t *testing.T) {
 	}
 
 	// 6. Test signed NXDOMAIN (Authenticated Denial)
-	query2 := packet.NewDnsPacket()
-	query2.Questions = append(query2.Questions, packet.DnsQuestion{Name: "nonexistent.dnssec.e2e.", QType: packet.A})
-	query2.Resources = append(query2.Resources, packet.DnsRecord{
+	query2 := packet.NewDNSPacket()
+	query2.Questions = append(query2.Questions, packet.DNSQuestion{Name: "nonexistent.dnssec.e2e.", QType: packet.A})
+	query2.Resources = append(query2.Resources, packet.DNSRecord{
 		Name: ".", Type: packet.OPT, UDPPayloadSize: 4096, Z: 0x8000,
 	})
 	
@@ -142,7 +142,7 @@ func TestEndToEndDNSSEC_Lifecycle(t *testing.T) {
 	conn.Write(qBuf2.Buf[:qBuf2.Position()])
 	
 	n2, _ := conn.Read(resBuf)
-	res2 := packet.NewDnsPacket()
+	res2 := packet.NewDNSPacket()
 	pBuf2 := packet.NewBytePacketBuffer()
 	copy(pBuf2.Buf, resBuf[:n2])
 	res2.FromBuffer(pBuf2)

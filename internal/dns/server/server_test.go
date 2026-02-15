@@ -246,9 +246,9 @@ func TestHandlePacketLocalHit(t *testing.T) {
 	}
 	srv := NewServer("127.0.0.1:0", repo, nil)
 
-	req := packet.NewDnsPacket()
+	req := packet.NewDNSPacket()
 	req.Header.ID = 123
-	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "local.test.", QType: packet.A})
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "local.test.", QType: packet.A})
 	
 	buffer := packet.NewBytePacketBuffer()
 	req.Write(buffer)
@@ -266,7 +266,7 @@ func TestHandlePacketLocalHit(t *testing.T) {
 
 	resBuf := packet.NewBytePacketBuffer()
 	copy(resBuf.Buf, capturedResp)
-	resp := packet.NewDnsPacket()
+	resp := packet.NewDNSPacket()
 	resp.FromBuffer(resBuf)
 
 	if len(resp.Answers) != 1 {
@@ -283,10 +283,10 @@ func TestHandlePacketCacheHit(t *testing.T) {
 	
 	// Pre-populate cache
 	cacheKey := "cached.test.:1" // A record
-	cachedPacket := packet.NewDnsPacket()
+	cachedPacket := packet.NewDNSPacket()
 	cachedPacket.Header.Response = true
-	cachedPacket.Questions = append(cachedPacket.Questions, packet.DnsQuestion{Name: "cached.test.", QType: packet.A})
-	cachedPacket.Answers = append(cachedPacket.Answers, packet.DnsRecord{
+	cachedPacket.Questions = append(cachedPacket.Questions, packet.DNSQuestion{Name: "cached.test.", QType: packet.A})
+	cachedPacket.Answers = append(cachedPacket.Answers, packet.DNSRecord{
 		Name: "cached.test.", Type: packet.A, IP: net.ParseIP("2.2.2.2"), TTL: 60, Class: 1,
 	})
 	buf := packet.NewBytePacketBuffer()
@@ -294,9 +294,9 @@ func TestHandlePacketCacheHit(t *testing.T) {
 	srv.Cache.Set(cacheKey, buf.Buf[:buf.Position()], 60*time.Second)
 
 	// Query
-	req := packet.NewDnsPacket()
+	req := packet.NewDNSPacket()
 	req.Header.ID = 999
-	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "cached.test.", QType: packet.A})
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "cached.test.", QType: packet.A})
 	reqBuf := packet.NewBytePacketBuffer()
 	req.Write(reqBuf)
 
@@ -308,7 +308,7 @@ func TestHandlePacketCacheHit(t *testing.T) {
 
 	resBuf := packet.NewBytePacketBuffer()
 	copy(resBuf.Buf, capturedResp)
-	resp := packet.NewDnsPacket()
+	resp := packet.NewDNSPacket()
 	resp.FromBuffer(resBuf)
 
 	if resp.Header.ID != 999 {
@@ -339,8 +339,8 @@ func TestWorkerPoolProcessing(t *testing.T) {
 	// Start one worker
 	go srv.udpWorker()
 
-	req := packet.NewDnsPacket()
-	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "worker.test.", QType: packet.A})
+	req := packet.NewDNSPacket()
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "worker.test.", QType: packet.A})
 	reqBuf := packet.NewBytePacketBuffer()
 	req.Write(reqBuf)
 
@@ -366,8 +366,8 @@ func TestHandlePacketNXDOMAIN(t *testing.T) {
 	repo := &mockServerRepo{}
 	srv := NewServer("127.0.0.1:0", repo, nil)
 
-	req := packet.NewDnsPacket()
-	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "missing.test.", QType: packet.A})
+	req := packet.NewDNSPacket()
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "missing.test.", QType: packet.A})
 	reqBuf := packet.NewBytePacketBuffer()
 	req.Write(reqBuf)
 
@@ -377,7 +377,7 @@ func TestHandlePacketNXDOMAIN(t *testing.T) {
 		return nil
 	})
 
-	resPacket := packet.NewDnsPacket()
+	resPacket := packet.NewDNSPacket()
 	pBuf := packet.NewBytePacketBuffer()
 	copy(pBuf.Buf, capturedResp)
 	resPacket.FromBuffer(pBuf)
@@ -391,7 +391,7 @@ func TestHandlePacketNoQuestions(t *testing.T) {
 	repo := &mockServerRepo{}
 	srv := NewServer("127.0.0.1:0", repo, nil)
 
-	req := packet.NewDnsPacket()
+	req := packet.NewDNSPacket()
 	reqBuf := packet.NewBytePacketBuffer()
 	req.Write(reqBuf)
 
@@ -401,7 +401,7 @@ func TestHandlePacketNoQuestions(t *testing.T) {
 		return nil
 	})
 
-	resPacket := packet.NewDnsPacket()
+	resPacket := packet.NewDNSPacket()
 	pBuf := packet.NewBytePacketBuffer()
 	copy(pBuf.Buf, capturedResp)
 	resPacket.FromBuffer(pBuf)
@@ -415,10 +415,10 @@ func TestHandlePacketEDNS(t *testing.T) {
 	repo := &mockServerRepo{}
 	srv := NewServer("127.0.0.1:0", repo, nil)
 
-	req := packet.NewDnsPacket()
-	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "test.com.", QType: packet.A})
+	req := packet.NewDNSPacket()
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "test.com.", QType: packet.A})
 	// Add OPT record
-	req.Resources = append(req.Resources, packet.DnsRecord{
+	req.Resources = append(req.Resources, packet.DNSRecord{
 		Type:           packet.OPT,
 		UDPPayloadSize: 4096,
 	})
@@ -449,14 +449,14 @@ func TestHandlePacketTruncation(t *testing.T) {
 		})
 	}
 
-	req := packet.NewDnsPacket()
-	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "big.test.", QType: packet.A})
+	req := packet.NewDNSPacket()
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "big.test.", QType: packet.A})
 	// No OPT -> limit 512
 	reqBuf := packet.NewBytePacketBuffer()
 	req.Write(reqBuf)
 
 	err := srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
-		resPacket := packet.NewDnsPacket()
+		resPacket := packet.NewDNSPacket()
 		resBuffer := packet.NewBytePacketBuffer()
 		copy(resBuffer.Buf, resp)
 		resPacket.FromBuffer(resBuffer)
@@ -482,8 +482,8 @@ func TestHandleDoH(t *testing.T) {
 	}
 	srv := NewServer("127.0.0.1:0", repo, nil)
 
-	req := packet.NewDnsPacket()
-	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "doh.test.", QType: packet.A})
+	req := packet.NewDNSPacket()
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "doh.test.", QType: packet.A})
 	reqBuf := packet.NewBytePacketBuffer()
 	req.Write(reqBuf)
 
@@ -511,7 +511,7 @@ func TestSendTCPError(t *testing.T) {
 		t.Fatalf("Expected 1 error packet")
 	}
 	
-	p := packet.NewDnsPacket()
+	p := packet.NewDNSPacket()
 	pBuf := packet.NewBytePacketBuffer()
 	pBuf.Load(conn.captured[0])
 	p.FromBuffer(pBuf)

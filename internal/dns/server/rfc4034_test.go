@@ -21,9 +21,9 @@ func TestRFC4034_NSEC(t *testing.T) {
 	srv := NewServer("127.0.0.1:0", repo, nil)
 
 	// 1. Query for non-existent name "b.example.com." with DO bit set
-	req := packet.NewDnsPacket()
-	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "b.example.com.", QType: packet.A})
-	req.Resources = append(req.Resources, packet.DnsRecord{
+	req := packet.NewDNSPacket()
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "b.example.com.", QType: packet.A})
+	req.Resources = append(req.Resources, packet.DNSRecord{
 		Name: ".", Type: packet.OPT, UDPPayloadSize: 4096, Z: 0x8000, // DO bit
 	})
 	
@@ -36,7 +36,7 @@ func TestRFC4034_NSEC(t *testing.T) {
 		return nil
 	})
 
-	resPacket := packet.NewDnsPacket()
+	resPacket := packet.NewDNSPacket()
 	resBuf := packet.NewBytePacketBuffer()
 	copy(resBuf.Buf, capturedResp)
 	resPacket.FromBuffer(resBuf)

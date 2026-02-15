@@ -19,8 +19,8 @@ func TestRFC1035_MessageCompression(t *testing.T) {
 	}
 	srv := NewServer("127.0.0.1:0", repo, nil)
 
-	req := packet.NewDnsPacket()
-	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "www.example.com.", QType: packet.A})
+	req := packet.NewDNSPacket()
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "www.example.com.", QType: packet.A})
 	reqBuf := packet.NewBytePacketBuffer()
 	req.Write(reqBuf)
 
@@ -59,8 +59,8 @@ func TestRFC1035_ResponseFormat(t *testing.T) {
 	}
 	srv := NewServer("127.0.0.1:0", repo, nil)
 
-	req := packet.NewDnsPacket()
-	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "www.example.com.", QType: packet.A})
+	req := packet.NewDNSPacket()
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "www.example.com.", QType: packet.A})
 	
 	reqBuf := packet.NewBytePacketBuffer()
 	req.Write(reqBuf)
@@ -71,7 +71,7 @@ func TestRFC1035_ResponseFormat(t *testing.T) {
 		return nil
 	})
 
-	resPacket := packet.NewDnsPacket()
+	resPacket := packet.NewDNSPacket()
 	resBuf := packet.NewBytePacketBuffer()
 	copy(resBuf.Buf, capturedResp)
 	resPacket.FromBuffer(resBuf)
@@ -112,9 +112,9 @@ func TestRFC1035_AXFR(t *testing.T) {
 	defer clientConn.Close()
 	defer serverConn.Close()
 
-	req := packet.NewDnsPacket()
+	req := packet.NewDNSPacket()
 	req.Header.ID = 0x1234
-	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "axfr.test.", QType: packet.AXFR})
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "axfr.test.", QType: packet.AXFR})
 	
 	// Handle AXFR in background
 	go srv.handleAXFR(serverConn, req)
@@ -133,7 +133,7 @@ func TestRFC1035_AXFR(t *testing.T) {
 		respData := make([]byte, respLen)
 		clientConn.Read(respData)
 
-		respPacket := packet.NewDnsPacket()
+		respPacket := packet.NewDNSPacket()
 		pBuf := packet.NewBytePacketBuffer()
 		pBuf.Load(respData)
 		respPacket.FromBuffer(pBuf)

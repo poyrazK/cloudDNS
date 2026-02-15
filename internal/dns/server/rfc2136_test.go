@@ -22,13 +22,13 @@ func TestHandleUpdateAddRecord(t *testing.T) {
 	}
 	srv := NewServer("127.0.0.1:0", repo, nil)
 
-	req := packet.NewDnsPacket()
+	req := packet.NewDNSPacket()
 	req.Header.ID = 100
 	req.Header.Opcode = packet.OPCODE_UPDATE
 	// Zone Section: Specifies the zone being updated
-	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "example.test.", QType: packet.SOA})
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "example.test.", QType: packet.SOA})
 	// Update Section: The record to be added (Class IN)
-	req.Authorities = append(req.Authorities, packet.DnsRecord{
+	req.Authorities = append(req.Authorities, packet.DNSRecord{
 		Name: "new.example.test.",
 		Type: packet.A,
 		Class: 1, // IN -> Add
@@ -50,7 +50,7 @@ func TestHandleUpdateAddRecord(t *testing.T) {
 		t.Fatalf("HandlePacket failed: %v", err)
 	}
 
-	resPacket := packet.NewDnsPacket()
+	resPacket := packet.NewDNSPacket()
 	pBuf := packet.NewBytePacketBuffer()
 	copy(pBuf.Buf, capturedResp)
 	resPacket.FromBuffer(pBuf)
@@ -87,11 +87,11 @@ func TestHandleUpdateDeleteRRSet(t *testing.T) {
 	}
 	srv := NewServer("127.0.0.1:0", repo, nil)
 
-	req := packet.NewDnsPacket()
+	req := packet.NewDNSPacket()
 	req.Header.Opcode = packet.OPCODE_UPDATE
-	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "example.test.", QType: packet.SOA})
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "example.test.", QType: packet.SOA})
 	// Delete RRSet: Class ANY (255), Type A
-	req.Authorities = append(req.Authorities, packet.DnsRecord{
+	req.Authorities = append(req.Authorities, packet.DNSRecord{
 		Name: "del.example.test.",
 		Type: packet.A,
 		Class: 255, // ANY -> Delete RRset
@@ -130,11 +130,11 @@ func TestHandleUpdatePrerequisiteFail(t *testing.T) {
 	}
 	srv := NewServer("127.0.0.1:0", repo, nil)
 
-	req := packet.NewDnsPacket()
+	req := packet.NewDNSPacket()
 	req.Header.Opcode = packet.OPCODE_UPDATE
-	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "example.test.", QType: packet.SOA})
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "example.test.", QType: packet.SOA})
 	// Prerequisite: Name is in use (Class ANY, Type ANY)
-	req.Answers = append(req.Answers, packet.DnsRecord{
+	req.Answers = append(req.Answers, packet.DNSRecord{
 		Name: "missing.example.test.",
 		Type: 255, // ANY
 		Class: 255, // ANY
@@ -150,7 +150,7 @@ func TestHandleUpdatePrerequisiteFail(t *testing.T) {
 		return nil
 	})
 
-	resPacket := packet.NewDnsPacket()
+	resPacket := packet.NewDNSPacket()
 	pBuf := packet.NewBytePacketBuffer()
 	copy(pBuf.Buf, capturedResp)
 	resPacket.FromBuffer(pBuf)
@@ -172,10 +172,10 @@ func TestHandleUpdateMorePrereqs(t *testing.T) {
 	srv := NewServer("127.0.0.1:0", repo, nil)
 
 	// 1. Success case: Prerequisite check
-	req := packet.NewDnsPacket()
+	req := packet.NewDNSPacket()
 	req.Header.Opcode = packet.OPCODE_UPDATE
-	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "test.test.", QType: packet.SOA})
-	req.Answers = append(req.Answers, packet.DnsRecord{
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "test.test.", QType: packet.SOA})
+	req.Answers = append(req.Answers, packet.DNSRecord{
 		Name: "exists.test.", Type: packet.A, Class: 255,
 	})
 	
@@ -186,16 +186,16 @@ func TestHandleUpdateMorePrereqs(t *testing.T) {
 	})
 
 	// 2. Failure case: "Name NOT in use" but name exists
-	req2 := packet.NewDnsPacket()
+	req2 := packet.NewDNSPacket()
 	req2.Header.Opcode = packet.OPCODE_UPDATE
-	req2.Questions = append(req2.Questions, packet.DnsQuestion{Name: "test.test.", QType: packet.SOA})
-	req2.Answers = append(req2.Answers, packet.DnsRecord{
+	req2.Questions = append(req2.Questions, packet.DNSQuestion{Name: "test.test.", QType: packet.SOA})
+	req2.Answers = append(req2.Answers, packet.DNSRecord{
 		Name: "exists.test.", Type: 255, Class: 254, // NONE/ANY -> YXDOMAIN if name in use
 	})
 	buf2 := packet.NewBytePacketBuffer()
 	req2.Write(buf2)
 	srv.handlePacket(buf2.Buf[:buf2.Position()], "127.0.0.1:1", func(resp []byte) error {
-		p := packet.NewDnsPacket()
+		p := packet.NewDNSPacket()
 		pb := packet.NewBytePacketBuffer()
 		pb.Load(resp)
 		p.FromBuffer(pb)
@@ -218,11 +218,11 @@ func TestHandleUpdateDeleteSpecific(t *testing.T) {
 	}
 	srv := NewServer("127.0.0.1:0", repo, nil)
 
-	req := packet.NewDnsPacket()
+	req := packet.NewDNSPacket()
 	req.Header.Opcode = packet.OPCODE_UPDATE
-	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "test.test.", QType: packet.SOA})
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "test.test.", QType: packet.SOA})
 	// Delete specific record: Class NONE (254), Type A, matching IP 1.1.1.1
-	req.Authorities = append(req.Authorities, packet.DnsRecord{
+	req.Authorities = append(req.Authorities, packet.DNSRecord{
 		Name: "www.test.", Type: packet.A, Class: 254, IP: net.ParseIP("1.1.1.1"),
 	})
 
@@ -251,10 +251,10 @@ func TestHandleUpdateTSIG(t *testing.T) {
 	srv := NewServer("127.0.0.1:0", repo, nil)
 	srv.TsigKeys["testkey."] = []byte("secret123")
 
-	req := packet.NewDnsPacket()
+	req := packet.NewDNSPacket()
 	req.Header.Opcode = packet.OPCODE_UPDATE
-	req.Questions = append(req.Questions, packet.DnsQuestion{Name: "tsig.test.", QType: packet.SOA})
-	req.Authorities = append(req.Authorities, packet.DnsRecord{
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "tsig.test.", QType: packet.SOA})
+	req.Authorities = append(req.Authorities, packet.DNSRecord{
 		Name: "auth.tsig.test.",
 		Type: packet.A,
 		Class: 1,
@@ -273,13 +273,13 @@ func TestHandleUpdateTSIG(t *testing.T) {
 	
 	data := buffer.Buf[:buffer.Position()]
 	
-	parsedReq := packet.NewDnsPacket()
+	parsedReq := packet.NewDNSPacket()
 	pBuf := packet.NewBytePacketBuffer()
 	pBuf.Load(data)
 	parsedReq.FromBuffer(pBuf)
 
 	err = srv.handlePacket(data, "127.0.0.1:12345", func(resp []byte) error {
-		resPacket := packet.NewDnsPacket()
+		resPacket := packet.NewDNSPacket()
 		resBuf := packet.NewBytePacketBuffer()
 		resBuf.Load(resp)
 		resPacket.FromBuffer(resBuf)
@@ -312,13 +312,13 @@ func TestHandleUpdate_ErrorCases(t *testing.T) {
 	srv.TsigKeys["key1"] = []byte("secret")
 
 	// 1. Invalid ZOCOUNT != 1
-	req := packet.NewDnsPacket()
+	req := packet.NewDNSPacket()
 	req.Header.Opcode = packet.OPCODE_UPDATE
 	// 0 questions
 	buf := packet.NewBytePacketBuffer()
 	req.Write(buf)
 	srv.handlePacket(buf.Buf[:buf.Position()], "127.0.0.1:1", func(resp []byte) error {
-		p := packet.NewDnsPacket()
+		p := packet.NewDNSPacket()
 		pb := packet.NewBytePacketBuffer()
 		pb.Load(resp)
 		p.FromBuffer(pb)
@@ -329,14 +329,14 @@ func TestHandleUpdate_ErrorCases(t *testing.T) {
 	})
 
 	// 2. Unknown TSIG key
-	req2 := packet.NewDnsPacket()
+	req2 := packet.NewDNSPacket()
 	req2.Header.Opcode = packet.OPCODE_UPDATE
-	req2.Questions = append(req2.Questions, packet.DnsQuestion{Name: "error.test.", QType: packet.SOA})
+	req2.Questions = append(req2.Questions, packet.DNSQuestion{Name: "error.test.", QType: packet.SOA})
 	buf2 := packet.NewBytePacketBuffer()
 	req2.Write(buf2)
 	req2.SignTSIG(buf2, "unknown.", []byte("any"))
 	srv.handlePacket(buf2.Buf[:buf2.Position()], "127.0.0.1:1", func(resp []byte) error {
-		p := packet.NewDnsPacket()
+		p := packet.NewDNSPacket()
 		pb := packet.NewBytePacketBuffer()
 		pb.Load(resp)
 		p.FromBuffer(pb)
@@ -347,13 +347,13 @@ func TestHandleUpdate_ErrorCases(t *testing.T) {
 	})
 
 	// 3. Not authoritative zone
-	req3 := packet.NewDnsPacket()
+	req3 := packet.NewDNSPacket()
 	req3.Header.Opcode = packet.OPCODE_UPDATE
-	req3.Questions = append(req3.Questions, packet.DnsQuestion{Name: "notauth.test.", QType: packet.SOA})
+	req3.Questions = append(req3.Questions, packet.DNSQuestion{Name: "notauth.test.", QType: packet.SOA})
 	buf3 := packet.NewBytePacketBuffer()
 	req3.Write(buf3)
 	srv.handlePacket(buf3.Buf[:buf3.Position()], "127.0.0.1:1", func(resp []byte) error {
-		p := packet.NewDnsPacket()
+		p := packet.NewDNSPacket()
 		pb := packet.NewBytePacketBuffer()
 		pb.Load(resp)
 		p.FromBuffer(pb)
@@ -375,18 +375,18 @@ func TestCheckPrerequisite_RRset(t *testing.T) {
 	zone := &domain.Zone{ID: "z1"}
 
 	// 1. RRset exists (value independent) - SUCCESS
-	err := srv.checkPrerequisite(ctx, zone, packet.DnsRecord{Name: "exists.test.", Type: packet.A, Class: 255})
+	err := srv.checkPrerequisite(ctx, zone, packet.DNSRecord{Name: "exists.test.", Type: packet.A, Class: 255})
 	if err != nil { t.Errorf("Expected success, got %v", err) }
 
 	// 2. RRset exists - FAILURE (doesn't exist)
-	err = srv.checkPrerequisite(ctx, zone, packet.DnsRecord{Name: "missing.test.", Type: packet.A, Class: 255})
+	err = srv.checkPrerequisite(ctx, zone, packet.DNSRecord{Name: "missing.test.", Type: packet.A, Class: 255})
 	if err == nil { t.Errorf("Expected error for missing RRset") }
 
 	// 3. RRset does NOT exist - SUCCESS
-	err = srv.checkPrerequisite(ctx, zone, packet.DnsRecord{Name: "missing.test.", Type: packet.A, Class: 254})
+	err = srv.checkPrerequisite(ctx, zone, packet.DNSRecord{Name: "missing.test.", Type: packet.A, Class: 254})
 	if err != nil { t.Errorf("Expected success, got %v", err) }
 
 	// 4. RRset does NOT exist - FAILURE (it exists)
-	err = srv.checkPrerequisite(ctx, zone, packet.DnsRecord{Name: "exists.test.", Type: packet.A, Class: 254})
+	err = srv.checkPrerequisite(ctx, zone, packet.DNSRecord{Name: "exists.test.", Type: packet.A, Class: 254})
 	if err == nil { t.Errorf("Expected error for existing RRset check") }
 }

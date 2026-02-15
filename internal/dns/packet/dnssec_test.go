@@ -8,7 +8,7 @@ import (
 )
 
 func TestComputeKeyTag(t *testing.T) {
-	record := DnsRecord{
+	record := DNSRecord{
 		Type:      DNSKEY,
 		Flags:     256,
 		Algorithm: 13,
@@ -21,7 +21,7 @@ func TestComputeKeyTag(t *testing.T) {
 }
 
 func TestComputeDS(t *testing.T) {
-	record := DnsRecord{
+	record := DNSRecord{
 		Name:      "example.com.",
 		Type:      DNSKEY,
 		Flags:     257,
@@ -39,7 +39,7 @@ func TestComputeDS(t *testing.T) {
 
 func TestSignRRSet(t *testing.T) {
 	privKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	records := []DnsRecord{
+	records := []DNSRecord{
 		{Name: "www.test.", Type: A, TTL: 300, IP: []byte{1, 2, 3, 4}},
 	}
 	
@@ -54,14 +54,14 @@ func TestSignRRSet(t *testing.T) {
 }
 
 func TestComputeKeyTag_WrongType(t *testing.T) {
-	record := DnsRecord{Type: A}
+	record := DNSRecord{Type: A}
 	if tag := record.ComputeKeyTag(); tag != 0 {
 		t.Errorf("Expected 0 tag for non-DNSKEY")
 	}
 }
 
 func TestComputeDS_WrongType(t *testing.T) {
-	record := DnsRecord{Type: A}
+	record := DNSRecord{Type: A}
 	ds, err := record.ComputeDS(2)
 	if err != nil || ds.Type != UNKNOWN {
 		t.Errorf("Expected empty record and no error for non-DNSKEY")

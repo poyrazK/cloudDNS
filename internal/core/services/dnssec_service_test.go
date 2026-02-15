@@ -188,7 +188,7 @@ func TestSignRRSet(t *testing.T) {
 	}
 
 	// 2. Sign a dummy RRSet
-	records := []packet.DnsRecord{
+	records := []packet.DNSRecord{
 		{Name: "www.example.com.", Type: packet.A, IP: net.ParseIP("1.2.3.4"), TTL: 300, Class: 1},
 	}
 
