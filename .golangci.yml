@@ -1,18 +1,12 @@
-linters:
-  enable:
-    - errcheck
-    - gosimple
-    - govet
-    - ineffassign
-    - staticcheck
-    - unused
-    - revive
-    - gosec
-    - bodyclose
-    - gocritic
-
 run:
   timeout: 5m
+
+linters:
+  enable-all: true
+  disable:
+    - depguard # Requires manual dependency whitelist configuration
+    - lll      # Line length is often a matter of taste
+    - wsl      # Extremely pedantic about white space
 
 issues:
   exclude-use-default: false
