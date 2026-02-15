@@ -24,6 +24,10 @@ linters-settings:
     confidence: 0.8
   govet:
     enable-all: true
+    disable:
+      - fieldalignment
+  staticcheck:
+    checks: ["all"]
 
 issues:
   exclude-use-default: false

@@ -64,8 +64,8 @@ func TestHandleIXFR_WithChanges(t *testing.T) {
 		},
 	}
 	// Add history: Client has 100, we are at 101
-	repo.RecordZoneChange(nil, &domain.ZoneChange{
-		ZoneID: "zone-1", Serial: 101, Action: "ADD", Name: "new.example.test.", Type: domain.TypeA, Content: "1.2.3.4", TTL: 300,
+	repo.RecordZoneChange(context.Background(), &domain.ZoneChange{
+		ZoneID: "zone-1", Serial: 101, Action: "ADD", Name: "new.example.test.", Type: "A", Content: "1.2.3.4", TTL: 300,
 	})
 
 	srv := NewServer("127.0.0.1:0", repo, nil)

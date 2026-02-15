@@ -69,7 +69,8 @@ func TestComputeDS_WrongType(t *testing.T) {
 }
 
 func TestSignRRSet_Empty(t *testing.T) {
-	sig, err := SignRRSet(nil, nil, "test.", 0, 0, 0)
+	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	sig, err := SignRRSet([]DNSRecord{}, priv, "test.", 0, 0, 0)
 	if err != nil || sig.Type != UNKNOWN {
 		t.Errorf("Expected empty record for empty RRSet")
 	}

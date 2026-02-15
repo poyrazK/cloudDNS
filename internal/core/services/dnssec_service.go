@@ -77,8 +77,8 @@ func (s *DNSSECService) AutomateLifecycle(ctx context.Context, zoneID string) er
 
 		// 1. Initial creation
 		if len(activeKeys) == 0 {
-			_, err = s.GenerateKey(ctx, zoneID, keyType)
-			return err
+			_, errCreate := s.GenerateKey(ctx, zoneID, keyType)
+			return errCreate
 		}
 
 		// 2. Rollover Orchestration
@@ -92,8 +92,8 @@ func (s *DNSSECService) AutomateLifecycle(ctx context.Context, zoneID string) er
 
 		// If no key is recent, we need a new one
 		if !hasRecentKey {
-			s.GenerateKey(ctx, zoneID, keyType)
-			return nil // We added a new key, let the next run handle deactivation
+			_, errGen := s.GenerateKey(ctx, zoneID, keyType)
+			return errGen // Return the error if generation fails
 		}
 
 		// 3. Phase out old keys
@@ -102,8 +102,8 @@ func (s *DNSSECService) AutomateLifecycle(ctx context.Context, zoneID string) er
 			if age > rollover+overlap {
 				k.Active = false
 				k.UpdatedAt = now
-				if err := s.repo.UpdateKey(ctx, &k); err != nil {
-					return err
+				if errUpd := s.repo.UpdateKey(ctx, &k); errUpd != nil {
+					return errUpd
 				}
 			}
 		}
