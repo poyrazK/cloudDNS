@@ -73,6 +73,25 @@ func TestResolveRecursive_NXDOMAIN(t *testing.T) {
 	}
 }
 
+func TestRecursive_NoNextNS(t *testing.T) {
+	s := NewServer(":0", nil, nil)
+
+	s.queryFn = func(server string, name string, qtype packet.QueryType) (*packet.DnsPacket, error) {
+		resp := packet.NewDnsPacket()
+		resp.Header.Response = true
+		// No answers, no authorities, no resources -> findNextNS returns false
+		return resp, nil
+	}
+
+	resp, err := s.resolveRecursive("deadend.test.", packet.A)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+	if len(resp.Answers) != 0 {
+		t.Errorf("Expected no answers")
+	}
+}
+
 func TestSendQuery(t *testing.T) {
 	// 1. Start a mock UDP DNS server
 	addr, err := net.ResolveUDPAddr("udp", "127.0.0.1:0")
