@@ -107,8 +107,8 @@ func (r *PostgresRepository) ListRecordsForZone(ctx context.Context, zoneID stri
 	for rows.Next() {
 		var rec domain.Record
 		var priority sql.NullInt32
-		if err := rows.Scan(&rec.ID, &rec.ZoneID, &rec.Name, &rec.Type, &rec.Content, &rec.TTL, &priority, &rec.Network); err != nil {
-			return nil, err
+		if errScan := rows.Scan(&rec.ID, &rec.ZoneID, &rec.Name, &rec.Type, &rec.Content, &rec.TTL, &priority, &rec.Network); errScan != nil {
+			return nil, errScan
 		}
 		if priority.Valid {
 			p := int(priority.Int32)
@@ -181,8 +181,8 @@ func (r *PostgresRepository) ListZones(ctx context.Context, tenantID string) ([]
 	var zones []domain.Zone
 	for rows.Next() {
 		var z domain.Zone
-		if err := rows.Scan(&z.ID, &z.TenantID, &z.Name, &z.VPCID, &z.Description, &z.CreatedAt, &z.UpdatedAt); err != nil {
-			return nil, err
+		if errScan := rows.Scan(&z.ID, &z.TenantID, &z.Name, &z.VPCID, &z.Description, &z.CreatedAt, &z.UpdatedAt); errScan != nil {
+			return nil, errScan
 		}
 		zones = append(zones, z)
 	}
@@ -239,8 +239,8 @@ func (r *PostgresRepository) ListZoneChanges(ctx context.Context, zoneID string,
 	for rows.Next() {
 		var c domain.ZoneChange
 		var priority sql.NullInt32
-		if err := rows.Scan(&c.ID, &c.ZoneID, &c.Serial, &c.Action, &c.Name, &c.Type, &c.Content, &c.TTL, &priority, &c.CreatedAt); err != nil {
-			return nil, err
+		if errScan := rows.Scan(&c.ID, &c.ZoneID, &c.Serial, &c.Action, &c.Name, &c.Type, &c.Content, &c.TTL, &priority, &c.CreatedAt); errScan != nil {
+			return nil, errScan
 		}
 		if priority.Valid {
 			p := int(priority.Int32)
