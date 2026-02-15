@@ -28,3 +28,20 @@ func TestNSEC3_HashAndEncode(t *testing.T) {
 		t.Errorf("Different iteration counts should produce different hashes")
 	}
 }
+
+func TestHashName_Root(t *testing.T) {
+	h1 := HashName(".", 1, 0, nil)
+	h2 := HashName("", 1, 0, nil)
+	if !bytes.Equal(h1, h2) {
+		t.Errorf("Root dot and empty string should produce same hash")
+	}
+}
+
+func TestBase32Encode_Small(t *testing.T) {
+	// Test data that doesn't align perfectly with 5-bit boundaries
+	data := []byte{0xFF} // 1111 1111 -> 11111 11100 -> 'v' 's'
+	got := Base32Encode(data)
+	if got != "vs" {
+		t.Errorf("Expected vs, got %s", got)
+	}
+}
