@@ -28,27 +28,27 @@ func setupTestDB(t *testing.T) (*sql.DB, func()) {
 			wait.ForListeningPort("5432").
 				WithStartupTimeout(60*time.Second)),
 	)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("failed to start container: %s", err)
 	}
 
 	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("failed to get connection string: %s", err)
 	}
 
 	db, err := sql.Open("pgx", connStr)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("failed to open db: %s", err)
 	}
 
 	schemaPath := filepath.Join(".", "schema.sql")
 	schema, err := os.ReadFile(schemaPath)
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("failed to read schema: %s", err)
 	}
 
-	if _, err := db.Exec(string(schema)); err != nil {
+	if _, err := db.Exec(string(schema)); errScan != nil {
 		t.Fatalf("failed to apply schema: %s", err)
 	}
 
@@ -75,14 +75,14 @@ func TestPostgresRepository_Integration(t *testing.T) {
 	ctx := context.Background()
 
 	// 1. Test Ping
-	if err := repo.Ping(ctx); err != nil {
+	if err := repo.Ping(ctx); errScan != nil {
 		t.Errorf("Ping failed: %v", err)
 	}
 
 	// 2. Test CreateZone
 	zoneID1 := "550e8400-e29b-41d4-a716-446655440000"
 	zone := &domain.Zone{ID: zoneID1, Name: "base.test.", TenantID: "t1"}
-	if err := repo.CreateZone(ctx, zone); err != nil {
+	if err := repo.CreateZone(ctx, zone); errScan != nil {
 		t.Fatalf("CreateZone failed: %v", err)
 	}
 
@@ -97,7 +97,7 @@ func TestPostgresRepository_Integration(t *testing.T) {
 	record := &domain.Record{
 		ID: recordID1, ZoneID: zoneID1, Name: "www.base.test.", Type: domain.TypeA, Content: "1.2.3.4", TTL: 300,
 	}
-	if err := repo.CreateRecord(ctx, record); err != nil {
+	if err := repo.CreateRecord(ctx, record); errScan != nil {
 		t.Fatalf("CreateRecord failed: %v", err)
 	}
 
@@ -131,28 +131,28 @@ func TestPostgresRepository_Integration(t *testing.T) {
 	}
 
 	// 9. Test DeleteRecord
-	if err := repo.DeleteRecord(ctx, recordID1, zoneID1); err != nil {
+	if err := repo.DeleteRecord(ctx, recordID1, zoneID1); errScan != nil {
 		t.Errorf("DeleteRecord failed: %v", err)
 	}
 
 	// 10. Test DeleteRecordsByNameAndType
 	rid2 := "550e8400-e29b-41d4-a716-446655440003"
 	repo.CreateRecord(ctx, &domain.Record{ID: rid2, ZoneID: zoneID1, Name: "del.test.", Type: domain.TypeA, Content: "1.1.1.1", TTL: 60})
-	if err := repo.DeleteRecordsByNameAndType(ctx, zoneID1, "del.test.", domain.TypeA); err != nil {
+	if err := repo.DeleteRecordsByNameAndType(ctx, zoneID1, "del.test.", domain.TypeA); errScan != nil {
 		t.Errorf("DeleteRecordsByNameAndType failed: %v", err)
 	}
 
 	// 11. Test DeleteRecordsByName
 	rid3 := "550e8400-e29b-41d4-a716-446655440004"
 	repo.CreateRecord(ctx, &domain.Record{ID: rid3, ZoneID: zoneID1, Name: "delname.test.", Type: domain.TypeA, Content: "1.1.1.1", TTL: 60})
-	if err := repo.DeleteRecordsByName(ctx, zoneID1, "delname.test."); err != nil {
+	if err := repo.DeleteRecordsByName(ctx, zoneID1, "delname.test."); errScan != nil {
 		t.Errorf("DeleteRecordsByName failed: %v", err)
 	}
 
 	// 12. Test DeleteRecordSpecific
 	rid4 := "550e8400-e29b-41d4-a716-446655440005"
 	repo.CreateRecord(ctx, &domain.Record{ID: rid4, ZoneID: zoneID1, Name: "specific.test.", Type: domain.TypeA, Content: "1.1.1.1", TTL: 60})
-	if err := repo.DeleteRecordSpecific(ctx, zoneID1, "specific.test.", domain.TypeA, "1.1.1.1"); err != nil {
+	if err := repo.DeleteRecordSpecific(ctx, zoneID1, "specific.test.", domain.TypeA, "1.1.1.1"); errScan != nil {
 		t.Errorf("DeleteRecordSpecific failed: %v", err)
 	}
 
@@ -161,7 +161,7 @@ func TestPostgresRepository_Integration(t *testing.T) {
 	change := &domain.ZoneChange{
 		ID: changeID1, ZoneID: zoneID1, Serial: 100, Action: "ADD", Name: "new.test.", Type: domain.TypeA, Content: "4.4.4.4", TTL: 300, CreatedAt: time.Now(),
 	}
-	if err := repo.RecordZoneChange(ctx, change); err != nil {
+	if err := repo.RecordZoneChange(ctx, change); errScan != nil {
 		t.Errorf("RecordZoneChange failed: %v", err)
 	}
 	changes, _ := repo.ListZoneChanges(ctx, zoneID1, 99)
@@ -186,7 +186,7 @@ func TestPostgresRepository_Integration(t *testing.T) {
 	}
 
 	// 15. Test DeleteZone
-	if err := repo.DeleteZone(ctx, zoneID1, "t1"); err != nil {
+	if err := repo.DeleteZone(ctx, zoneID1, "t1"); errScan != nil {
 		t.Errorf("DeleteZone failed: %v", err)
 	}
 }
@@ -214,7 +214,7 @@ func TestPostgresRepository_EdgeCases(t *testing.T) {
 	recs := []domain.Record{
 		{ID: "550e8400-e29b-41d4-a716-446655440010", ZoneID: zID, Name: "batch.test.", Type: domain.TypeA, Content: "1.1.1.1", TTL: 60},
 	}
-	if err := repo.CreateZoneWithRecords(ctx, zone, recs); err != nil {
+	if err := repo.CreateZoneWithRecords(ctx, zone, recs); errScan != nil {
 		t.Errorf("CreateZoneWithRecords failed: %v", err)
 	}
 

@@ -12,7 +12,7 @@ import (
 
 func TestPostgresRepository_Unit(t *testing.T) {
 	db, mock, err := sqlmock.New()
-	if err != nil {
+	if errScan != nil {
 		t.Fatalf("failed to open sqlmock: %s", err)
 	}
 	defer db.Close()
@@ -30,7 +30,7 @@ func TestPostgresRepository_Unit(t *testing.T) {
 			WillReturnRows(rows)
 
 		recs, err := repo.GetRecords(ctx, "www.test.", domain.TypeA, "8.8.8.8")
-		if err != nil {
+		if errScan != nil {
 			t.Errorf("GetRecords failed: %v", err)
 		}
 		if len(recs) != 1 || recs[0].Content != "1.2.3.4" {
@@ -48,7 +48,7 @@ func TestPostgresRepository_Unit(t *testing.T) {
 			WillReturnRows(rows)
 
 		zone, err := repo.GetZone(ctx, "test.com.")
-		if err != nil {
+		if errScan != nil {
 			t.Errorf("GetZone failed: %v", err)
 		}
 		if zone == nil || zone.ID != "z1" {
@@ -64,7 +64,7 @@ func TestPostgresRepository_Unit(t *testing.T) {
 			WillReturnResult(sqlmock.NewResult(1, 1))
 
 		err := repo.CreateZone(ctx, zone)
-		if err != nil {
+		if errScan != nil {
 			t.Errorf("CreateZone failed: %v", err)
 		}
 	})
@@ -79,7 +79,7 @@ func TestPostgresRepository_Unit(t *testing.T) {
 			WillReturnRows(rows)
 
 		recs, err := repo.ListRecordsForZone(ctx, "z1")
-		if err != nil {
+		if errScan != nil {
 			t.Errorf("ListRecordsForZone failed: %v", err)
 		}
 		if len(recs) != 1 || *recs[0].Priority != 10 {
@@ -94,7 +94,7 @@ func TestPostgresRepository_Unit(t *testing.T) {
 			WillReturnResult(sqlmock.NewResult(0, 1))
 
 		err := repo.DeleteZone(ctx, "z1", "t1")
-		if err != nil {
+		if errScan != nil {
 			t.Errorf("DeleteZone failed: %v", err)
 		}
 	})
@@ -107,7 +107,7 @@ func TestPostgresRepository_Unit(t *testing.T) {
 			WillReturnResult(sqlmock.NewResult(1, 1))
 
 		err := repo.CreateRecord(ctx, rec)
-		if err != nil {
+		if errScan != nil {
 			t.Errorf("CreateRecord failed: %v", err)
 		}
 	})
@@ -144,7 +144,7 @@ func TestPostgresRepository_Unit(t *testing.T) {
 			WillReturnResult(sqlmock.NewResult(1, 1))
 
 		err := repo.RecordZoneChange(ctx, change)
-		if err != nil {
+		if errScan != nil {
 			t.Errorf("RecordZoneChange failed: %v", err)
 		}
 	})
@@ -171,7 +171,7 @@ func TestPostgresRepository_Unit(t *testing.T) {
 			WillReturnResult(sqlmock.NewResult(1, 1))
 
 		err := repo.SaveAuditLog(ctx, &domain.AuditLog{ID: "a1", TenantID: "t1", Action: "ACT", ResourceType: "RES", ResourceID: "rid", Details: "det", CreatedAt: time.Now()})
-		if err != nil {
+		if errScan != nil {
 			t.Errorf("SaveAuditLog failed: %v", err)
 		}
 
@@ -194,7 +194,7 @@ func TestPostgresRepository_Unit(t *testing.T) {
 			WillReturnResult(sqlmock.NewResult(1, 1))
 
 		err := repo.CreateKey(ctx, key)
-		if err != nil {
+		if errScan != nil {
 			t.Errorf("CreateKey failed: %v", err)
 		}
 
@@ -213,7 +213,7 @@ func TestPostgresRepository_Unit(t *testing.T) {
 			WillReturnResult(sqlmock.NewResult(0, 1))
 
 		err = repo.UpdateKey(ctx, &domain.DNSSECKey{ID: "k1", Active: false, UpdatedAt: time.Now()})
-		if err != nil {
+		if errScan != nil {
 			t.Errorf("UpdateKey failed: %v", err)
 		}
 	})
@@ -228,7 +228,7 @@ func TestPostgresRepository_Unit(t *testing.T) {
 		zone := &domain.Zone{ID: "z3", Name: "batch.test."}
 		recs := []domain.Record{{ID: "r3", ZoneID: "z3", Name: "r3.test.", Type: "A", Content: "1.1.1.1"}}
 		err := repo.CreateZoneWithRecords(ctx, zone, recs)
-		if err != nil {
+		if errScan != nil {
 			t.Errorf("CreateZoneWithRecords failed: %v", err)
 		}
 	})

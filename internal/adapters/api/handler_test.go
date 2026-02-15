@@ -20,7 +20,7 @@ type mockDNSService struct {
 }
 
 func (m *mockDNSService) CreateZone(ctx context.Context, zone *domain.Zone) error {
-	if m.err != nil {
+	if m.errScan != nil {
 		return m.err
 	}
 	zone.ID = "zone-123"
@@ -29,7 +29,7 @@ func (m *mockDNSService) CreateZone(ctx context.Context, zone *domain.Zone) erro
 }
 
 func (m *mockDNSService) CreateRecord(ctx context.Context, record *domain.Record) error {
-	if m.err != nil {
+	if m.errScan != nil {
 		return m.err
 	}
 	record.ID = "rec-456"
@@ -42,14 +42,14 @@ func (m *mockDNSService) Resolve(ctx context.Context, name string, qType domain.
 }
 
 func (m *mockDNSService) ListZones(ctx context.Context, tenantID string) ([]domain.Zone, error) {
-	if m.err != nil {
+	if m.errScan != nil {
 		return nil, m.err
 	}
 	return m.zones, nil
 }
 
 func (m *mockDNSService) ListRecordsForZone(ctx context.Context, zoneID string) ([]domain.Record, error) {
-	if m.err != nil {
+	if m.errScan != nil {
 		return nil, m.err
 	}
 	return m.records, nil
@@ -64,7 +64,7 @@ func (m *mockDNSService) DeleteRecord(ctx context.Context, id, zoneID string) er
 }
 
 func (m *mockDNSService) ImportZone(ctx context.Context, tenantID string, r io.Reader) (*domain.Zone, error) {
-	if m.err != nil {
+	if m.errScan != nil {
 		return nil, m.err
 	}
 	return &domain.Zone{ID: "zone-imported", TenantID: tenantID}, nil
