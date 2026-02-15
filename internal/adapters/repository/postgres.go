@@ -74,8 +74,8 @@ func (r *PostgresRepository) GetIPsForName(ctx context.Context, name string, cli
 	var ips []string
 	for rows.Next() {
 		var ip string
-		if err := rows.Scan(&ip); err != nil {
-			return nil, err
+		if errScan := rows.Scan(&ip); errScan != nil {
+			return nil, errScan
 		}
 		ips = append(ips, ip)
 	}
