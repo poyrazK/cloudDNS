@@ -149,17 +149,23 @@ func (b *BytePacketBuffer) ReadName() (string, error) {
 		if lenByte == 0 {
 			pos++
 			if !jumped {
-				if err := b.Seek(pos); err != nil { return "", err }
+				if err := b.Seek(pos); err != nil {
+					return "", err
+				}
 			}
 			res := out.String()
-			if res == "" { return ".", nil }
+			if res == "" {
+				return ".", nil
+			}
 			return res, nil
 		}
 
 		// Compression pointer (11xxxxxx)
 		if (lenByte & 0xC0) == 0xC0 {
 			if !jumped {
-				if err := b.Seek(pos + 2); err != nil { return "", err }
+				if err := b.Seek(pos + 2); err != nil {
+					return "", err
+				}
 			}
 			b2, err := b.Get(pos + 1)
 			if err != nil {
@@ -175,7 +181,7 @@ func (b *BytePacketBuffer) ReadName() (string, error) {
 		// Normal label
 		pos++
 		lenInt := int(lenByte)
-		
+
 		if pos+lenInt > MaxPacketSize {
 			return "", errors.New("out of bounds")
 		}

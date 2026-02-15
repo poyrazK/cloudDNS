@@ -273,12 +273,14 @@ func (s *Server) handleTCPConnection(conn net.Conn) {
 		}
 		packet.PutBuffer(reqBuffer)
 
-		s.handlePacket(data, conn.RemoteAddr(), func(resp []byte) error {
+		if err := s.handlePacket(data, conn.RemoteAddr(), func(resp []byte) error {
 			resLen := uint16(len(resp))
 			fullResp := append([]byte{byte(resLen >> 8), byte(resLen & 0xFF)}, resp...)
 			_, err := conn.Write(fullResp)
 			return err
-		})
+		}); err != nil {
+			s.Logger.Error("Failed to handle TCP packet", "error", err)
+		}
 	}
 }
 
@@ -347,7 +349,11 @@ func (s *Server) handleAXFR(conn net.Conn, request *packet.DNSPacket) {
 
 		resBuffer := packet.GetBuffer()
 		resBuffer.HasNames = true
-		response.Write(resBuffer)
+		if err := response.Write(resBuffer); err != nil {
+			s.Logger.Error("AXFR failed to write response", "error", err)
+			packet.PutBuffer(resBuffer)
+			continue
+		}
 		resData := resBuffer.Buf[:resBuffer.Position()]
 
 		resLen := uint16(len(resData))
