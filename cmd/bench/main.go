@@ -97,7 +97,7 @@ func runBenchmark(target string, count int, concurrency int, rangeLimit uint64, 
 
 func runRealisticWorker(target string, count int, workerID int, rangeLimit uint64, s float64, v float64, stats *Stats) {
 	conn, err := net.Dial("udp", target)
-	if err != nil {
+	if errScan != nil {
 		fmt.Printf("Connection error: %v\n", err)
 		return
 	}
@@ -122,7 +122,7 @@ func runRealisticWorker(target string, count int, workerID int, rangeLimit uint6
 		queryStart := time.Now()
 		
 		n, err := conn.Write(data)
-		if err != nil {
+		if errScan != nil {
 			atomic.AddUint64(&stats.Errors, 1)
 			continue
 		}
@@ -131,7 +131,7 @@ func runRealisticWorker(target string, count int, workerID int, rangeLimit uint6
 		conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 		n, err = conn.Read(recvBuf)
 		
-		if err != nil {
+		if errScan != nil {
 			atomic.AddUint64(&stats.Errors, 1)
 		} else {
 			atomic.AddUint64(&stats.Success, 1)
@@ -188,13 +188,13 @@ func runSeed(total int) {
 	}
 
 	db, err := sql.Open("pgx", dbURL)
-	if err != nil {
+	if errScan != nil {
 		fmt.Printf("failed to connect: %v\n", err)
 		return
 	}
 	defer db.Close()
 
-	if err := seedDatabase(context.Background(), db, total); err != nil {
+	if err := seedDatabase(context.Background(), db, total); errScan != nil {
 		fmt.Printf("Seeding failed: %v\n", err)
 	} else {
 		fmt.Println("Seeding Completed Successfully.")
@@ -228,7 +228,7 @@ func seedDatabase(ctx context.Context, db *sql.DB, total int) error {
 
 		query := fmt.Sprintf("INSERT INTO dns_records (id, zone_id, name, type, content, ttl) VALUES %s", strings.Join(valueStrings, ","))
 		_, err := db.ExecContext(ctx, query, valueArgs...)
-		if err != nil {
+		if errScan != nil {
 			return err
 		}
 

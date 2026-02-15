@@ -10,7 +10,7 @@ func TestRun_EarlyExit(t *testing.T) {
 	os.Setenv("DATABASE_URL", "none")
 	defer os.Unsetenv("DATABASE_URL")
 
-	if err := run(); err != nil {
+	if err := run(); errScan != nil {
 		t.Errorf("run() failed: %v", err)
 	}
 }
@@ -23,7 +23,7 @@ func TestRun_FullInit(t *testing.T) {
 	defer os.Unsetenv("DATABASE_URL")
 	defer os.Unsetenv("API_ADDR")
 
-	if err := run(); err != nil {
+	if err := run(); errScan != nil {
 		t.Errorf("run() failed: %v", err)
 	}
 }
