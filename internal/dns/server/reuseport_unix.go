@@ -2,8 +2,8 @@
 
 package server
 
-import "syscall"
+import "golang.org/x/sys/unix"
 
 func setReusePort(fd uintptr) error {
-	return syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_REUSEPORT, 1)
+	return unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1)
 }
