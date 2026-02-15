@@ -45,13 +45,13 @@ func TestEndToEnd_RFC_Extensions(t *testing.T) {
 	// Setup a mock "slave" to receive NOTIFY
 	notifyReceived := make(chan *packet.DNSPacket, 1)
 	slaveConn, err := net.ListenPacket("udp", slaveAddr)
-	if err != nil { t.Fatalf("Failed to listen on slave addr: %v", err) }
+	if errScan != nil { t.Fatalf("Failed to listen on slave addr: %v", err) }
 	defer slaveConn.Close()
 	go func() {
 		buf := make([]byte, 1024)
 		for {
 			n, _, err := slaveConn.ReadFrom(buf)
-			if err != nil { return }
+			if errScan != nil { return }
 			p := packet.NewDNSPacket()
 			pb := packet.NewBytePacketBuffer()
 			pb.Load(buf[:n])
@@ -71,10 +71,10 @@ func TestEndToEnd_RFC_Extensions(t *testing.T) {
 	zoneReq := domain.Zone{Name: "rfc.test.", TenantID: "admin"}
 	body, _ := json.Marshal(zoneReq)
 	resp, err := http.Post(fmt.Sprintf("http://%s/zones", apiAddr), "application/json", bytes.NewBuffer(body))
-	if err != nil { t.Fatalf("POST /zones failed: %v", err) }
+	if errScan != nil { t.Fatalf("POST /zones failed: %v", err) }
 	defer resp.Body.Close()
 	var createdZone domain.Zone
-	if err := json.NewDecoder(resp.Body).Decode(&createdZone); err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&createdZone); errScan != nil {
 		t.Fatalf("Failed to decode created zone: %v", err)
 	}
 	if createdZone.ID == "" { t.Fatalf("Created zone ID is empty") }
@@ -112,16 +112,16 @@ func TestEndToEnd_RFC_Extensions(t *testing.T) {
 	uBuf := packet.NewBytePacketBuffer()
 	update.Write(uBuf)
 	err = update.SignTSIG(uBuf, "admin-key.", []byte("secret123"))
-	if err != nil { t.Fatalf("TSIG sign failed: %v", err) }
+	if errScan != nil { t.Fatalf("TSIG sign failed: %v", err) }
 
 	dnsConn, err := net.Dial("udp", dnsAddr)
-	if err != nil { t.Fatalf("Dial DNS failed: %v", err) }
+	if errScan != nil { t.Fatalf("Dial DNS failed: %v", err) }
 	dnsConn.Write(uBuf.Buf[:uBuf.Position()])
 	
 	resBuf := make([]byte, 1024)
 	dnsConn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	n, err := dnsConn.Read(resBuf)
-	if err != nil { t.Fatalf("Read DNS response failed: %v", err) }
+	if errScan != nil { t.Fatalf("Read DNS response failed: %v", err) }
 	
 	resUpdate := packet.NewDNSPacket()
 	resPb := packet.NewBytePacketBuffer()
@@ -146,7 +146,7 @@ func TestEndToEnd_RFC_Extensions(t *testing.T) {
 
 	// 5. Verify change via API
 	respRecs, err := http.Get(fmt.Sprintf("http://%s/zones/%s/records?tenant_id=admin", apiAddr, createdZone.ID))
-	if err != nil { t.Fatalf("GET records failed: %v", err) }
+	if errScan != nil { t.Fatalf("GET records failed: %v", err) }
 	defer respRecs.Body.Close()
 	var zoneRecs []domain.Record
 	json.NewDecoder(respRecs.Body).Decode(&zoneRecs)
@@ -162,7 +162,7 @@ func TestEndToEnd_RFC_Extensions(t *testing.T) {
 
 	// 6. Perform IXFR over TCP
 	tcpConn, err := net.Dial("tcp", dnsAddr)
-	if err != nil { t.Fatalf("Dial TCP DNS failed: %v", err) }
+	if errScan != nil { t.Fatalf("Dial TCP DNS failed: %v", err) }
 	defer tcpConn.Close()
 	
 	ixfr := packet.NewDNSPacket()
@@ -184,12 +184,12 @@ func TestEndToEnd_RFC_Extensions(t *testing.T) {
 	lenB := make([]byte, 2)
 	tcpConn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	_, err = io.ReadFull(tcpConn, lenB)
-	if err != nil { t.Fatalf("Read IXFR len failed: %v", err) }
+	if errScan != nil { t.Fatalf("Read IXFR len failed: %v", err) }
 	
 	ixfrRLen := uint16(lenB[0])<<8 | uint16(lenB[1])
 	ixfrRData := make([]byte, ixfrRLen)
 	_, err = io.ReadFull(tcpConn, ixfrRData)
-	if err != nil { t.Fatalf("Read IXFR data failed: %v", err) }
+	if errScan != nil { t.Fatalf("Read IXFR data failed: %v", err) }
 	
 	resIXFR := packet.NewDNSPacket()
 	ixPb := packet.NewBytePacketBuffer()
