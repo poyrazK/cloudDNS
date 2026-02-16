@@ -42,7 +42,7 @@ func (r *recursiveResolver) getShuffledRoots() []string {
 	return shuffled
 }
 
-func (s *Server) resolveRecursive(name string, qtype packet.QueryType) (*packet.DNSPacket, error) {
+func (s *Server) resolveRecursive(name string) (*packet.DNSPacket, error) {
 	// Start with a random root server for load balancing and resilience.
 	resolver := newRecursiveResolver()
 	roots := resolver.getShuffledRoots()
@@ -59,7 +59,7 @@ func (s *Server) resolveRecursive(name string, qtype packet.QueryType) (*packet.
 
 			// Query the current authoritative name server
 			serverAddr := net.JoinHostPort(ns, "53")
-			resp, err := s.queryFn(serverAddr, name, qtype)
+			resp, err := s.queryFn(serverAddr, name, packet.A)
 			if err != nil {
 				// Record the error and break the inner loop to try the next root server
 				lastErr = err
@@ -88,7 +88,7 @@ func (s *Server) resolveRecursive(name string, qtype packet.QueryType) (*packet.
 		}
 	}
 
-	return nil, fmt.Errorf("recursion failed after trying all roots: %v", lastErr)
+	return nil, fmt.Errorf("recursion failed after trying all roots: %w", lastErr)
 }
 
 func (s *Server) sendQuery(server string, name string, qtype packet.QueryType) (*packet.DNSPacket, error) {
@@ -102,7 +102,7 @@ func (s *Server) sendQuery(server string, name string, qtype packet.QueryType) (
 	req.Header.ID = 1234
 	req.Header.Questions = 1
 	req.Header.RecursionDesired = false // Iterative
-	req.Questions = append(req.Questions, *packet.NewDNSQuestion(name, qtype))
+	req.Questions = append(req.Questions, *packet.NewDNSQuestion(name, packet.A))
 
 	buffer := packet.NewBytePacketBuffer()
 	if err := req.Write(buffer); err != nil {

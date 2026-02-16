@@ -59,7 +59,7 @@ func TestEndToEnd_Protocols(t *testing.T) {
 
 	rec := domain.Record{Name: "www.protocols.test.", Type: domain.TypeA, Content: "1.2.3.4", TTL: 60, ZoneID: createdZone.ID}
 	br, _ := json.Marshal(rec)
-	_, _ = http.Post(fmt.Sprintf("http://%s/zones/%s/records", apiAddr, createdZone.ID), "application/json", bytes.NewBuffer(br))
+	if resp, err := http.Post(fmt.Sprintf("http://%s/zones/%s/records", apiAddr, createdZone.ID), "application/json", bytes.NewBuffer(br)); err == nil { _ = resp.Body.Close() }
 
 	// 3. Test UDP
 	conn, err := net.Dial("udp", dnsAddr)

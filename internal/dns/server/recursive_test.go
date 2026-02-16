@@ -42,7 +42,7 @@ func TestResolveRecursive(t *testing.T) {
 		return resp, nil
 	}
 
-	resp, err := s.resolveRecursive("test.com.", packet.A)
+	resp, err := s.resolveRecursive("test.com.")
 	if err != nil {
 		t.Fatalf("Recursive resolve failed: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestResolveRecursive_NXDOMAIN(t *testing.T) {
 		return resp, nil
 	}
 
-	resp, err := s.resolveRecursive("nonexistent.io.", packet.A)
+	resp, err := s.resolveRecursive("nonexistent.io.")
 	if err != nil {
 		t.Fatalf("Expected no error for NXDOMAIN, got %v", err)
 	}
@@ -84,7 +84,7 @@ func TestRecursive_NoNextNS(t *testing.T) {
 		return resp, nil
 	}
 
-	resp, err := s.resolveRecursive("deadend.test.", packet.A)
+	resp, err := s.resolveRecursive("deadend.test.")
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -102,7 +102,7 @@ func TestSendQuery(t *testing.T) {
 	if err != nil { t.Fatalf("ListenUDP failed: %v", err) }
 	
 	go func() {
-		defer conn.Close()
+		defer func() { _ = conn.Close() }() 
 		buf := make([]byte, 512)
 		n, remote, err := conn.ReadFromUDP(buf)
 		if err != nil { return }

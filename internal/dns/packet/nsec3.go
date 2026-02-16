@@ -15,7 +15,7 @@ func HashName(name string, alg uint8, iterations uint16, salt []byte) []byte {
 
 	// Manual wire format conversion for hashing (simplified)
 	labels := strings.Split(strings.TrimSuffix(name, "."), ".")
-	var wire []byte
+	wire := make([]byte, 0, 1024)
 	for _, l := range labels {
 		wire = append(wire, byte(len(l)))
 		wire = append(wire, []byte(l)...)

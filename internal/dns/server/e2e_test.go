@@ -59,7 +59,7 @@ func TestEndToEndDNS_Advanced(t *testing.T) {
 	}
 	for _, r := range records {
 		b, _ := json.Marshal(r)
-		_, _ = http.Post(fmt.Sprintf("http://%s/zones/%s/records", apiAddr, createdZone.ID), "application/json", bytes.NewBuffer(b))
+		if resp, err := http.Post(fmt.Sprintf("http://%s/zones/%s/records", apiAddr, createdZone.ID), "application/json", bytes.NewBuffer(b)); err == nil { _ = resp.Body.Close() }
 	}
 
 	// 3. Test Wildcard Resolution

@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -134,7 +135,7 @@ func (r *PostgresRepository) CreateZoneWithRecords(ctx context.Context, zone *do
 		return err
 	}
 	defer func() {
-		if err := tx.Rollback(); err != nil && err != sql.ErrTxDone {
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
 			log.Printf("failed to rollback transaction: %v", err)
 		}
 	}()

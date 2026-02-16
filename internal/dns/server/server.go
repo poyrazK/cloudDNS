@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"errors"
 	crand "crypto/rand"
 	"crypto/tls"
 	"encoding/base64"
@@ -765,7 +766,8 @@ func (s *Server) handleUpdate(request *packet.DNSPacket, rawData []byte, clientI
 	for _, pr := range request.Answers {
 		if errPrereq := s.checkPrerequisite(ctx, dbZone, pr); errPrereq != nil {
 			s.Logger.Warn("update failed: prerequisite mismatch", "pr", pr.Name, "error", errPrereq)
-			if uErr, ok := errPrereq.(updateError); ok {
+			var uErr updateError
+			if errors.As(errPrereq, &uErr) {
 				response.Header.ResCode = uint8(uErr.rcode) // #nosec G115
 			} else {
 				response.Header.ResCode = packet.RCODE_SERVFAIL
@@ -989,7 +991,7 @@ func (s *Server) groupRecords(records []packet.DNSRecord) [][]packet.DNSRecord {
 		groups[key] = append(groups[key], r)
 	}
 
-	var res [][]packet.DNSRecord
+	res := make([][]packet.DNSRecord, 0, len(keys))
 	for _, k := range keys {
 		res = append(res, groups[k])
 	}
@@ -1390,7 +1392,8 @@ func (s *Server) generateTypeBitMap(types []domain.RecordType) []byte {
 		}
 	}
 
-	res := []byte{0, byte(maxType + 1)}
+	res := make([]byte, 0, 2 + (maxType + 1))
+	res = append(res, 0, byte(maxType + 1))
 	res = append(res, bits[:maxType+1]...)
 	return res
 }
