@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/google/uuid"
