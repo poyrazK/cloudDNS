@@ -304,7 +304,7 @@ func (s *Server) handleTCPConnection(conn net.Conn) {
 		packet.PutBuffer(reqBuffer)
 
 		if err := s.handlePacket(data, conn.RemoteAddr(), func(resp []byte) error {
-			resLen := uint16(len(resp))
+			resLen := uint16(len(resp)) // #nosec G115
 			fullResp := append([]byte{byte(resLen >> 8), byte(resLen & 0xFF)}, resp...)
 			_, err := conn.Write(fullResp)
 			return err
@@ -386,7 +386,7 @@ func (s *Server) handleAXFR(conn net.Conn, request *packet.DNSPacket) {
 		}
 		resData := resBuffer.Buf[:resBuffer.Position()]
 
-		resLen := uint16(len(resData))
+		resLen := uint16(len(resData)) // #nosec G115
 		fullResp := append([]byte{byte(resLen >> 8), byte(resLen & 0xFF)}, resData...)
 		if _, errW := conn.Write(fullResp); errW != nil {
 			s.Logger.Error("AXFR connection broken", "error", errW)
@@ -407,7 +407,7 @@ func (s *Server) sendTCPError(conn net.Conn, id uint16, rcode uint8) {
 	resBuffer := packet.GetBuffer()
 	_ = response.Write(resBuffer)
 	resData := resBuffer.Buf[:resBuffer.Position()]
-	resLen := uint16(len(resData))
+	resLen := uint16(len(resData)) // #nosec G115
 	fullResp := append([]byte{byte(resLen >> 8), byte(resLen & 0xFF)}, resData...)
 	_, _ = conn.Write(fullResp)
 	packet.PutBuffer(resBuffer)
@@ -1007,7 +1007,7 @@ func (s *Server) sendSingleRecordResponse(conn net.Conn, id uint16, q packet.DNS
 	resBuffer := packet.GetBuffer()
 	_ = resp.Write(resBuffer)
 	resData := resBuffer.Buf[:resBuffer.Position()]
-	resLen := uint16(len(resData))
+	resLen := uint16(len(resData)) // #nosec G115
 	fullResp := append([]byte{byte(resLen >> 8), byte(resLen & 0xFF)}, resData...)
 	_, _ = conn.Write(fullResp)
 	packet.PutBuffer(resBuffer)
@@ -1024,7 +1024,7 @@ func (s *Server) sendIXFRDiff(conn net.Conn, id uint16, q packet.DNSQuestion, so
 	resBuffer := packet.GetBuffer()
 	_ = resp.Write(resBuffer)
 	resData := resBuffer.Buf[:resBuffer.Position()]
-	resLen := uint16(len(resData))
+	resLen := uint16(len(resData)) // #nosec G115
 	_, _ = conn.Write(append([]byte{byte(resLen >> 8), byte(resLen & 0xFF)}, resData...))
 	packet.PutBuffer(resBuffer)
 
