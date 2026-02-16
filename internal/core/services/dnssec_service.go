@@ -167,7 +167,11 @@ func (s *DNSSECService) SignRRSet(ctx context.Context, zoneName string, zoneID s
 		keyTag := tempKeyRec.ComputeKeyTag()
 
 		// Calculate inception and expiration (valid for 30 days)
-		now := uint32(time.Now().Unix())
+		unixNow := time.Now().Unix()
+		now := uint32(0)
+		if unixNow >= 0 && unixNow <= math.MaxUint32 {
+			now = uint32(unixNow) // #nosec G115
+		}
 		expiration := now + (30 * 24 * 60 * 60)
 
 		sig, err := packet.SignRRSet(records, priv, zoneName, keyTag, now, expiration)
