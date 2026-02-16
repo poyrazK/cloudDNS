@@ -97,11 +97,15 @@ func runBenchmark(target string, count int, concurrency int, rangeLimit uint64, 
 
 func runRealisticWorker(target string, count int, workerID int, rangeLimit uint64, s float64, v float64, stats *Stats) {
 	conn, err := net.Dial("udp", target)
-	if errScan != nil {
+	if err != nil {
 		fmt.Printf("Connection error: %v\n", err)
 		return
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			fmt.Printf("Warning: failed to close connection: %v\n", err)
+		}
+	}()
 
 	recvBuf := make([]byte, 1024)
 	r := rand.New(rand.NewSource(time.Now().UnixNano() + int64(workerID)))
@@ -116,22 +120,27 @@ func runRealisticWorker(target string, count int, workerID int, rangeLimit uint6
 		p.Questions = append(p.Questions, packet.DNSQuestion{Name: currentDomain, QType: packet.A})
 
 		buf := packet.NewBytePacketBuffer()
-		p.Write(buf)
+		if err := p.Write(buf); err != nil {
+			atomic.AddUint64(&stats.Errors, 1)
+			continue
+		}
 		data := buf.Buf[:buf.Position()]
 
 		queryStart := time.Now()
 		
 		n, err := conn.Write(data)
-		if errScan != nil {
+		if err != nil {
 			atomic.AddUint64(&stats.Errors, 1)
 			continue
 		}
 		atomic.AddUint64(&stats.BytesSent, uint64(n))
 
-		conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+			fmt.Printf("Warning: failed to set read deadline: %v\n", err)
+		}
 		n, err = conn.Read(recvBuf)
 		
-		if errScan != nil {
+		if err != nil {
 			atomic.AddUint64(&stats.Errors, 1)
 		} else {
 			atomic.AddUint64(&stats.Success, 1)
@@ -188,13 +197,13 @@ func runSeed(total int) {
 	}
 
 	db, err := sql.Open("pgx", dbURL)
-	if errScan != nil {
+	if err != nil {
 		fmt.Printf("failed to connect: %v\n", err)
 		return
 	}
-	defer db.Close()
+	_ = db.Close()
 
-	if err := seedDatabase(context.Background(), db, total); errScan != nil {
+	if err := seedDatabase(context.Background(), db, total); err != nil {
 		fmt.Printf("Seeding failed: %v\n", err)
 	} else {
 		fmt.Println("Seeding Completed Successfully.")
@@ -206,7 +215,7 @@ func seedDatabase(ctx context.Context, db *sql.DB, total int) error {
 	
 	fmt.Println("Preparing record environment...")
 	
-	db.ExecContext(ctx, "INSERT INTO dns_zones (id, tenant_id, name) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING", zoneID, "bench", "root")
+	_, _ = db.ExecContext(ctx, "INSERT INTO dns_zones (id, tenant_id, name) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING", zoneID, "bench", "root")
 
 	batchSize := 5000 
 	fmt.Printf("Seeding %d Realistic Records...\n", total)
@@ -228,7 +237,7 @@ func seedDatabase(ctx context.Context, db *sql.DB, total int) error {
 
 		query := fmt.Sprintf("INSERT INTO dns_records (id, zone_id, name, type, content, ttl) VALUES %s", strings.Join(valueStrings, ","))
 		_, err := db.ExecContext(ctx, query, valueArgs...)
-		if errScan != nil {
+		if err != nil {
 			return err
 		}
 
@@ -252,7 +261,7 @@ func runScaleTest(count int, concurrency int) {
 		},
 		Started: true,
 	})
-	defer pgContainer.Terminate(ctx)
+	_ = pgContainer.Terminate(ctx)
 
 	redisContainer, _ := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: testcontainers.ContainerRequest{
@@ -261,7 +270,7 @@ func runScaleTest(count int, concurrency int) {
 		},
 		Started: true,
 	})
-	defer redisContainer.Terminate(ctx)
+	_ = redisContainer.Terminate(ctx)
 
 	pgHost, _ := pgContainer.Host(ctx)
 	pgPort, _ := pgContainer.MappedPort(ctx, "5432")
@@ -271,10 +280,10 @@ func runScaleTest(count int, concurrency int) {
 	// 2. Heavy Seeding
 	db, _ := sql.Open("pgx", fmt.Sprintf("postgres://postgres:password@%s:%s/clouddns?sslmode=disable", pgHost, pgPort.Port()))
 	schema, _ := os.ReadFile("internal/adapters/repository/schema.sql")
-	db.ExecContext(ctx, string(schema))
+	_, _ = db.ExecContext(ctx, string(schema))
 
 	zoneID := uuid.New()
-	db.ExecContext(ctx, "INSERT INTO dns_zones (id, tenant_id, name) VALUES ($1, $2, $3)", zoneID, "bench", "root")
+	_, _ = db.ExecContext(ctx, "INSERT INTO dns_zones (id, tenant_id, name) VALUES ($1, $2, $3)", zoneID, "bench", "root")
 	
 	totalRecords := 1000000
 	batchSize := 10000
@@ -289,7 +298,7 @@ func runScaleTest(count int, concurrency int) {
 			args = append(args, uuid.New(), zoneID, name, "A", "1.2.3.4", 3600)
 		}
 		query := fmt.Sprintf("INSERT INTO dns_records (id, zone_id, name, type, content, ttl) VALUES %s", strings.Join(vals, ","))
-		db.ExecContext(ctx, query, args...)
+		_, _ = db.ExecContext(ctx, query, args...)
 	}
 
 	// 3. Server
@@ -298,7 +307,7 @@ func runScaleTest(count int, concurrency int) {
 	repo := repository.NewPostgresRepository(db)
 	srv := server.NewServer(addr, repo, logger)
 	srv.Redis = server.NewRedisCache(fmt.Sprintf("%s:%s", redisHost, redisPort.Port()), "", 0)
-	go srv.Run()
+	_ = srv.Run()
 
 	time.Sleep(1 * time.Second)
 
@@ -326,7 +335,7 @@ func runAndCaptureScale(addr string, n int, c int, rangeLimit int, phase string)
 	cmd := exec.Command("go", args...)
 	var out bytes.Buffer
 	cmd.Stdout = &out
-	cmd.Run()
+	_ = cmd.Run()
 	output := out.String()
 	return Result{
 		Throughput: extractRegex(output, `Throughput:\s+([0-9.]+)`),
