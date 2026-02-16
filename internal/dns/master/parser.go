@@ -107,7 +107,7 @@ func (p *MasterParser) Parse(r io.Reader) (*ZoneData, error) {
 			lastName = name
 		}
 
-		var ttl int = p.DefaultTTL
+		var ttl = p.DefaultTTL
 		var qType domain.RecordType
 		var dataParts []string
 
