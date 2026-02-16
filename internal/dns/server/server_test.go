@@ -251,7 +251,7 @@ func TestHandlePacketLocalHit(t *testing.T) {
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "local.test.", QType: packet.A})
 	
 	buffer := packet.NewBytePacketBuffer()
-	req.Write(buffer)
+	_ = req.Write(buffer)
 	data := buffer.Buf[:buffer.Position()]
 
 	var capturedResp []byte
@@ -260,14 +260,14 @@ func TestHandlePacketLocalHit(t *testing.T) {
 		return nil
 	})
 
-	if errScan != nil {
+	if err != nil {
 		t.Fatalf("HandlePacket failed: %v", err)
 	}
 
 	resBuf := packet.NewBytePacketBuffer()
 	copy(resBuf.Buf, capturedResp)
 	resp := packet.NewDNSPacket()
-	resp.FromBuffer(resBuf)
+	_ = resp.FromBuffer(resBuf)
 
 	if len(resp.Answers) != 1 {
 		t.Fatalf("Expected 1 answer, got %d", len(resp.Answers))
@@ -298,7 +298,7 @@ func TestHandlePacketCacheHit(t *testing.T) {
 	req.Header.ID = 999
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "cached.test.", QType: packet.A})
 	reqBuf := packet.NewBytePacketBuffer()
-	req.Write(reqBuf)
+	_ = req.Write(reqBuf)
 
 	var capturedResp []byte
 	srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
@@ -309,7 +309,7 @@ func TestHandlePacketCacheHit(t *testing.T) {
 	resBuf := packet.NewBytePacketBuffer()
 	copy(resBuf.Buf, capturedResp)
 	resp := packet.NewDNSPacket()
-	resp.FromBuffer(resBuf)
+	_ = resp.FromBuffer(resBuf)
 
 	if resp.Header.ID != 999 {
 		t.Errorf("Expected ID 999 (mapped from request), got %d", resp.Header.ID)
@@ -342,7 +342,7 @@ func TestWorkerPoolProcessing(t *testing.T) {
 	req := packet.NewDNSPacket()
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "worker.test.", QType: packet.A})
 	reqBuf := packet.NewBytePacketBuffer()
-	req.Write(reqBuf)
+	_ = req.Write(reqBuf)
 
 	dummy := &dummyPacketConn{}
 	
@@ -369,7 +369,7 @@ func TestHandlePacketNXDOMAIN(t *testing.T) {
 	req := packet.NewDNSPacket()
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "missing.test.", QType: packet.A})
 	reqBuf := packet.NewBytePacketBuffer()
-	req.Write(reqBuf)
+	_ = req.Write(reqBuf)
 
 	var capturedResp []byte
 	srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
@@ -393,7 +393,7 @@ func TestHandlePacketNoQuestions(t *testing.T) {
 
 	req := packet.NewDNSPacket()
 	reqBuf := packet.NewBytePacketBuffer()
-	req.Write(reqBuf)
+	_ = req.Write(reqBuf)
 
 	var capturedResp []byte
 	srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
@@ -424,13 +424,13 @@ func TestHandlePacketEDNS(t *testing.T) {
 	})
 	
 	reqBuf := packet.NewBytePacketBuffer()
-	req.Write(reqBuf)
+	_ = req.Write(reqBuf)
 
 	err := srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
 		return nil
 	})
 	
-	if errScan != nil {
+	if err != nil {
 		t.Errorf("HandlePacket failed with EDNS: %v", err)
 	}
 }
@@ -453,7 +453,7 @@ func TestHandlePacketTruncation(t *testing.T) {
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "big.test.", QType: packet.A})
 	// No OPT -> limit 512
 	reqBuf := packet.NewBytePacketBuffer()
-	req.Write(reqBuf)
+	_ = req.Write(reqBuf)
 
 	err := srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
 		resPacket := packet.NewDNSPacket()
@@ -469,7 +469,7 @@ func TestHandlePacketTruncation(t *testing.T) {
 		}
 		return nil
 	})
-	if errScan != nil {
+	if err != nil {
 		t.Fatalf("handlePacket failed: %v", err)
 	}
 }
@@ -485,7 +485,7 @@ func TestHandleDoH(t *testing.T) {
 	req := packet.NewDNSPacket()
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "doh.test.", QType: packet.A})
 	reqBuf := packet.NewBytePacketBuffer()
-	req.Write(reqBuf)
+	_ = req.Write(reqBuf)
 
 	w := &mockResponseWriter{}
 	r, _ := http.NewRequest("POST", "/dns-query", bytes.NewReader(reqBuf.Buf[:reqBuf.Position()]))
@@ -514,7 +514,7 @@ func TestSendTCPError(t *testing.T) {
 	p := packet.NewDNSPacket()
 	pBuf := packet.NewBytePacketBuffer()
 	pBuf.Load(conn.captured[0])
-	p.FromBuffer(pBuf)
+	_ = p.FromBuffer(pBuf)
 
 	if p.Header.ResCode != 4 || p.Header.ID != 1234 {
 		t.Errorf("Invalid TCP error response")
