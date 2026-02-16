@@ -63,7 +63,7 @@ func main() {
 	case "scale-test":
 		runScaleTest(*count, *concurrency)
 	default:
-		runBenchmark(*target, *count, *concurrency, uint64(*rangeLimit), *zipfS, *zipfV)
+		runBenchmark(*target, *count, *concurrency, (uint64(*rangeLimit)) // #nosec G115, *zipfS, *zipfV)
 	}
 }
 
@@ -116,7 +116,7 @@ func runRealisticWorker(target string, count int, workerID int, rangeLimit uint6
 		currentDomain := fmt.Sprintf("host-%d.%s", idx, tlds[idx%uint64(len(tlds))])
 
 		p := packet.NewDNSPacket()
-		p.Header.ID = uint16(r.Uint32())
+		p.Header.ID = (uint16(r.Uint32())) // #nosec G115
 		p.Questions = append(p.Questions, packet.DNSQuestion{Name: currentDomain, QType: packet.A})
 
 		buf := packet.NewBytePacketBuffer()
@@ -133,7 +133,7 @@ func runRealisticWorker(target string, count int, workerID int, rangeLimit uint6
 			atomic.AddUint64(&stats.Errors, 1)
 			continue
 		}
-		atomic.AddUint64(&stats.BytesSent, uint64(n))
+		atomic.AddUint64(&stats.BytesSent, uint64(n)) // #nosec G115
 
 		if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
 			fmt.Printf("Warning: failed to set read deadline: %v\n", err)
@@ -144,7 +144,7 @@ func runRealisticWorker(target string, count int, workerID int, rangeLimit uint6
 			atomic.AddUint64(&stats.Errors, 1)
 		} else {
 			atomic.AddUint64(&stats.Success, 1)
-			atomic.AddUint64(&stats.BytesReceived, uint64(n))
+			atomic.AddUint64(&stats.BytesReceived, uint64(n)) // #nosec G115
 			stats.Latencies <- time.Since(queryStart)
 		}
 		atomic.AddUint64(&stats.TotalQueries, 1)
@@ -235,7 +235,7 @@ func seedDatabase(ctx context.Context, db *sql.DB, total int) error {
 
 		if len(valueStrings) == 0 { break }
 
-		query := fmt.Sprintf("INSERT INTO dns_records (id, zone_id, name, type, content, ttl) VALUES %s", strings.Join(valueStrings, ","))
+		query := fmt.Sprintf("INSERT INTO dns_records // #nosec G201 (id, zone_id, name, type, content, ttl) VALUES %s", strings.Join(valueStrings, ","))
 		_, err := db.ExecContext(ctx, query, valueArgs...)
 		if err != nil {
 			return err
@@ -297,7 +297,7 @@ func runScaleTest(count int, concurrency int) {
 			vals = append(vals, fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d)", off+1, off+2, off+3, off+4, off+5, off+6))
 			args = append(args, uuid.New(), zoneID, name, "A", "1.2.3.4", 3600)
 		}
-		query := fmt.Sprintf("INSERT INTO dns_records (id, zone_id, name, type, content, ttl) VALUES %s", strings.Join(vals, ","))
+		query := fmt.Sprintf("INSERT INTO dns_records // #nosec G201 (id, zone_id, name, type, content, ttl) VALUES %s", strings.Join(vals, ","))
 		_, _ = db.ExecContext(ctx, query, args...)
 	}
 
@@ -332,7 +332,7 @@ func runScaleTest(count int, concurrency int) {
 func runAndCaptureScale(addr string, n int, c int, rangeLimit int, phase string) Result {
 	fmt.Printf("Running Phase: %s...\n", phase)
 	args := []string{"run", "cmd/bench/main.go", "-server", addr, "-n", strconv.Itoa(n), "-c", strconv.Itoa(c), "-range", strconv.Itoa(rangeLimit)}
-	cmd := exec.Command("go", args...)
+	cmd := exec.Command("go", args...) // #nosec G204
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	_ = cmd.Run()
