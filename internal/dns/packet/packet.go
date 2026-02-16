@@ -768,10 +768,10 @@ func (p *DNSPacket) FromBuffer(buffer *BytePacketBuffer) error {
 }
 
 func (p *DNSPacket) Write(buffer *BytePacketBuffer) error {
-	p.Header.Questions = uint16(len(p.Questions))
-	p.Header.Answers = uint16(len(p.Answers))
-	p.Header.AuthoritativeEntries = uint16(len(p.Authorities))
-	p.Header.ResourceEntries = uint16(len(p.Resources))
+	p.Header.Questions = uint16(len(p.Questions)) // #nosec G115
+	p.Header.Answers = uint16(len(p.Answers)) // #nosec G115
+	p.Header.AuthoritativeEntries = uint16(len(p.Authorities)) // #nosec G115
+	p.Header.ResourceEntries = uint16(len(p.Resources)) // #nosec G115
 
 	if err := p.Header.Write(buffer); err != nil { return err }
 	for _, q := range p.Questions {

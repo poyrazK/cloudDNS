@@ -108,7 +108,7 @@ func runRealisticWorker(target string, count int, workerID int, rangeLimit uint6
 	}()
 
 	recvBuf := make([]byte, 1024)
-	r := rand.New(rand.NewSource(time.Now().UnixNano() + int64(workerID)))
+	r := rand.New(rand.NewSource(time.Now().UnixNano() + int64(workerID))) // #nosec G404
 	zipf := rand.NewZipf(r, s, v, rangeLimit-1)
 
 	for i := 0; i < count; i++ {
@@ -235,8 +235,9 @@ func seedDatabase(ctx context.Context, db *sql.DB, total int) error {
 
 		if len(valueStrings) == 0 { break }
 
+		// #nosec G201
 		query := fmt.Sprintf("INSERT INTO dns_records (id, zone_id, name, type, content, ttl) VALUES %s", strings.Join(valueStrings, ","))
-		_, err := db.ExecContext(ctx, query, valueArgs...) // #nosec G201
+		_, err := db.ExecContext(ctx, query, valueArgs...)
 		if err != nil {
 			return err
 		}
@@ -297,8 +298,9 @@ func runScaleTest(count int, concurrency int) {
 			vals = append(vals, fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d)", off+1, off+2, off+3, off+4, off+5, off+6))
 			args = append(args, uuid.New(), zoneID, name, "A", "1.2.3.4", 3600)
 		}
+		// #nosec G201
 		query := fmt.Sprintf("INSERT INTO dns_records (id, zone_id, name, type, content, ttl) VALUES %s", strings.Join(vals, ","))
-		_, _ = db.ExecContext(ctx, query, args...) // #nosec G201
+		_, _ = db.ExecContext(ctx, query, args...)
 	}
 
 	// 3. Server

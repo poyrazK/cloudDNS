@@ -766,7 +766,7 @@ func (s *Server) handleUpdate(request *packet.DNSPacket, rawData []byte, clientI
 		if errPrereq := s.checkPrerequisite(ctx, dbZone, pr); errPrereq != nil {
 			s.Logger.Warn("update failed: prerequisite mismatch", "pr", pr.Name, "error", errPrereq)
 			if uErr, ok := errPrereq.(updateError); ok {
-				response.Header.ResCode = uint8(uErr.rcode)
+				response.Header.ResCode = uint8(uErr.rcode) // #nosec G115
 			} else {
 				response.Header.ResCode = packet.RCODE_SERVFAIL
 			}
@@ -1039,7 +1039,7 @@ func (s *Server) sendIXFRDiff(conn net.Conn, id uint16, q packet.DNSQuestion, so
 	resBuffer = packet.GetBuffer()
 	_ = resp.Write(resBuffer)
 	resData = resBuffer.Buf[:resBuffer.Position()]
-	resLen = uint16(len(resData))
+	resLen = uint16(len(resData)) // #nosec G115
 	_, _ = conn.Write(append([]byte{byte(resLen >> 8), byte(resLen & 0xFF)}, resData...))
 	packet.PutBuffer(resBuffer)
 }

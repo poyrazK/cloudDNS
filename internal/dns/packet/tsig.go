@@ -2,7 +2,7 @@ package packet
 
 import (
 	"crypto/hmac"
-	"crypto/md5"
+	"crypto/md5" // #nosec G501
 	"errors"
 	"time"
 )
@@ -42,7 +42,7 @@ func (p *DNSPacket) VerifyTSIG(rawBuffer []byte, tsigStart int, secret []byte) e
 	prefix := make([]byte, tsigStart)
 	copy(prefix, rawBuffer[:tsigStart])
 	if len(prefix) >= 12 {
-		arCount := uint16(len(p.Resources) - 1)
+		arCount := uint16(len(p.Resources) - 1) // #nosec G115
 		prefix[10] = byte(arCount >> 8)
 		prefix[11] = byte(arCount & 0xFF)
 	}
@@ -110,7 +110,7 @@ func (p *DNSPacket) SignTSIG(buffer *BytePacketBuffer, keyName string, secret []
 
 	// 3. Update the packet state before writing to buffer
 	p.Resources = append(p.Resources, tsig)
-	p.Header.ResourceEntries = uint16(len(p.Resources))
+	p.Header.ResourceEntries = uint16(len(p.Resources)) // #nosec G115
 
 	// 4. Update Header's ARCOUNT in the wire format (at offset 10)
 	if len(buffer.Buf) >= 12 {

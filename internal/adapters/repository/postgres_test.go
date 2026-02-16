@@ -43,7 +43,7 @@ func setupTestDB(t *testing.T) (*sql.DB, func()) {
 	}
 
 	schemaPath := filepath.Join(".", "schema.sql")
-	schema, err := os.ReadFile(schemaPath)
+	schema, err := os.ReadFile(schemaPath) // #nosec G304
 	if err != nil {
 		t.Fatalf("failed to read schema: %s", err)
 	}

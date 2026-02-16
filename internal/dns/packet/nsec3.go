@@ -1,7 +1,7 @@
 package packet
 
 import (
-	"crypto/sha1"
+	"crypto/sha1" // #nosec G505
 	"strings"
 )
 
@@ -23,7 +23,7 @@ func HashName(name string, alg uint8, iterations uint16, salt []byte) []byte {
 	wire = append(wire, 0) // Null terminator
 
 	// 2. Initial Hash: H(name | salt)
-	h := sha1.New()
+	h := sha1.New() // #nosec G401
 	h.Write(wire)
 	h.Write(salt)
 	res := h.Sum(nil)
