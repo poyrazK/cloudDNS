@@ -63,7 +63,7 @@ func main() {
 	case "scale-test":
 		runScaleTest(*count, *concurrency)
 	default:
-		runBenchmark(*target, *count, *concurrency, (uint64(*rangeLimit)) // #nosec G115, *zipfS, *zipfV)
+		runBenchmark(*target, *count, *concurrency, uint64(*rangeLimit), *zipfS, *zipfV) // #nosec G115
 	}
 }
 
@@ -116,7 +116,7 @@ func runRealisticWorker(target string, count int, workerID int, rangeLimit uint6
 		currentDomain := fmt.Sprintf("host-%d.%s", idx, tlds[idx%uint64(len(tlds))])
 
 		p := packet.NewDNSPacket()
-		p.Header.ID = (uint16(r.Uint32())) // #nosec G115
+		p.Header.ID = uint16(r.Uint32()) // #nosec G115
 		p.Questions = append(p.Questions, packet.DNSQuestion{Name: currentDomain, QType: packet.A})
 
 		buf := packet.NewBytePacketBuffer()
@@ -235,8 +235,8 @@ func seedDatabase(ctx context.Context, db *sql.DB, total int) error {
 
 		if len(valueStrings) == 0 { break }
 
-		query := fmt.Sprintf("INSERT INTO dns_records // #nosec G201 (id, zone_id, name, type, content, ttl) VALUES %s", strings.Join(valueStrings, ","))
-		_, err := db.ExecContext(ctx, query, valueArgs...)
+		query := fmt.Sprintf("INSERT INTO dns_records (id, zone_id, name, type, content, ttl) VALUES %s", strings.Join(valueStrings, ","))
+		_, err := db.ExecContext(ctx, query, valueArgs...) // #nosec G201
 		if err != nil {
 			return err
 		}
@@ -297,8 +297,8 @@ func runScaleTest(count int, concurrency int) {
 			vals = append(vals, fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d)", off+1, off+2, off+3, off+4, off+5, off+6))
 			args = append(args, uuid.New(), zoneID, name, "A", "1.2.3.4", 3600)
 		}
-		query := fmt.Sprintf("INSERT INTO dns_records // #nosec G201 (id, zone_id, name, type, content, ttl) VALUES %s", strings.Join(vals, ","))
-		_, _ = db.ExecContext(ctx, query, args...)
+		query := fmt.Sprintf("INSERT INTO dns_records (id, zone_id, name, type, content, ttl) VALUES %s", strings.Join(vals, ","))
+		_, _ = db.ExecContext(ctx, query, args...) // #nosec G201
 	}
 
 	// 3. Server
