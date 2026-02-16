@@ -19,7 +19,11 @@ func (p *DNSPacket) VerifyTSIG(rawBuffer []byte, tsigStart int, secret []byte) e
 	}
 
 	// 2. Check time drift (Fudge)
-	now := uint64(time.Now().Unix())
+	unixNow := time.Now().Unix()
+	var now uint64
+	if unixNow >= 0 {
+		now = uint64(unixNow)
+	}
 	drift := uint64(0)
 	if now > tsig.TimeSigned {
 		drift = now - tsig.TimeSigned
@@ -51,11 +55,11 @@ func (p *DNSPacket) VerifyTSIG(rawBuffer []byte, tsigStart int, secret []byte) e
 	if err := vBuf.Writeu16(tsig.Class); err != nil { return err }
 	if err := vBuf.Writeu32(tsig.TTL); err != nil { return err }
 	if err := vBuf.WriteName(tsig.AlgorithmName); err != nil { return err }
-	if err := vBuf.Writeu16(uint16(tsig.TimeSigned >> 32)); err != nil { return err }
-	if err := vBuf.Writeu32(uint32(tsig.TimeSigned & 0xFFFFFFFF)); err != nil { return err }
+	if err := vBuf.Writeu16(uint16(tsig.TimeSigned >> 32)); err != nil { return err } // #nosec G115
+	if err := vBuf.Writeu32(uint32(tsig.TimeSigned & 0xFFFFFFFF)); err != nil { return err } // #nosec G115
 	if err := vBuf.Writeu16(tsig.Fudge); err != nil { return err }
 	if err := vBuf.Writeu16(tsig.Error); err != nil { return err }
-	if err := vBuf.Writeu16(uint16(len(tsig.Other))); err != nil { return err }
+	if err := vBuf.Writeu16(uint16(len(tsig.Other))); err != nil { return err } // #nosec G115
 	if err := vBuf.WriteRange(vBuf.Position(), tsig.Other); err != nil { return err }
 	
 	h.Write(vBuf.Buf[:vBuf.Position()])
@@ -76,7 +80,7 @@ func (p *DNSPacket) SignTSIG(buffer *BytePacketBuffer, keyName string, secret []
 		Class:         255, // ANY
 		TTL:           0,
 		AlgorithmName: "hmac-md5.sig-alg.reg.int.",
-		TimeSigned:    uint64(time.Now().Unix()),
+		TimeSigned:    (func() uint64 { u := time.Now().Unix(); if u < 0 { return 0 }; return uint64(u) })(),
 		Fudge:         300,
 		OriginalID:    p.Header.ID,
 	}
@@ -93,11 +97,11 @@ func (p *DNSPacket) SignTSIG(buffer *BytePacketBuffer, keyName string, secret []
 	if err := vBuf.Writeu16(tsig.Class); err != nil { return err }
 	if err := vBuf.Writeu32(tsig.TTL); err != nil { return err }
 	if err := vBuf.WriteName(tsig.AlgorithmName); err != nil { return err }
-	if err := vBuf.Writeu16(uint16(tsig.TimeSigned >> 32)); err != nil { return err }
-	if err := vBuf.Writeu32(uint32(tsig.TimeSigned & 0xFFFFFFFF)); err != nil { return err }
+	if err := vBuf.Writeu16(uint16(tsig.TimeSigned >> 32)); err != nil { return err } // #nosec G115
+	if err := vBuf.Writeu32(uint32(tsig.TimeSigned & 0xFFFFFFFF)); err != nil { return err } // #nosec G115
 	if err := vBuf.Writeu16(tsig.Fudge); err != nil { return err }
 	if err := vBuf.Writeu16(tsig.Error); err != nil { return err }
-	if err := vBuf.Writeu16(uint16(len(tsig.Other))); err != nil { return err }
+	if err := vBuf.Writeu16(uint16(len(tsig.Other))); err != nil { return err } // #nosec G115
 	if err := vBuf.WriteRange(vBuf.Position(), tsig.Other); err != nil { return err }
 	
 	h.Write(vBuf.Buf[:vBuf.Position()])

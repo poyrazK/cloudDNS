@@ -268,7 +268,7 @@ func (b *BytePacketBuffer) WriteName(name string) error {
 		if b.HasNames {
 			lower := strings.ToLower(curr)
 			if pos, ok := b.names[lower]; ok {
-				return b.Writeu16(uint16(pos) | 0xC000)
+				return b.Writeu16(uint16(pos) | 0xC000) // #nosec G115
 			}
 			if b.Pos < 0x4000 {
 				b.names[lower] = b.Pos

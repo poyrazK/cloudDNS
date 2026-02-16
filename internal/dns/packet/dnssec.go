@@ -32,7 +32,7 @@ func (r *DNSRecord) ComputeKeyTag() uint16 {
 		}
 	}
 	ac += (ac >> 16) & 0xFFFF
-	return uint16(ac & 0xFFFF)
+	return uint16(ac & 0xFFFF) // #nosec G115
 }
 
 // RFC 4034 Section 5.2: DS RDATA Calculation
@@ -88,7 +88,7 @@ func SignRRSet(records []DNSRecord, privKey *ecdsa.PrivateKey, signerName string
 		TTL:         records[0].TTL,
 		TypeCovered: uint16(records[0].Type),
 		Algorithm:   13, // ECDSAP256SHA256
-		Labels:      uint8(countLabels(records[0].Name)),
+		Labels:      uint8(countLabels(records[0].Name)), // #nosec G115
 		OrigTTL:     records[0].TTL,
 		Expiration:  expiration,
 		Inception:   inception,

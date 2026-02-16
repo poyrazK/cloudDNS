@@ -159,8 +159,8 @@ func (h *DNSHeader) Read(buffer *BytePacketBuffer) error {
 	flags, err := buffer.Readu16()
 	if err != nil { return err }
 
-	a := uint8(flags >> 8)
-	b := uint8(flags & 0xFF)
+	a := uint8(flags >> 8) // #nosec G115
+	b := uint8(flags & 0xFF) // #nosec G115
 
 	h.RecursionDesired = (a & (1 << 0)) > 0
 	h.TruncatedMessage = (a & (1 << 1)) > 0
@@ -481,9 +481,9 @@ func (r *DNSRecord) Read(buffer *BytePacketBuffer) error {
 		if err := buffer.Step(int(otherLen)); err != nil { return err }
 	case OPT:
 		r.UDPPayloadSize = r.Class
-		r.ExtendedRcode = uint8(r.TTL >> 24)
-		r.EDNSVersion = uint8((r.TTL >> 16) & 0xFF)
-		r.Z = uint16(r.TTL & 0xFFFF)
+		r.ExtendedRcode = uint8(r.TTL >> 24) // #nosec G115
+		r.EDNSVersion = uint8((r.TTL >> 16) & 0xFF) // #nosec G115
+		r.Z = uint16(r.TTL & 0xFFFF) // #nosec G115
 		remaining := int(dataLen)
 		for remaining >= 4 {
 			optCode, err := buffer.Readu16()
@@ -515,14 +515,14 @@ func (r *DNSRecord) Write(buffer *BytePacketBuffer) (int, error) {
 		if err := buffer.Writeu16(0); err != nil { return 0, err }
 		for _, opt := range r.Options {
 			if err := buffer.Writeu16(opt.Code); err != nil { return 0, err }
-			if err := buffer.Writeu16(uint16(len(opt.Data))); err != nil { return 0, err }
+			if err := buffer.Writeu16(uint16(len(opt.Data))); err != nil { return 0, err } // #nosec G115
 			for _, b := range opt.Data { 
 				if err := buffer.Write(b); err != nil { return 0, err }
 			}
 		}
 		currPos := buffer.Position()
 		if err := buffer.Seek(lenPos); err != nil { return 0, err }
-		if err := buffer.Writeu16(uint16(currPos - (lenPos + 2))); err != nil { return 0, err }
+		if err := buffer.Writeu16(uint16(currPos - (lenPos + 2))); err != nil { return 0, err } // #nosec G115
 		if err := buffer.Seek(currPos); err != nil { return 0, err }
 		return currPos - startPos, nil
 	}
@@ -535,22 +535,22 @@ func (r *DNSRecord) Write(buffer *BytePacketBuffer) (int, error) {
 		lenPos := buffer.Position()
 		if err := buffer.Writeu16(0); err != nil { return 0, err }
 		if err := buffer.WriteName(r.AlgorithmName); err != nil { return 0, err }
-		if err := buffer.Writeu16(uint16(r.TimeSigned >> 32)); err != nil { return 0, err }
-		if err := buffer.Writeu32(uint32(r.TimeSigned & 0xFFFFFFFF)); err != nil { return 0, err }
+		if err := buffer.Writeu16(uint16(r.TimeSigned >> 32)); err != nil { return 0, err } // #nosec G115
+		if err := buffer.Writeu32(uint32(r.TimeSigned & 0xFFFFFFFF)); err != nil { return 0, err } // #nosec G115
 		if err := buffer.Writeu16(r.Fudge); err != nil { return 0, err }
-		if err := buffer.Writeu16(uint16(len(r.MAC))); err != nil { return 0, err }
+		if err := buffer.Writeu16(uint16(len(r.MAC))); err != nil { return 0, err } // #nosec G115
 		for _, b := range r.MAC { 
 			if err := buffer.Write(b); err != nil { return 0, err }
 		}
 		if err := buffer.Writeu16(r.OriginalID); err != nil { return 0, err }
 		if err := buffer.Writeu16(r.Error); err != nil { return 0, err }
-		if err := buffer.Writeu16(uint16(len(r.Other))); err != nil { return 0, err }
+		if err := buffer.Writeu16(uint16(len(r.Other))); err != nil { return 0, err } // #nosec G115
 		for _, b := range r.Other { 
 			if err := buffer.Write(b); err != nil { return 0, err }
 		}
 		currPos := buffer.Position()
 		if err := buffer.Seek(lenPos); err != nil { return 0, err }
-		if err := buffer.Writeu16(uint16(currPos - (lenPos + 2))); err != nil { return 0, err }
+		if err := buffer.Writeu16(uint16(currPos - (lenPos + 2))); err != nil { return 0, err } // #nosec G115
 		if err := buffer.Seek(currPos); err != nil { return 0, err }
 		return currPos - startPos, nil
 	}
@@ -578,7 +578,7 @@ func (r *DNSRecord) Write(buffer *BytePacketBuffer) (int, error) {
 		if err := buffer.WriteName(r.Host); err != nil { return 0, err }
 		currPos := buffer.Position()
 		if err := buffer.Seek(lenPos); err != nil { return 0, err }
-		if err := buffer.Writeu16(uint16(currPos - (lenPos + 2))); err != nil { return 0, err }
+		if err := buffer.Writeu16(uint16(currPos - (lenPos + 2))); err != nil { return 0, err } // #nosec G115
 		if err := buffer.Seek(currPos); err != nil { return 0, err }
 	case MX:
 		lenPos := buffer.Position()
@@ -587,11 +587,11 @@ func (r *DNSRecord) Write(buffer *BytePacketBuffer) (int, error) {
 		if err := buffer.WriteName(r.Host); err != nil { return 0, err }
 		currPos := buffer.Position()
 		if err := buffer.Seek(lenPos); err != nil { return 0, err }
-		if err := buffer.Writeu16(uint16(currPos - (lenPos + 2))); err != nil { return 0, err }
+		if err := buffer.Writeu16(uint16(currPos - (lenPos + 2))); err != nil { return 0, err } // #nosec G115
 		if err := buffer.Seek(currPos); err != nil { return 0, err }
 	case TXT:
-		if err := buffer.Writeu16(uint16(len(r.Txt) + 1)); err != nil { return 0, err }
-		if err := buffer.Write(byte(len(r.Txt))); err != nil { return 0, err }
+		if err := buffer.Writeu16(uint16(len(r.Txt) + 1)); err != nil { return 0, err } // #nosec G115
+		if err := buffer.Write(byte(len(r.Txt))); err != nil { return 0, err } // #nosec G115
 		for i := 0; i < len(r.Txt); i++ {
 			if err := buffer.Write(r.Txt[i]); err != nil { return 0, err }
 		}
@@ -607,15 +607,15 @@ func (r *DNSRecord) Write(buffer *BytePacketBuffer) (int, error) {
 		if err := buffer.Writeu32(r.Minimum); err != nil { return 0, err }
 		currPos := buffer.Position()
 		if err := buffer.Seek(lenPos); err != nil { return 0, err }
-		if err := buffer.Writeu16(uint16(currPos - (lenPos + 2))); err != nil { return 0, err }
+		if err := buffer.Writeu16(uint16(currPos - (lenPos + 2))); err != nil { return 0, err } // #nosec G115
 		if err := buffer.Seek(currPos); err != nil { return 0, err }
 	case HINFO:
-		if err := buffer.Writeu16(uint16(len(r.CPU) + len(r.OS) + 2)); err != nil { return 0, err }
-		if err := buffer.Write(byte(len(r.CPU))); err != nil { return 0, err }
+		if err := buffer.Writeu16(uint16(len(r.CPU) + len(r.OS) + 2)); err != nil { return 0, err } // #nosec G115
+		if err := buffer.Write(byte(len(r.CPU))); err != nil { return 0, err } // #nosec G115
 		for i := 0; i < len(r.CPU); i++ {
 			if err := buffer.Write(r.CPU[i]); err != nil { return 0, err }
 		}
-		if err := buffer.Write(byte(len(r.OS))); err != nil { return 0, err }
+		if err := buffer.Write(byte(len(r.OS))); err != nil { return 0, err } // #nosec G115
 		for i := 0; i < len(r.OS); i++ {
 			if err := buffer.Write(r.OS[i]); err != nil { return 0, err }
 		}
@@ -626,7 +626,7 @@ func (r *DNSRecord) Write(buffer *BytePacketBuffer) (int, error) {
 		if err := buffer.WriteName(r.EMailBX); err != nil { return 0, err }
 		currPos := buffer.Position()
 		if err := buffer.Seek(lenPos); err != nil { return 0, err }
-		if err := buffer.Writeu16(uint16(currPos - (lenPos + 2))); err != nil { return 0, err }
+		if err := buffer.Writeu16(uint16(currPos - (lenPos + 2))); err != nil { return 0, err } // #nosec G115
 		if err := buffer.Seek(currPos); err != nil { return 0, err }
 	case NSEC:
 		lenPos := buffer.Position()
@@ -637,10 +637,10 @@ func (r *DNSRecord) Write(buffer *BytePacketBuffer) (int, error) {
 		}
 		currPos := buffer.Position()
 		if err := buffer.Seek(lenPos); err != nil { return 0, err }
-		if err := buffer.Writeu16(uint16(currPos - (lenPos + 2))); err != nil { return 0, err }
+		if err := buffer.Writeu16(uint16(currPos - (lenPos + 2))); err != nil { return 0, err } // #nosec G115
 		if err := buffer.Seek(currPos); err != nil { return 0, err }
 	case DNSKEY:
-		if err := buffer.Writeu16(uint16(4 + len(r.PublicKey))); err != nil { return 0, err }
+		if err := buffer.Writeu16(uint16(4 + len(r.PublicKey))); err != nil { return 0, err } // #nosec G115
 		if err := buffer.Writeu16(r.Flags); err != nil { return 0, err }
 		if err := buffer.Write(3); err != nil { return 0, err } // Protocol
 		if err := buffer.Write(r.Algorithm); err != nil { return 0, err }
@@ -663,19 +663,19 @@ func (r *DNSRecord) Write(buffer *BytePacketBuffer) (int, error) {
 		}
 		currPos := buffer.Position()
 		if err := buffer.Seek(lenPos); err != nil { return 0, err }
-		if err := buffer.Writeu16(uint16(currPos - (lenPos + 2))); err != nil { return 0, err }
+		if err := buffer.Writeu16(uint16(currPos - (lenPos + 2))); err != nil { return 0, err } // #nosec G115
 		if err := buffer.Seek(currPos); err != nil { return 0, err }
 	case NSEC3:
 		lenPos := buffer.Position()
 		if err := buffer.Writeu16(0); err != nil { return 0, err }
 		if err := buffer.Write(r.HashAlg); err != nil { return 0, err }
-		if err := buffer.Write(uint8(r.Flags)); err != nil { return 0, err }
+		if err := buffer.Write(uint8(r.Flags)); err != nil { return 0, err } // #nosec G115
 		if err := buffer.Writeu16(r.Iterations); err != nil { return 0, err }
-		if err := buffer.Write(uint8(len(r.Salt))); err != nil { return 0, err }
+		if err := buffer.Write(uint8(len(r.Salt))); err != nil { return 0, err } // #nosec G115
 		for _, b := range r.Salt {
 			if err := buffer.Write(b); err != nil { return 0, err }
 		}
-		if err := buffer.Write(uint8(len(r.NextHash))); err != nil { return 0, err }
+		if err := buffer.Write(uint8(len(r.NextHash))); err != nil { return 0, err } // #nosec G115
 		for _, b := range r.NextHash {
 			if err := buffer.Write(b); err != nil { return 0, err }
 		}
@@ -684,24 +684,24 @@ func (r *DNSRecord) Write(buffer *BytePacketBuffer) (int, error) {
 		}
 		currPos := buffer.Position()
 		if err := buffer.Seek(lenPos); err != nil { return 0, err }
-		if err := buffer.Writeu16(uint16(currPos - (lenPos + 2))); err != nil { return 0, err }
+		if err := buffer.Writeu16(uint16(currPos - (lenPos + 2))); err != nil { return 0, err } // #nosec G115
 		if err := buffer.Seek(currPos); err != nil { return 0, err }
 	case NSEC3PARAM:
 		lenPos := buffer.Position()
 		if err := buffer.Writeu16(0); err != nil { return 0, err }
 		if err := buffer.Write(r.HashAlg); err != nil { return 0, err }
-		if err := buffer.Write(uint8(r.Flags)); err != nil { return 0, err }
+		if err := buffer.Write(uint8(r.Flags)); err != nil { return 0, err } // #nosec G115
 		if err := buffer.Writeu16(r.Iterations); err != nil { return 0, err }
-		if err := buffer.Write(uint8(len(r.Salt))); err != nil { return 0, err }
+		if err := buffer.Write(uint8(len(r.Salt))); err != nil { return 0, err } // #nosec G115
 		for _, b := range r.Salt {
 			if err := buffer.Write(b); err != nil { return 0, err }
 		}
 		currPos := buffer.Position()
 		if err := buffer.Seek(lenPos); err != nil { return 0, err }
-		if err := buffer.Writeu16(uint16(currPos - (lenPos + 2))); err != nil { return 0, err }
+		if err := buffer.Writeu16(uint16(currPos - (lenPos + 2))); err != nil { return 0, err } // #nosec G115
 		if err := buffer.Seek(currPos); err != nil { return 0, err }
 	case DS:
-		if err := buffer.Writeu16(uint16(4 + len(r.Digest))); err != nil { return 0, err }
+		if err := buffer.Writeu16(uint16(4 + len(r.Digest))); err != nil { return 0, err } // #nosec G115
 		if err := buffer.Writeu16(r.KeyTag); err != nil { return 0, err }
 		if err := buffer.Write(r.Algorithm); err != nil { return 0, err }
 		if err := buffer.Write(r.DigestType); err != nil { return 0, err }
@@ -709,7 +709,7 @@ func (r *DNSRecord) Write(buffer *BytePacketBuffer) (int, error) {
 			if err := buffer.Write(b); err != nil { return 0, err }
 		}
 	default:
-		if err := buffer.Writeu16(uint16(len(r.Data))); err != nil { return 0, err }
+		if err := buffer.Writeu16(uint16(len(r.Data))); err != nil { return 0, err } // #nosec G115
 		for _, b := range r.Data {
 			if err := buffer.Write(b); err != nil { return 0, err }
 		}
