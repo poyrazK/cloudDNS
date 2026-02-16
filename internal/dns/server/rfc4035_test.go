@@ -23,7 +23,7 @@ func TestRFC4035_ADBit(t *testing.T) {
 	req.Header.AuthedData = true
 	
 	reqBuf := packet.NewBytePacketBuffer()
-	req.Write(reqBuf)
+	_ = req.Write(reqBuf)
 
 	var capturedResp []byte
 	srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 53}, func(resp []byte) error {
@@ -34,7 +34,7 @@ func TestRFC4035_ADBit(t *testing.T) {
 	resPacket := packet.NewDNSPacket()
 	resBuf := packet.NewBytePacketBuffer()
 	copy(resBuf.Buf, capturedResp)
-	resPacket.FromBuffer(resBuf)
+	_ = resPacket.FromBuffer(resBuf)
 
 	// ensure field exists
 	_ = resPacket.Header.AuthedData
@@ -60,7 +60,7 @@ func TestRFC4035_NSEC(t *testing.T) {
 	})
 
 	reqBuf := packet.NewBytePacketBuffer()
-	req.Write(reqBuf)
+	_ = req.Write(reqBuf)
 
 	var capturedResp []byte
 	srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 53}, func(resp []byte) error {
@@ -71,7 +71,7 @@ func TestRFC4035_NSEC(t *testing.T) {
 	res := packet.NewDNSPacket()
 	resBuf := packet.NewBytePacketBuffer()
 	copy(resBuf.Buf, capturedResp)
-	res.FromBuffer(resBuf)
+	_ = res.FromBuffer(resBuf)
 
 	if res.Header.ResCode != 3 {
 		t.Errorf("Expected NXDOMAIN, got %d", res.Header.ResCode)
@@ -111,7 +111,7 @@ func TestRFC4035_NSEC3(t *testing.T) {
 	})
 
 	reqBuf := packet.NewBytePacketBuffer()
-	req.Write(reqBuf)
+	_ = req.Write(reqBuf)
 
 	var capturedResp []byte
 	srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 53}, func(resp []byte) error {
@@ -122,7 +122,7 @@ func TestRFC4035_NSEC3(t *testing.T) {
 	res := packet.NewDNSPacket()
 	resBuf := packet.NewBytePacketBuffer()
 	copy(resBuf.Buf, capturedResp)
-	res.FromBuffer(resBuf)
+	_ = res.FromBuffer(resBuf)
 
 	foundNSEC3 := false
 	for _, auth := range res.Authorities {

@@ -21,7 +21,7 @@ func TestHandleNotify(t *testing.T) {
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "notify.test.", QType: packet.SOA})
 
 	reqBuf := packet.NewBytePacketBuffer()
-	req.Write(reqBuf)
+	_ = req.Write(reqBuf)
 	
 	var capturedResp []byte
 	err := srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], "127.0.0.1:12345", func(resp []byte) error {
@@ -29,14 +29,14 @@ func TestHandleNotify(t *testing.T) {
 		return nil
 	})
 
-	if errScan != nil {
+	if err != nil {
 		t.Fatalf("handleNotify failed: %v", err)
 	}
 
 	resp := packet.NewDNSPacket()
 	resBuf := packet.NewBytePacketBuffer()
 	copy(resBuf.Buf, capturedResp)
-	resp.FromBuffer(resBuf)
+	_ = resp.FromBuffer(resBuf)
 
 	// RFC 1996: The response MUST have the same ID, Opcode, and the QR bit set.
 	if resp.Header.Opcode != packet.OPCODE_NOTIFY || !resp.Header.Response {
@@ -52,10 +52,10 @@ func TestHandleNotify(t *testing.T) {
 func TestNotifySlaves(t *testing.T) {
 	// Listen on a local UDP port to simulate a slave server
 	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
-	if errScan != nil {
+	if err != nil {
 		t.Fatalf("failed to listen: %v", err)
 	}
-	defer pc.Close()
+	defer func() { _ = pc.Close() }()
 	
 	repo := &mockServerRepo{
 		zones: []domain.Zone{
@@ -76,10 +76,10 @@ func TestNotifySlaves(t *testing.T) {
 	go srv.notifySlaves("example.test.")
 
 	// Attempt to read the NOTIFY packet from the mock slave port
-	pc.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+	_ = pc.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 	buf := make([]byte, 512)
 	n, _, err := pc.ReadFrom(buf)
-	if errScan != nil {
+	if err != nil {
 		// If timeout, it might be expected depending on concurrent execution,
 		// but for this test we want to see the packet.
 		return 
@@ -88,7 +88,7 @@ func TestNotifySlaves(t *testing.T) {
 	p := packet.NewDNSPacket()
 	pBuf := packet.NewBytePacketBuffer()
 	pBuf.Load(buf[:n])
-	p.FromBuffer(pBuf)
+	_ = p.FromBuffer(pBuf)
 
 	if p.Header.Opcode != packet.OPCODE_NOTIFY {
 		t.Errorf("Expected NOTIFY opcode, got %d", p.Header.Opcode)

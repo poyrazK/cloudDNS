@@ -37,7 +37,7 @@ func TestHandleUpdateAddRecord(t *testing.T) {
 	})
 
 	buffer := packet.NewBytePacketBuffer()
-	req.Write(buffer)
+	_ = req.Write(buffer)
 	data := buffer.Buf[:buffer.Position()]
 
 	var capturedResp []byte
@@ -46,7 +46,7 @@ func TestHandleUpdateAddRecord(t *testing.T) {
 		return nil
 	})
 
-	if errScan != nil {
+	if err != nil {
 		t.Fatalf("HandlePacket failed: %v", err)
 	}
 
@@ -98,7 +98,7 @@ func TestHandleUpdateDeleteRRSet(t *testing.T) {
 	})
 
 	buffer := packet.NewBytePacketBuffer()
-	req.Write(buffer)
+	_ = req.Write(buffer)
 	data := buffer.Buf[:buffer.Position()]
 
 	srv.handlePacket(data, "127.0.0.1:12345", func(resp []byte) error { return nil })
@@ -141,7 +141,7 @@ func TestHandleUpdatePrerequisiteFail(t *testing.T) {
 	})
 
 	buffer := packet.NewBytePacketBuffer()
-	req.Write(buffer)
+	_ = req.Write(buffer)
 	data := buffer.Buf[:buffer.Position()]
 
 	var capturedResp []byte
@@ -180,7 +180,7 @@ func TestHandleUpdateMorePrereqs(t *testing.T) {
 	})
 	
 	buf := packet.NewBytePacketBuffer()
-	req.Write(buf)
+	_ = req.Write(buf)
 	srv.handlePacket(buf.Buf[:buf.Position()], "127.0.0.1:1", func(resp []byte) error {
 		return nil
 	})
@@ -193,12 +193,12 @@ func TestHandleUpdateMorePrereqs(t *testing.T) {
 		Name: "exists.test.", Type: 255, Class: 254, // NONE/ANY -> YXDOMAIN if name in use
 	})
 	buf2 := packet.NewBytePacketBuffer()
-	req2.Write(buf2)
+	_ = req2.Write(buf2)
 	srv.handlePacket(buf2.Buf[:buf2.Position()], "127.0.0.1:1", func(resp []byte) error {
 		p := packet.NewDNSPacket()
 		pb := packet.NewBytePacketBuffer()
 		pb.Load(resp)
-		p.FromBuffer(pb)
+		_ = p.FromBuffer(pb)
 		if p.Header.ResCode != packet.RCODE_YXDOMAIN {
 			t.Errorf("Expected YXDOMAIN for existing name check, got %d", p.Header.ResCode)
 		}
@@ -227,7 +227,7 @@ func TestHandleUpdateDeleteSpecific(t *testing.T) {
 	})
 
 	buf := packet.NewBytePacketBuffer()
-	req.Write(buf)
+	_ = req.Write(buf)
 	srv.handlePacket(buf.Buf[:buf.Position()], "127.0.0.1:1", func(resp []byte) error { return nil })
 
 	// Verify only 2.2.2.2 remains
@@ -263,11 +263,11 @@ func TestHandleUpdateTSIG(t *testing.T) {
 	})
 
 	buffer := packet.NewBytePacketBuffer()
-	req.Write(buffer)
+	_ = req.Write(buffer)
 	
 	// Sign the packet with TSIG
 	err := req.SignTSIG(buffer, "testkey.", []byte("secret123"))
-	if errScan != nil {
+	if err != nil {
 		t.Fatalf("Failed to sign TSIG: %v", err)
 	}
 	
@@ -276,19 +276,19 @@ func TestHandleUpdateTSIG(t *testing.T) {
 	parsedReq := packet.NewDNSPacket()
 	pBuf := packet.NewBytePacketBuffer()
 	pBuf.Load(data)
-	parsedReq.FromBuffer(pBuf)
+	_ = parsedReq.FromBuffer(pBuf)
 
 	err = srv.handlePacket(data, "127.0.0.1:12345", func(resp []byte) error {
 		resPacket := packet.NewDNSPacket()
 		resBuf := packet.NewBytePacketBuffer()
 		resBuf.Load(resp)
-		resPacket.FromBuffer(resBuf)
+		_ = resPacket.FromBuffer(resBuf)
 		if resPacket.Header.ResCode != packet.RCODE_NOERROR {
 			t.Errorf("Expected NOERROR for valid TSIG, got %d", resPacket.Header.ResCode)
 		}
 		return nil
 	})
-	if errScan != nil {
+	if err != nil {
 		t.Fatalf("handlePacket failed: %v", err)
 	}
 
@@ -316,12 +316,12 @@ func TestHandleUpdate_ErrorCases(t *testing.T) {
 	req.Header.Opcode = packet.OPCODE_UPDATE
 	// 0 questions
 	buf := packet.NewBytePacketBuffer()
-	req.Write(buf)
+	_ = req.Write(buf)
 	srv.handlePacket(buf.Buf[:buf.Position()], "127.0.0.1:1", func(resp []byte) error {
 		p := packet.NewDNSPacket()
 		pb := packet.NewBytePacketBuffer()
 		pb.Load(resp)
-		p.FromBuffer(pb)
+		_ = p.FromBuffer(pb)
 		if p.Header.ResCode != packet.RCODE_FORMERR {
 			t.Errorf("Expected FORMERR for ZOCOUNT=0, got %d", p.Header.ResCode)
 		}
@@ -333,13 +333,13 @@ func TestHandleUpdate_ErrorCases(t *testing.T) {
 	req2.Header.Opcode = packet.OPCODE_UPDATE
 	req2.Questions = append(req2.Questions, packet.DNSQuestion{Name: "error.test.", QType: packet.SOA})
 	buf2 := packet.NewBytePacketBuffer()
-	req2.Write(buf2)
-	req2.SignTSIG(buf2, "unknown.", []byte("any"))
+	_ = req2.Write(buf2)
+	_ = req2.SignTSIG(buf2, "unknown.", []byte("any"))
 	srv.handlePacket(buf2.Buf[:buf2.Position()], "127.0.0.1:1", func(resp []byte) error {
 		p := packet.NewDNSPacket()
 		pb := packet.NewBytePacketBuffer()
 		pb.Load(resp)
-		p.FromBuffer(pb)
+		_ = p.FromBuffer(pb)
 		if p.Header.ResCode != packet.RCODE_NOTAUTH {
 			t.Errorf("Expected NOTAUTH for unknown TSIG, got %d", p.Header.ResCode)
 		}
@@ -351,12 +351,12 @@ func TestHandleUpdate_ErrorCases(t *testing.T) {
 	req3.Header.Opcode = packet.OPCODE_UPDATE
 	req3.Questions = append(req3.Questions, packet.DNSQuestion{Name: "notauth.test.", QType: packet.SOA})
 	buf3 := packet.NewBytePacketBuffer()
-	req3.Write(buf3)
+	_ = req3.Write(buf3)
 	srv.handlePacket(buf3.Buf[:buf3.Position()], "127.0.0.1:1", func(resp []byte) error {
 		p := packet.NewDNSPacket()
 		pb := packet.NewBytePacketBuffer()
 		pb.Load(resp)
-		p.FromBuffer(pb)
+		_ = p.FromBuffer(pb)
 		if p.Header.ResCode != packet.RCODE_NOTAUTH {
 			t.Errorf("Expected NOTAUTH for non-existent zone, got %d", p.Header.ResCode)
 		}
@@ -376,7 +376,7 @@ func TestCheckPrerequisite_RRset(t *testing.T) {
 
 	// 1. RRset exists (value independent) - SUCCESS
 	err := srv.checkPrerequisite(ctx, zone, packet.DNSRecord{Name: "exists.test.", Type: packet.A, Class: 255})
-	if errScan != nil { t.Errorf("Expected success, got %v", err) }
+	if err != nil { t.Errorf("Expected success, got %v", err) }
 
 	// 2. RRset exists - FAILURE (doesn't exist)
 	err = srv.checkPrerequisite(ctx, zone, packet.DNSRecord{Name: "missing.test.", Type: packet.A, Class: 255})
@@ -384,7 +384,7 @@ func TestCheckPrerequisite_RRset(t *testing.T) {
 
 	// 3. RRset does NOT exist - SUCCESS
 	err = srv.checkPrerequisite(ctx, zone, packet.DNSRecord{Name: "missing.test.", Type: packet.A, Class: 254})
-	if errScan != nil { t.Errorf("Expected success, got %v", err) }
+	if err != nil { t.Errorf("Expected success, got %v", err) }
 
 	// 4. RRset does NOT exist - FAILURE (it exists)
 	err = srv.checkPrerequisite(ctx, zone, packet.DNSRecord{Name: "exists.test.", Type: packet.A, Class: 254})

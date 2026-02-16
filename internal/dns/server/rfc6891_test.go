@@ -32,7 +32,7 @@ func TestRFC6891_EDNS0(t *testing.T) {
 	req.Resources = append(req.Resources, optReq)
 	
 	reqBuf := packet.NewBytePacketBuffer()
-	req.Write(reqBuf)
+	_ = req.Write(reqBuf)
 
 	var capturedResp []byte
 	srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 53}, func(resp []byte) error {
@@ -43,7 +43,7 @@ func TestRFC6891_EDNS0(t *testing.T) {
 	resPacket := packet.NewDNSPacket()
 	resBuf := packet.NewBytePacketBuffer()
 	copy(resBuf.Buf, capturedResp)
-	resPacket.FromBuffer(resBuf)
+	_ = resPacket.FromBuffer(resBuf)
 
 	// RFC 6891: Response MUST contain an OPT record if the query had one
 	foundOPT := false
@@ -87,7 +87,7 @@ func TestRFC6891_LargePayload(t *testing.T) {
 	})
 	
 	reqBuf := packet.NewBytePacketBuffer()
-	req.Write(reqBuf)
+	_ = req.Write(reqBuf)
 
 	var capturedResp []byte
 	srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 53}, func(resp []byte) error {
@@ -98,7 +98,7 @@ func TestRFC6891_LargePayload(t *testing.T) {
 	resPacket := packet.NewDNSPacket()
 	resBuf := packet.NewBytePacketBuffer()
 	copy(resBuf.Buf, capturedResp)
-	resPacket.FromBuffer(resBuf)
+	_ = resPacket.FromBuffer(resBuf)
 
 	if resPacket.Header.TruncatedMessage {
 		t.Errorf("RFC 6891 Violation: Packet should NOT be truncated when EDNS payload size allows it")

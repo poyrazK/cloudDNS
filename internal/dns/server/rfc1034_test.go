@@ -22,7 +22,7 @@ func TestRFC1034_CaseInsensitivity(t *testing.T) {
 	req := packet.NewDNSPacket()
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "WwW.ExAmPlE.CoM.", QType: packet.A})
 	reqBuf := packet.NewBytePacketBuffer()
-	req.Write(reqBuf)
+	_ = req.Write(reqBuf)
 
 	var capturedResp []byte
 	srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 53}, func(resp []byte) error {
@@ -33,7 +33,7 @@ func TestRFC1034_CaseInsensitivity(t *testing.T) {
 	resPacket := packet.NewDNSPacket()
 	resBuf := packet.NewBytePacketBuffer()
 	copy(resBuf.Buf, capturedResp)
-	resPacket.FromBuffer(resBuf)
+	_ = resPacket.FromBuffer(resBuf)
 
 	if len(resPacket.Answers) == 0 {
 		t.Fatalf("RFC 1034 Violation: Expected answer for mixed-case query, got none")
@@ -57,7 +57,7 @@ func TestRFC1034_WildcardMatching(t *testing.T) {
 	req := packet.NewDNSPacket()
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "sub.example.com.", QType: packet.A})
 	reqBuf := packet.NewBytePacketBuffer()
-	req.Write(reqBuf)
+	_ = req.Write(reqBuf)
 
 	var capturedResp []byte
 	srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 53}, func(resp []byte) error {
@@ -68,7 +68,7 @@ func TestRFC1034_WildcardMatching(t *testing.T) {
 	resPacket := packet.NewDNSPacket()
 	resBuf := packet.NewBytePacketBuffer()
 	copy(resBuf.Buf, capturedResp)
-	resPacket.FromBuffer(resBuf)
+	_ = resPacket.FromBuffer(resBuf)
 
 	if len(resPacket.Answers) == 0 {
 		t.Fatalf("RFC 1034 Violation: Wildcard record not found")
@@ -108,7 +108,7 @@ func TestRFC1034_Recursion(t *testing.T) {
 	}
 
 	resp, err := s.resolveRecursive("test.com.", packet.A)
-	if errScan != nil {
+	if err != nil {
 		t.Fatalf("Recursive resolve failed: %v", err)
 	}
 
