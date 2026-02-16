@@ -28,17 +28,23 @@ func TestEndToEndDNSSEC_Lifecycle(t *testing.T) {
 	apiAddr := "127.0.0.1:18082"
 
 	dnsSrv := NewServer(dnsAddr, repo, nil)
-	_ = dnsSrv.Run()
+	go func() {
+		_ = dnsSrv.Run()
+	}()
 
 	apiHandler := api.NewAPIHandler(dnsSvc)
 	mux := http.NewServeMux()
 	apiHandler.RegisterRoutes(mux)
 	apiSrv := &http.Server{Addr: apiAddr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
-	_ = apiSrv.ListenAndServe()
+	go func() {
+		_ = apiSrv.ListenAndServe()
+	}()
 
 	// Wait for servers to start
-	time.Sleep(200 * time.Millisecond)
-	_ = apiSrv.Shutdown(context.Background())
+	time.Sleep(500 * time.Millisecond)
+	defer func() {
+		_ = apiSrv.Shutdown(context.Background())
+	}()
 
 	// 2. Create a new zone via API
 	zoneReq := domain.Zone{Name: "dnssec.e2e.", TenantID: "admin"}
@@ -47,9 +53,9 @@ func TestEndToEndDNSSEC_Lifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create zone via API: %v", err)
 	}
-	_ = resp.Body.Close()
 	var createdZone domain.Zone
 	_ = json.NewDecoder(resp.Body).Decode(&createdZone)
+	_ = resp.Body.Close()
 
 	// Add an A record to the zone
 	record := domain.Record{
@@ -60,7 +66,11 @@ func TestEndToEndDNSSEC_Lifecycle(t *testing.T) {
 		ZoneID:  createdZone.ID,
 	}
 	rb, _ := json.Marshal(record)
-	_, _ = http.Post(fmt.Sprintf("http://%s/zones/%s/records", apiAddr, createdZone.ID), "application/json", bytes.NewBuffer(rb))
+	resp2, err := http.Post(fmt.Sprintf("http://%s/zones/%s/records", apiAddr, createdZone.ID), "application/json", bytes.NewBuffer(rb))
+	if err != nil {
+		t.Fatalf("Failed to create record: %v", err)
+	}
+	_ = resp2.Body.Close()
 
 	// 3. Trigger DNSSEC Automation
 	// Force the lifecycle management to generate keys for the new zone
@@ -101,7 +111,9 @@ func TestEndToEndDNSSEC_Lifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to connect to DNS server: %v", err)
 	}
-	_ = conn.Close()
+	defer func() {
+		_ = conn.Close()
+	}()
 	
 	_, _ = conn.Write(qBuf.Buf[:qBuf.Position()])
 	
@@ -113,7 +125,7 @@ func TestEndToEndDNSSEC_Lifecycle(t *testing.T) {
 	
 	res := packet.NewDNSPacket()
 	pBuf := packet.NewBytePacketBuffer()
-	copy(pBuf.Buf, resBuf[:n])
+	pBuf.Load(resBuf[:n])
 	_ = res.FromBuffer(pBuf)
 
 	// Verify Answer section has the A record AND its corresponding RRSIG
@@ -145,7 +157,7 @@ func TestEndToEndDNSSEC_Lifecycle(t *testing.T) {
 	n2, _ := conn.Read(resBuf)
 	res2 := packet.NewDNSPacket()
 	pBuf2 := packet.NewBytePacketBuffer()
-	copy(pBuf2.Buf, resBuf[:n2])
+	pBuf2.Load(resBuf[:n2])
 	_ = res2.FromBuffer(pBuf2)
 
 	if res2.Header.ResCode != 3 {

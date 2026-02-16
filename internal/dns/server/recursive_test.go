@@ -2,6 +2,7 @@ package server
 
 import (
 	"net"
+	"strings"
 	"testing"
 
 	"github.com/poyrazK/cloudDNS/internal/dns/packet"
@@ -16,9 +17,8 @@ func TestResolveRecursive(t *testing.T) {
 		resp.Header.ID = 1234
 		resp.Header.Response = true
 
-		switch server {
-		case "198.41.0.4:53":
-			// Root server returns delegation to .com
+		// Handle ANY root server by delegation to .com
+		if strings.Contains(server, ":53") && !strings.HasPrefix(server, "1.1.1.1") {
 			resp.Authorities = append(resp.Authorities, packet.DNSRecord{
 				Name: "com.",
 				Type: packet.NS,
@@ -29,7 +29,7 @@ func TestResolveRecursive(t *testing.T) {
 				Type: packet.A,
 				IP:   net.ParseIP("1.1.1.1"),
 			})
-		case "1.1.1.1:53":
+		} else if strings.HasPrefix(server, "1.1.1.1") {
 			// .com server returns final answer
 			resp.Answers = append(resp.Answers, packet.DNSRecord{
 				Name: name,
@@ -100,11 +100,12 @@ func TestSendQuery(t *testing.T) {
 	
 	conn, err := net.ListenUDP("udp", addr)
 	if err != nil { t.Fatalf("ListenUDP failed: %v", err) }
-	_ = conn.Close()
 	
 	go func() {
+		defer conn.Close()
 		buf := make([]byte, 512)
-		n, remote, _ := conn.ReadFromUDP(buf)
+		n, remote, err := conn.ReadFromUDP(buf)
+		if err != nil { return }
 		
 		req := packet.NewDNSPacket()
 		pb := packet.NewBytePacketBuffer()
@@ -114,14 +115,16 @@ func TestSendQuery(t *testing.T) {
 		resp := packet.NewDNSPacket()
 		resp.Header.ID = req.Header.ID
 		resp.Header.Response = true
-		resp.Questions = append(resp.Questions, req.Questions[0])
-		resp.Answers = append(resp.Answers, packet.DNSRecord{
-			Name: req.Questions[0].Name,
-			Type: packet.A,
-			IP:   net.ParseIP("9.9.9.9"),
-			TTL:  300,
-			Class: 1,
-		})
+		if len(req.Questions) > 0 {
+			resp.Questions = append(resp.Questions, req.Questions[0])
+			resp.Answers = append(resp.Answers, packet.DNSRecord{
+				Name: req.Questions[0].Name,
+				Type: packet.A,
+				IP:   net.ParseIP("9.9.9.9"),
+				TTL:  300,
+				Class: 1,
+			})
+		}
 		
 		resBuf := packet.NewBytePacketBuffer()
 		_ = resp.Write(resBuf)

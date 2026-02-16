@@ -24,16 +24,23 @@ func TestEndToEndDNS_Advanced(t *testing.T) {
 	apiAddr := "127.0.0.1:18081"
 
 	dnsSrv := NewServer(dnsAddr, repo, nil)
-	_ = dnsSrv.Run()
+	go func() {
+		_ = dnsSrv.Run()
+	}()
 
 	apiHandler := api.NewAPIHandler(svc)
 	mux := http.NewServeMux()
 	apiHandler.RegisterRoutes(mux)
 	apiSrv := &http.Server{Addr: apiAddr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
-	_ = apiSrv.ListenAndServe()
+	go func() {
+		_ = apiSrv.ListenAndServe()
+	}()
 
-	time.Sleep(200 * time.Millisecond)
-	_ = apiSrv.Shutdown(context.Background())
+	// Wait for servers to start
+	time.Sleep(500 * time.Millisecond)
+	defer func() {
+		_ = apiSrv.Shutdown(context.Background())
+	}()
 
 	// 2. Setup Zone with multiple records including Wildcards
 	zoneReq := domain.Zone{Name: "advanced.test.", TenantID: "admin"}
@@ -42,9 +49,9 @@ func TestEndToEndDNS_Advanced(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create zone: %v", err)
 	}
-	_ = resp.Body.Close()
 	var createdZone domain.Zone
 	_ = json.NewDecoder(resp.Body).Decode(&createdZone)
+	_ = resp.Body.Close()
 
 	records := []domain.Record{
 		{Name: "a.advanced.test.", Type: domain.TypeA, Content: "1.1.1.1", TTL: 300, ZoneID: createdZone.ID},
@@ -61,7 +68,10 @@ func TestEndToEndDNS_Advanced(t *testing.T) {
 	qBuf := packet.NewBytePacketBuffer()
 	_ = query.Write(qBuf)
 
-	conn, _ := net.Dial("udp", dnsAddr)
+	conn, err := net.Dial("udp", dnsAddr)
+	if err != nil {
+		t.Fatalf("Failed to connect to DNS: %v", err)
+	}
 	_, _ = conn.Write(qBuf.Buf[:qBuf.Position()])
 	resBuf := make([]byte, 1024)
 	n, _ := conn.Read(resBuf)
@@ -74,20 +84,22 @@ func TestEndToEndDNS_Advanced(t *testing.T) {
 	if len(res.Answers) == 0 || res.Answers[0].Txt != "wildcard" {
 		t.Errorf("Wildcard E2E failed")
 	}
+	_ = conn.Close()
 
 	// 4. Test AXFR over TCP
-	tcpConn, _ := net.Dial("tcp", dnsAddr)
+	tcpConn, err := net.Dial("tcp", dnsAddr)
+	if err != nil {
+		t.Fatalf("Failed to connect to DNS TCP: %v", err)
+	}
 	axfrQuery := packet.NewDNSPacket()
 	axfrQuery.Header.ID = 0x1234
 	axfrQuery.Questions = append(axfrQuery.Questions, packet.DNSQuestion{Name: "advanced.test.", QType: packet.AXFR})
 	aqBuf := packet.NewBytePacketBuffer()
 	_ = axfrQuery.Write(aqBuf)
 
-	tcpAQBuf := make([]byte, aqBuf.Position()+2)
-	tcpAQBuf[0] = byte(aqBuf.Position() >> 8)
-	tcpAQBuf[1] = byte(aqBuf.Position() & 0xFF)
-	copy(tcpAQBuf[2:], aqBuf.Buf[:aqBuf.Position()])
-	_, _ = tcpConn.Write(tcpAQBuf)
+	data := aqBuf.Buf[:aqBuf.Position()]
+	fullData := append([]byte{byte(len(data) >> 8), byte(len(data) & 0xFF)}, data...)
+	_, _ = tcpConn.Write(fullData)
 
 	// Read first SOA
 	lenB := make([]byte, 2)
@@ -133,4 +145,5 @@ func TestEndToEndDNS_Advanced(t *testing.T) {
 	if !foundNSEC {
 		t.Errorf("DNSSEC/NSEC E2E failed: no NSEC record in NXDOMAIN response")
 	}
+	_ = conn2.Close()
 }
