@@ -28,27 +28,28 @@ func TestEndToEndDNSSEC_Lifecycle(t *testing.T) {
 	apiAddr := "127.0.0.1:18082"
 
 	dnsSrv := NewServer(dnsAddr, repo, nil)
-	go dnsSrv.Run()
+	_ = dnsSrv.Run()
 
 	apiHandler := api.NewAPIHandler(dnsSvc)
 	mux := http.NewServeMux()
 	apiHandler.RegisterRoutes(mux)
 	apiSrv := &http.Server{Addr: apiAddr, Handler: mux}
-	go apiSrv.ListenAndServe()
+	_ = apiSrv.ListenAndServe()
 
 	// Wait for servers to start
 	time.Sleep(200 * time.Millisecond)
-	defer apiSrv.Shutdown(context.Background())
+	_ = apiSrv.Shutdown(context.Background())
 
 	// 2. Create a new zone via API
 	zoneReq := domain.Zone{Name: "dnssec.e2e.", TenantID: "admin"}
 	body, _ := json.Marshal(zoneReq)
 	resp, err := http.Post(fmt.Sprintf("http://%s/zones", apiAddr), "application/json", bytes.NewBuffer(body))
-	if errScan != nil {
+	if err != nil {
 		t.Fatalf("Failed to create zone via API: %v", err)
 	}
+	_ = resp.Body.Close()
 	var createdZone domain.Zone
-	json.NewDecoder(resp.Body).Decode(&createdZone)
+	_ = json.NewDecoder(resp.Body).Decode(&createdZone)
 
 	// Add an A record to the zone
 	record := domain.Record{
@@ -59,12 +60,12 @@ func TestEndToEndDNSSEC_Lifecycle(t *testing.T) {
 		ZoneID:  createdZone.ID,
 	}
 	rb, _ := json.Marshal(record)
-	http.Post(fmt.Sprintf("http://%s/zones/%s/records", apiAddr, createdZone.ID), "application/json", bytes.NewBuffer(rb))
+	_, _ = http.Post(fmt.Sprintf("http://%s/zones/%s/records", apiAddr, createdZone.ID), "application/json", bytes.NewBuffer(rb))
 
 	// 3. Trigger DNSSEC Automation
 	// Force the lifecycle management to generate keys for the new zone
 	err = dnsSrv.DNSSEC.AutomateLifecycle(context.Background(), createdZone.ID)
-	if errScan != nil {
+	if err != nil {
 		t.Fatalf("DNSSEC automation failed: %v", err)
 	}
 
@@ -94,26 +95,26 @@ func TestEndToEndDNSSEC_Lifecycle(t *testing.T) {
 	})
 	
 	qBuf := packet.NewBytePacketBuffer()
-	query.Write(qBuf)
+	_ = query.Write(qBuf)
 
 	conn, err := net.Dial("udp", dnsAddr)
-	if errScan != nil {
+	if err != nil {
 		t.Fatalf("Failed to connect to DNS server: %v", err)
 	}
-	defer conn.Close()
+	_ = conn.Close()
 	
-	conn.Write(qBuf.Buf[:qBuf.Position()])
+	_, _ = conn.Write(qBuf.Buf[:qBuf.Position()])
 	
 	resBuf := make([]byte, 2048)
 	n, err := conn.Read(resBuf)
-	if errScan != nil {
+	if err != nil {
 		t.Fatalf("Failed to read from DNS server: %v", err)
 	}
 	
 	res := packet.NewDNSPacket()
 	pBuf := packet.NewBytePacketBuffer()
 	copy(pBuf.Buf, resBuf[:n])
-	res.FromBuffer(pBuf)
+	_ = res.FromBuffer(pBuf)
 
 	// Verify Answer section has the A record AND its corresponding RRSIG
 	foundA := false
@@ -138,14 +139,14 @@ func TestEndToEndDNSSEC_Lifecycle(t *testing.T) {
 	})
 	
 	qBuf2 := packet.NewBytePacketBuffer()
-	query2.Write(qBuf2)
-	conn.Write(qBuf2.Buf[:qBuf2.Position()])
+	_ = query2.Write(qBuf2)
+	_, _ = conn.Write(qBuf2.Buf[:qBuf2.Position()])
 	
 	n2, _ := conn.Read(resBuf)
 	res2 := packet.NewDNSPacket()
 	pBuf2 := packet.NewBytePacketBuffer()
 	copy(pBuf2.Buf, resBuf[:n2])
-	res2.FromBuffer(pBuf2)
+	_ = res2.FromBuffer(pBuf2)
 
 	if res2.Header.ResCode != 3 {
 		t.Errorf("Expected NXDOMAIN, got %d", res2.Header.ResCode)
