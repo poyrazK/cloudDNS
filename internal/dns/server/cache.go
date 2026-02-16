@@ -36,7 +36,7 @@ func NewDNSCache() *DNSCache {
 
 func (c *DNSCache) getShard(key string) *cacheShard {
 	h := fnv.New32a()
-	h.Write([]byte(key))
+	h.Write([]byte(key)) // #nosec G104
 	return c.shards[h.Sum32()%shardCount]
 }
 
