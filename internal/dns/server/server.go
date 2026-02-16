@@ -242,7 +242,9 @@ func (s *Server) handleDoH(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(resp)
 		return nil
-	})
+	}); err != nil {
+		http.Error(w, "server error", http.StatusInternalServerError)
+	}
 }
 
 func (s *Server) udpWorker() {
@@ -255,7 +257,9 @@ func (s *Server) handleUDPConnection(pc net.PacketConn, addr net.Addr, data []by
 	if err := s.handlePacket(data, addr, func(resp []byte) error {
 		_, err := pc.WriteTo(resp, addr)
 		return err
-	})
+	}); err != nil {
+		s.Logger.Error("failed to handle UDP packet", "error", err)
+	}
 }
 
 func (s *Server) handleTCPConnection(conn net.Conn) {
