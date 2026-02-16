@@ -25,7 +25,7 @@ func TestRFC1035_MessageCompression(t *testing.T) {
 	_ = req.Write(reqBuf)
 
 	var capturedResp []byte
-	srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 53}, func(resp []byte) error {
+	_ = srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 53}, func(resp []byte) error {
 		capturedResp = resp
 		return nil
 	})
@@ -66,7 +66,7 @@ func TestRFC1035_ResponseFormat(t *testing.T) {
 	_ = req.Write(reqBuf)
 
 	var capturedResp []byte
-	srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 53}, func(resp []byte) error {
+	_ = srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 53}, func(resp []byte) error {
 		capturedResp = resp
 		return nil
 	})

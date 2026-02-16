@@ -53,7 +53,7 @@ func TestHandleUpdateAddRecord(t *testing.T) {
 	resPacket := packet.NewDNSPacket()
 	pBuf := packet.NewBytePacketBuffer()
 	copy(pBuf.Buf, capturedResp)
-	resPacket.FromBuffer(pBuf)
+	_ = resPacket.FromBuffer(pBuf)
 
 	if resPacket.Header.ResCode != packet.RCODE_NOERROR {
 		t.Errorf("Expected NOERROR, got %d", resPacket.Header.ResCode)
@@ -101,7 +101,9 @@ func TestHandleUpdateDeleteRRSet(t *testing.T) {
 	_ = req.Write(buffer)
 	data := buffer.Buf[:buffer.Position()]
 
-	srv.handlePacket(data, "127.0.0.1:12345", func(resp []byte) error { return nil })
+	if err := srv.handlePacket(data, "127.0.0.1:12345", func(resp []byte) error { return nil }); err != nil {
+		t.Errorf("handlePacket failed: %v", err)
+	}
 
 	// Verify all A records are gone but the TXT record remains
 	for _, r := range repo.records {
@@ -145,15 +147,17 @@ func TestHandleUpdatePrerequisiteFail(t *testing.T) {
 	data := buffer.Buf[:buffer.Position()]
 
 	var capturedResp []byte
-	srv.handlePacket(data, "127.0.0.1:12345", func(resp []byte) error {
+	if err := srv.handlePacket(data, "127.0.0.1:12345", func(resp []byte) error {
 		capturedResp = resp
 		return nil
-	})
+	}); err != nil {
+		t.Fatalf("handlePacket failed: %v", err)
+	}
 
 	resPacket := packet.NewDNSPacket()
 	pBuf := packet.NewBytePacketBuffer()
 	copy(pBuf.Buf, capturedResp)
-	resPacket.FromBuffer(pBuf)
+	_ = resPacket.FromBuffer(pBuf)
 
 	if resPacket.Header.ResCode != packet.RCODE_NXDOMAIN {
 		t.Errorf("Expected NXDOMAIN (3) for failed prerequisite, got %d", resPacket.Header.ResCode)
@@ -181,9 +185,11 @@ func TestHandleUpdateMorePrereqs(t *testing.T) {
 	
 	buf := packet.NewBytePacketBuffer()
 	_ = req.Write(buf)
-	srv.handlePacket(buf.Buf[:buf.Position()], "127.0.0.1:1", func(resp []byte) error {
+	if err := srv.handlePacket(buf.Buf[:buf.Position()], "127.0.0.1:1", func(resp []byte) error {
 		return nil
-	})
+	}); err != nil {
+		t.Errorf("handlePacket failed: %v", err)
+	}
 
 	// 2. Failure case: "Name NOT in use" but name exists
 	req2 := packet.NewDNSPacket()
@@ -194,7 +200,7 @@ func TestHandleUpdateMorePrereqs(t *testing.T) {
 	})
 	buf2 := packet.NewBytePacketBuffer()
 	_ = req2.Write(buf2)
-	srv.handlePacket(buf2.Buf[:buf2.Position()], "127.0.0.1:1", func(resp []byte) error {
+	if err := srv.handlePacket(buf2.Buf[:buf2.Position()], "127.0.0.1:1", func(resp []byte) error {
 		p := packet.NewDNSPacket()
 		pb := packet.NewBytePacketBuffer()
 		pb.Load(resp)
@@ -203,7 +209,9 @@ func TestHandleUpdateMorePrereqs(t *testing.T) {
 			t.Errorf("Expected YXDOMAIN for existing name check, got %d", p.Header.ResCode)
 		}
 		return nil
-	})
+	}); err != nil {
+		t.Errorf("handlePacket failed: %v", err)
+	}
 }
 
 // TestHandleUpdateDeleteSpecific verifies the deletion of a single RR from an RRset
@@ -228,7 +236,9 @@ func TestHandleUpdateDeleteSpecific(t *testing.T) {
 
 	buf := packet.NewBytePacketBuffer()
 	_ = req.Write(buf)
-	srv.handlePacket(buf.Buf[:buf.Position()], "127.0.0.1:1", func(resp []byte) error { return nil })
+	if err := srv.handlePacket(buf.Buf[:buf.Position()], "127.0.0.1:1", func(resp []byte) error { return nil }); err != nil {
+		t.Errorf("handlePacket failed: %v", err)
+	}
 
 	// Verify only 2.2.2.2 remains
 	count := 0
@@ -278,7 +288,7 @@ func TestHandleUpdateTSIG(t *testing.T) {
 	pBuf.Load(data)
 	_ = parsedReq.FromBuffer(pBuf)
 
-	err = srv.handlePacket(data, "127.0.0.1:12345", func(resp []byte) error {
+	if err := srv.handlePacket(data, "127.0.0.1:12345", func(resp []byte) error {
 		resPacket := packet.NewDNSPacket()
 		resBuf := packet.NewBytePacketBuffer()
 		resBuf.Load(resp)
@@ -287,8 +297,7 @@ func TestHandleUpdateTSIG(t *testing.T) {
 			t.Errorf("Expected NOERROR for valid TSIG, got %d", resPacket.Header.ResCode)
 		}
 		return nil
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("handlePacket failed: %v", err)
 	}
 
@@ -317,7 +326,7 @@ func TestHandleUpdate_ErrorCases(t *testing.T) {
 	// 0 questions
 	buf := packet.NewBytePacketBuffer()
 	_ = req.Write(buf)
-	srv.handlePacket(buf.Buf[:buf.Position()], "127.0.0.1:1", func(resp []byte) error {
+	if err := srv.handlePacket(buf.Buf[:buf.Position()], "127.0.0.1:1", func(resp []byte) error {
 		p := packet.NewDNSPacket()
 		pb := packet.NewBytePacketBuffer()
 		pb.Load(resp)
@@ -326,7 +335,9 @@ func TestHandleUpdate_ErrorCases(t *testing.T) {
 			t.Errorf("Expected FORMERR for ZOCOUNT=0, got %d", p.Header.ResCode)
 		}
 		return nil
-	})
+	}); err != nil {
+		t.Errorf("handlePacket failed: %v", err)
+	}
 
 	// 2. Unknown TSIG key
 	req2 := packet.NewDNSPacket()
@@ -335,7 +346,7 @@ func TestHandleUpdate_ErrorCases(t *testing.T) {
 	buf2 := packet.NewBytePacketBuffer()
 	_ = req2.Write(buf2)
 	_ = req2.SignTSIG(buf2, "unknown.", []byte("any"))
-	srv.handlePacket(buf2.Buf[:buf2.Position()], "127.0.0.1:1", func(resp []byte) error {
+	if err := srv.handlePacket(buf2.Buf[:buf2.Position()], "127.0.0.1:1", func(resp []byte) error {
 		p := packet.NewDNSPacket()
 		pb := packet.NewBytePacketBuffer()
 		pb.Load(resp)
@@ -344,7 +355,9 @@ func TestHandleUpdate_ErrorCases(t *testing.T) {
 			t.Errorf("Expected NOTAUTH for unknown TSIG, got %d", p.Header.ResCode)
 		}
 		return nil
-	})
+	}); err != nil {
+		t.Errorf("handlePacket failed: %v", err)
+	}
 
 	// 3. Not authoritative zone
 	req3 := packet.NewDNSPacket()
@@ -352,7 +365,7 @@ func TestHandleUpdate_ErrorCases(t *testing.T) {
 	req3.Questions = append(req3.Questions, packet.DNSQuestion{Name: "notauth.test.", QType: packet.SOA})
 	buf3 := packet.NewBytePacketBuffer()
 	_ = req3.Write(buf3)
-	srv.handlePacket(buf3.Buf[:buf3.Position()], "127.0.0.1:1", func(resp []byte) error {
+	if err := srv.handlePacket(buf3.Buf[:buf3.Position()], "127.0.0.1:1", func(resp []byte) error {
 		p := packet.NewDNSPacket()
 		pb := packet.NewBytePacketBuffer()
 		pb.Load(resp)
@@ -361,7 +374,9 @@ func TestHandleUpdate_ErrorCases(t *testing.T) {
 			t.Errorf("Expected NOTAUTH for non-existent zone, got %d", p.Header.ResCode)
 		}
 		return nil
-	})
+	}); err != nil {
+		t.Errorf("handlePacket failed: %v", err)
+	}
 }
 
 func TestCheckPrerequisite_RRset(t *testing.T) {

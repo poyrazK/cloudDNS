@@ -25,7 +25,7 @@ func TestRFC1034_CaseInsensitivity(t *testing.T) {
 	_ = req.Write(reqBuf)
 
 	var capturedResp []byte
-	srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 53}, func(resp []byte) error {
+	_ = srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 53}, func(resp []byte) error {
 		capturedResp = resp
 		return nil
 	})
@@ -60,7 +60,7 @@ func TestRFC1034_WildcardMatching(t *testing.T) {
 	_ = req.Write(reqBuf)
 
 	var capturedResp []byte
-	srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 53}, func(resp []byte) error {
+	_ = srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 53}, func(resp []byte) error {
 		capturedResp = resp
 		return nil
 	})
@@ -92,14 +92,15 @@ func TestRFC1034_Recursion(t *testing.T) {
 		resp.Header.ID = 1234
 		resp.Header.Response = true
 
-		if server == "198.41.0.4:53" { // Root
+		switch server {
+		case "198.41.0.4:53": // Root
 			resp.Authorities = append(resp.Authorities, packet.DNSRecord{
 				Name: "com.", Type: packet.NS, Host: "ns1.tld.",
 			})
 			resp.Resources = append(resp.Resources, packet.DNSRecord{
 				Name: "ns1.tld.", Type: packet.A, IP: net.ParseIP("1.1.1.1"),
 			})
-		} else if server == "1.1.1.1:53" { // TLD
+		case "1.1.1.1:53": // TLD
 			resp.Answers = append(resp.Answers, packet.DNSRecord{
 				Name: name, Type: qtype, TTL: 300, IP: net.ParseIP("10.20.30.40"),
 			})
