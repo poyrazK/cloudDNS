@@ -39,7 +39,7 @@ func TestEndToEnd_RFC_Extensions(t *testing.T) {
 	apiHandler := api.NewAPIHandler(dnsSvc)
 	mux := http.NewServeMux()
 	apiHandler.RegisterRoutes(mux)
-	apiSrv := &http.Server{Addr: apiAddr, Handler: mux}
+	apiSrv := &http.Server{Addr: apiAddr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	_ = apiSrv.ListenAndServe()
 
 	// Setup a mock "slave" to receive NOTIFY
@@ -85,7 +85,7 @@ func TestEndToEnd_RFC_Extensions(t *testing.T) {
 	}
 	nb, _ := json.Marshal(nsRec)
 	respNS, err := http.Post(fmt.Sprintf("http://%s/zones/%s/records", apiAddr, createdZone.ID), "application/json", bytes.NewBuffer(nb))
-	if err == nil { respNS.Body.Close() }
+	if err == nil { _ = respNS.Body.Close() }
 	
 	// Add Glue record for the slave NS so notifySlaves can resolve it
 	glueRec := domain.Record{
@@ -93,7 +93,7 @@ func TestEndToEnd_RFC_Extensions(t *testing.T) {
 	}
 	gb, _ := json.Marshal(glueRec)
 	respGlue, err := http.Post(fmt.Sprintf("http://%s/zones/%s/records", apiAddr, createdZone.ID), "application/json", bytes.NewBuffer(gb))
-	if err == nil { respGlue.Body.Close() }
+	if err == nil { _ = respGlue.Body.Close() }
 
 	// Get the starting serial
 	recs, _ := repo.GetRecords(context.Background(), "rfc.test.", domain.TypeSOA, "")
@@ -147,7 +147,7 @@ func TestEndToEnd_RFC_Extensions(t *testing.T) {
 	// 5. Verify change via API
 	respRecs, err := http.Get(fmt.Sprintf("http://%s/zones/%s/records?tenant_id=admin", apiAddr, createdZone.ID))
 	if err != nil { t.Fatalf("GET records failed: %v", err) }
-	defer respRecs.Body.Close()
+	defer func() { _ = respRecs.Body.Close() }()
 	var zoneRecs []domain.Record
 	_ = json.NewDecoder(respRecs.Body).Decode(&zoneRecs)
 	foundDynamic := false

@@ -16,7 +16,8 @@ func TestResolveRecursive(t *testing.T) {
 		resp.Header.ID = 1234
 		resp.Header.Response = true
 
-		if server == "198.41.0.4:53" {
+		switch server {
+		case "198.41.0.4:53":
 			// Root server returns delegation to .com
 			resp.Authorities = append(resp.Authorities, packet.DNSRecord{
 				Name: "com.",
@@ -28,7 +29,7 @@ func TestResolveRecursive(t *testing.T) {
 				Type: packet.A,
 				IP:   net.ParseIP("1.1.1.1"),
 			})
-		} else if server == "1.1.1.1:53" {
+		case "1.1.1.1:53":
 			// .com server returns final answer
 			resp.Answers = append(resp.Answers, packet.DNSRecord{
 				Name: name,

@@ -29,7 +29,7 @@ func TestEndToEndDNS_Advanced(t *testing.T) {
 	apiHandler := api.NewAPIHandler(svc)
 	mux := http.NewServeMux()
 	apiHandler.RegisterRoutes(mux)
-	apiSrv := &http.Server{Addr: apiAddr, Handler: mux}
+	apiSrv := &http.Server{Addr: apiAddr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	_ = apiSrv.ListenAndServe()
 
 	time.Sleep(200 * time.Millisecond)
@@ -104,7 +104,7 @@ func TestEndToEndDNS_Advanced(t *testing.T) {
 	if len(axfrRes.Answers) == 0 || axfrRes.Answers[0].Type != packet.SOA {
 		t.Errorf("AXFR E2E failed to start with SOA")
 	}
-	tcpConn.Close()
+	_ = tcpConn.Close()
 
 	// 5. Test EDNS(0) + NSEC (Authenticated Denial)
 	conn2, _ := net.Dial("udp", dnsAddr)

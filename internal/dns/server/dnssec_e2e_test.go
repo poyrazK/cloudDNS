@@ -33,7 +33,7 @@ func TestEndToEndDNSSEC_Lifecycle(t *testing.T) {
 	apiHandler := api.NewAPIHandler(dnsSvc)
 	mux := http.NewServeMux()
 	apiHandler.RegisterRoutes(mux)
-	apiSrv := &http.Server{Addr: apiAddr, Handler: mux}
+	apiSrv := &http.Server{Addr: apiAddr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	_ = apiSrv.ListenAndServe()
 
 	// Wait for servers to start
