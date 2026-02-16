@@ -15,7 +15,7 @@ func TestPostgresRepository_Unit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open sqlmock: %s", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	repo := NewPostgresRepository(db)
 	ctx := context.Background()
@@ -263,7 +263,7 @@ func TestPostgresRepository_Unit(t *testing.T) {
 
 		// Ping
 		mock.ExpectPing()
-		repo.Ping(ctx)
+		_ = repo.Ping(ctx)
 	})
 
 	// 14. Error Paths

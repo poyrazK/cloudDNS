@@ -45,7 +45,7 @@ func TestRunBenchmark(t *testing.T) {
 	// Start a mock UDP server
 	addr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:0")
 	conn, _ := net.ListenUDP("udp", addr)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	
 	serverAddr := conn.LocalAddr().String()
 	
@@ -76,7 +76,7 @@ func TestRunRealisticWorker(t *testing.T) {
 	// Start a mock UDP server
 	addr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:0")
 	conn, _ := net.ListenUDP("udp", addr)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	
 	serverAddr := conn.LocalAddr().String()
 	
@@ -112,7 +112,7 @@ func TestRunRealisticWorker(t *testing.T) {
 func TestSeedDatabase(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil { t.Fatalf("failed to open sqlmock: %s", err) }
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	mock.ExpectExec("INSERT INTO dns_zones").WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec("INSERT INTO dns_records").WillReturnResult(sqlmock.NewResult(1, 1))

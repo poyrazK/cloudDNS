@@ -125,7 +125,10 @@ func TestPostgresRepository_Integration(t *testing.T) {
 		ID: auditID1, TenantID: "t1", Action: "CREATE", ResourceType: "ZONE", ResourceID: zoneID1, Details: "...", CreatedAt: time.Now(),
 	}
 	_ = repo.SaveAuditLog(ctx, audit)
-	logs, err := repo.GetAuditLogs(ctx,  "t1")
+	logs, err := repo.GetAuditLogs(ctx, "t1")
+	if err != nil {
+		t.Errorf("GetAuditLogs failed: %v", err)
+	}
 	if len(logs) != 1 {
 		t.Errorf("Audit logs expected 1, got %d", len(logs))
 	}
@@ -164,7 +167,10 @@ func TestPostgresRepository_Integration(t *testing.T) {
 	if err := repo.RecordZoneChange(ctx, change); err != nil {
 		t.Errorf("RecordZoneChange failed: %v", err)
 	}
-	changes, err := repo.ListZoneChanges(ctx,  zoneID1, 99)
+	changes, err := repo.ListZoneChanges(ctx, zoneID1, 99)
+	if err != nil {
+		t.Errorf("ListZoneChanges failed: %v", err)
+	}
 	if len(changes) != 1 || changes[0].ID != changeID1 {
 		t.Errorf("ListZoneChanges expected 1 change, got %d", len(changes))
 	}
@@ -175,12 +181,18 @@ func TestPostgresRepository_Integration(t *testing.T) {
 	_ = repo.CreateRecord(ctx, &domain.Record{ID: rid5, ZoneID: zoneID1, Name: "private.test.", Type: domain.TypeA, Content: "10.0.0.1", TTL: 60, Network: &netStr})
 	
 	// Should match from 192.168.1.50
-	recs, err = repo.GetRecords(ctx,  "private.test.", domain.TypeA, "192.168.1.50")
+	recs, err = repo.GetRecords(ctx, "private.test.", domain.TypeA, "192.168.1.50")
+	if err != nil {
+		t.Errorf("GetRecords failed: %v", err)
+	}
 	if len(recs) != 1 {
 		t.Errorf("Split-Horizon match failed")
 	}
 	// Should NOT match from 8.8.8.8
-	recs, err = repo.GetRecords(ctx,  "private.test.", domain.TypeA, "8.8.8.8")
+	recs, err = repo.GetRecords(ctx, "private.test.", domain.TypeA, "8.8.8.8")
+	if err != nil {
+		t.Errorf("GetRecords failed: %v", err)
+	}
 	if len(recs) != 0 {
 		t.Errorf("Split-Horizon isolation failed")
 	}
