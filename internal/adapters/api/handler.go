@@ -47,6 +47,11 @@ func (h *APIHandler) CreateZone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := domain.ValidateZoneName(zone.Name); err != nil {
+		http.Error(w, "Invalid zone name: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	// In a real app, we would get TenantID from Auth context
 	if zone.TenantID == "" {
 		zone.TenantID = "default-tenant"
