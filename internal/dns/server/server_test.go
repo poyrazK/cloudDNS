@@ -255,12 +255,10 @@ func TestHandlePacketLocalHit(t *testing.T) {
 	data := buffer.Buf[:buffer.Position()]
 
 	var capturedResp []byte
-	err := srv.handlePacket(data, &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
+	if err := srv.handlePacket(data, &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
 		capturedResp = resp
 		return nil
-	})
-
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("HandlePacket failed: %v", err)
 	}
 
@@ -290,7 +288,7 @@ func TestHandlePacketCacheHit(t *testing.T) {
 		Name: "cached.test.", Type: packet.A, IP: net.ParseIP("2.2.2.2"), TTL: 60, Class: 1,
 	})
 	buf := packet.NewBytePacketBuffer()
-	cachedPacket.Write(buf)
+	_ = cachedPacket.Write(buf)
 	srv.Cache.Set(cacheKey, buf.Buf[:buf.Position()], 60*time.Second)
 
 	// Query
@@ -301,10 +299,12 @@ func TestHandlePacketCacheHit(t *testing.T) {
 	_ = req.Write(reqBuf)
 
 	var capturedResp []byte
-	srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
+	if err := srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
 		capturedResp = resp
 		return nil
-	})
+	}); err != nil {
+		t.Fatalf("handlePacket failed: %v", err)
+	}
 
 	resBuf := packet.NewBytePacketBuffer()
 	copy(resBuf.Buf, capturedResp)
@@ -372,15 +372,17 @@ func TestHandlePacketNXDOMAIN(t *testing.T) {
 	_ = req.Write(reqBuf)
 
 	var capturedResp []byte
-	srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
+	if err := srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
 		capturedResp = resp
 		return nil
-	})
+	}); err != nil {
+		t.Fatalf("handlePacket failed: %v", err)
+	}
 
 	resPacket := packet.NewDNSPacket()
 	pBuf := packet.NewBytePacketBuffer()
 	copy(pBuf.Buf, capturedResp)
-	resPacket.FromBuffer(pBuf)
+	_ = resPacket.FromBuffer(pBuf)
 
 	if resPacket.Header.ResCode != 3 {
 		t.Errorf("Expected NXDOMAIN (3), got %d", resPacket.Header.ResCode)
@@ -396,15 +398,17 @@ func TestHandlePacketNoQuestions(t *testing.T) {
 	_ = req.Write(reqBuf)
 
 	var capturedResp []byte
-	srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
+	if err := srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
 		capturedResp = resp
 		return nil
-	})
+	}); err != nil {
+		t.Fatalf("handlePacket failed: %v", err)
+	}
 
 	resPacket := packet.NewDNSPacket()
 	pBuf := packet.NewBytePacketBuffer()
 	copy(pBuf.Buf, capturedResp)
-	resPacket.FromBuffer(pBuf)
+	_ = resPacket.FromBuffer(pBuf)
 
 	if resPacket.Header.ResCode != 4 {
 		t.Errorf("Expected FORMERR (4) for no questions, got %d", resPacket.Header.ResCode)
@@ -426,11 +430,9 @@ func TestHandlePacketEDNS(t *testing.T) {
 	reqBuf := packet.NewBytePacketBuffer()
 	_ = req.Write(reqBuf)
 
-	err := srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
+	if err := srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
 		return nil
-	})
-	
-	if err != nil {
+	}); err != nil {
 		t.Errorf("HandlePacket failed with EDNS: %v", err)
 	}
 }
@@ -455,11 +457,11 @@ func TestHandlePacketTruncation(t *testing.T) {
 	reqBuf := packet.NewBytePacketBuffer()
 	_ = req.Write(reqBuf)
 
-	err := srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
+	if err := srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
 		resPacket := packet.NewDNSPacket()
 		resBuffer := packet.NewBytePacketBuffer()
 		copy(resBuffer.Buf, resp)
-		resPacket.FromBuffer(resBuffer)
+		_ = resPacket.FromBuffer(resBuffer)
 
 		if !resPacket.Header.TruncatedMessage {
 			t.Errorf("Expected TC bit to be set")
@@ -468,8 +470,7 @@ func TestHandlePacketTruncation(t *testing.T) {
 			t.Errorf("Expected answers to be cleared in truncated response, got %d", len(resPacket.Answers))
 		}
 		return nil
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("handlePacket failed: %v", err)
 	}
 }
