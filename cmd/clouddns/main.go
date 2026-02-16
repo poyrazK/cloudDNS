@@ -77,5 +77,14 @@ func run() error {
 		return nil
 	}
 
-	return http.ListenAndServe(apiAddr, mux)
+	s := &http.Server{
+		Addr:              apiAddr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+
+	return s.ListenAndServe()
 }
