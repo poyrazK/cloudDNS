@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"net"
 	"strings"
 
@@ -41,14 +42,14 @@ func (r *PostgresRepository) GetRecords(ctx context.Context, name string, qType 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { if err := rows.Close(); err != nil { log.Printf("failed to close rows: %v", err) } }()
 
 	var records []domain.Record
 	for rows.Next() {
 		var rec domain.Record
 		var priority sql.NullInt32
-		if err := rows.Scan(&rec.ID, &rec.ZoneID, &rec.Name, &rec.Type, &rec.Content, &rec.TTL, &priority, &rec.Network); err != nil {
-			return nil, err
+		if errScan := rows.Scan(&rec.ID, &rec.ZoneID, &rec.Name, &rec.Type, &rec.Content, &rec.TTL, &priority, &rec.Network); errScan != nil {
+			return nil, errScan
 		}
 		if priority.Valid {
 			p := int(priority.Int32)
@@ -69,13 +70,13 @@ func (r *PostgresRepository) GetIPsForName(ctx context.Context, name string, cli
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { if err := rows.Close(); err != nil { log.Printf("failed to close rows: %v", err) } }()
 
 	var ips []string
 	for rows.Next() {
 		var ip string
-		if err := rows.Scan(&ip); err != nil {
-			return nil, err
+		if errScan := rows.Scan(&ip); errScan != nil {
+			return nil, errScan
 		}
 		ips = append(ips, ip)
 	}
@@ -101,14 +102,14 @@ func (r *PostgresRepository) ListRecordsForZone(ctx context.Context, zoneID stri
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { if err := rows.Close(); err != nil { log.Printf("failed to close rows: %v", err) } }()
 
 	var records []domain.Record
 	for rows.Next() {
 		var rec domain.Record
 		var priority sql.NullInt32
-		if err := rows.Scan(&rec.ID, &rec.ZoneID, &rec.Name, &rec.Type, &rec.Content, &rec.TTL, &priority, &rec.Network); err != nil {
-			return nil, err
+		if errScan := rows.Scan(&rec.ID, &rec.ZoneID, &rec.Name, &rec.Type, &rec.Content, &rec.TTL, &priority, &rec.Network); errScan != nil {
+			return nil, errScan
 		}
 		if priority.Valid {
 			p := int(priority.Int32)
@@ -131,7 +132,11 @@ func (r *PostgresRepository) CreateZoneWithRecords(ctx context.Context, zone *do
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		if err := tx.Rollback(); err != nil && err != sql.ErrTxDone {
+			log.Printf("failed to rollback transaction: %v", err)
+		}
+	}()
 
 	// 1. Insert Zone
 	zoneQuery := `INSERT INTO dns_zones (id, tenant_id, name, vpc_id, description, created_at, updated_at) 
@@ -176,13 +181,13 @@ func (r *PostgresRepository) ListZones(ctx context.Context, tenantID string) ([]
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { if err := rows.Close(); err != nil { log.Printf("failed to close rows: %v", err) } }()
 
 	var zones []domain.Zone
 	for rows.Next() {
 		var z domain.Zone
-		if err := rows.Scan(&z.ID, &z.TenantID, &z.Name, &z.VPCID, &z.Description, &z.CreatedAt, &z.UpdatedAt); err != nil {
-			return nil, err
+		if errScan := rows.Scan(&z.ID, &z.TenantID, &z.Name, &z.VPCID, &z.Description, &z.CreatedAt, &z.UpdatedAt); errScan != nil {
+			return nil, errScan
 		}
 		zones = append(zones, z)
 	}
@@ -233,14 +238,14 @@ func (r *PostgresRepository) ListZoneChanges(ctx context.Context, zoneID string,
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { if err := rows.Close(); err != nil { log.Printf("failed to close rows: %v", err) } }()
 
 	var changes []domain.ZoneChange
 	for rows.Next() {
 		var c domain.ZoneChange
 		var priority sql.NullInt32
-		if err := rows.Scan(&c.ID, &c.ZoneID, &c.Serial, &c.Action, &c.Name, &c.Type, &c.Content, &c.TTL, &priority, &c.CreatedAt); err != nil {
-			return nil, err
+		if errScan := rows.Scan(&c.ID, &c.ZoneID, &c.Serial, &c.Action, &c.Name, &c.Type, &c.Content, &c.TTL, &priority, &c.CreatedAt); errScan != nil {
+			return nil, errScan
 		}
 		if priority.Valid {
 			p := int(priority.Int32)
@@ -264,13 +269,13 @@ func (r *PostgresRepository) GetAuditLogs(ctx context.Context, tenantID string) 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { if err := rows.Close(); err != nil { log.Printf("failed to close rows: %v", err) } }()
 
 	var logs []domain.AuditLog
 	for rows.Next() {
 		var l domain.AuditLog
-		if err := rows.Scan(&l.ID, &l.TenantID, &l.Action, &l.ResourceType, &l.ResourceID, &l.Details, &l.CreatedAt); err != nil {
-			return nil, err
+		if errScan := rows.Scan(&l.ID, &l.TenantID, &l.Action, &l.ResourceType, &l.ResourceID, &l.Details, &l.CreatedAt); errScan != nil {
+			return nil, errScan
 		}
 		logs = append(logs, l)
 	}
@@ -294,13 +299,13 @@ func (r *PostgresRepository) ListKeysForZone(ctx context.Context, zoneID string)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { if err := rows.Close(); err != nil { log.Printf("failed to close rows: %v", err) } }()
 
 	var keys []domain.DNSSECKey
 	for rows.Next() {
 		var k domain.DNSSECKey
-		if err := rows.Scan(&k.ID, &k.ZoneID, &k.KeyType, &k.Algorithm, &k.PrivateKey, &k.PublicKey, &k.Active, &k.CreatedAt, &k.UpdatedAt); err != nil {
-			return nil, err
+		if errScan := rows.Scan(&k.ID, &k.ZoneID, &k.KeyType, &k.Algorithm, &k.PrivateKey, &k.PublicKey, &k.Active, &k.CreatedAt, &k.UpdatedAt); errScan != nil {
+			return nil, errScan
 		}
 		keys = append(keys, k)
 	}
@@ -415,11 +420,21 @@ func ConvertDomainToPacketRecord(rec domain.Record) (packet.DNSRecord, error) {
 			if !strings.HasSuffix(pRec.MName, ".") { pRec.MName += "." }
 			pRec.RName = parts[1]
 			if !strings.HasSuffix(pRec.RName, ".") { pRec.RName += "." }
-			fmt.Sscanf(parts[2], "%d", &pRec.Serial)
-			fmt.Sscanf(parts[3], "%d", &pRec.Refresh)
-			fmt.Sscanf(parts[4], "%d", &pRec.Retry)
-			fmt.Sscanf(parts[5], "%d", &pRec.Expire)
-			fmt.Sscanf(parts[6], "%d", &pRec.Minimum)
+			if _, err := fmt.Sscanf(parts[2], "%d", &pRec.Serial); err != nil {
+				return pRec, fmt.Errorf("failed to parse SOA serial: %w", err)
+			}
+			if _, err := fmt.Sscanf(parts[3], "%d", &pRec.Refresh); err != nil {
+				return pRec, fmt.Errorf("failed to parse SOA refresh: %w", err)
+			}
+			if _, err := fmt.Sscanf(parts[4], "%d", &pRec.Retry); err != nil {
+				return pRec, fmt.Errorf("failed to parse SOA retry: %w", err)
+			}
+			if _, err := fmt.Sscanf(parts[5], "%d", &pRec.Expire); err != nil {
+				return pRec, fmt.Errorf("failed to parse SOA expire: %w", err)
+			}
+			if _, err := fmt.Sscanf(parts[6], "%d", &pRec.Minimum); err != nil {
+				return pRec, fmt.Errorf("failed to parse SOA minimum: %w", err)
+			}
 		}
 	default:
 		return pRec, fmt.Errorf("unsupported record type: %s", rec.Type)

@@ -29,14 +29,14 @@ func TestDoH_E2E(t *testing.T) {
 	req.Header.ID = 1234
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "doh-e2e.test.", QType: packet.A})
 	reqBuf := packet.NewBytePacketBuffer()
-	req.Write(reqBuf)
+	_ = req.Write(reqBuf)
 	reqData := reqBuf.Buf[:reqBuf.Position()]
 
 	resp, err := http.Post(ts.URL+"/dns-query", "application/dns-message", bytes.NewReader(reqData))
-	if errScan != nil {
+	if err != nil {
 		t.Fatalf("DoH POST failed: %v", err)
 	}
-	defer resp.Body.Close()
+	_ = resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("Expected 200 OK, got %d", resp.StatusCode)
@@ -49,7 +49,7 @@ func TestDoH_E2E(t *testing.T) {
 	resPacket := packet.NewDNSPacket()
 	resBuf := packet.NewBytePacketBuffer()
 	resBuf.Load(resBody)
-	if err := resPacket.FromBuffer(resBuf); errScan != nil {
+	if err := resPacket.FromBuffer(resBuf); err != nil {
 		t.Fatalf("Failed to parse DoH response: %v", err)
 	}
 
@@ -60,10 +60,10 @@ func TestDoH_E2E(t *testing.T) {
 	// 2. Valid Query (GET)
 	b64Query := base64.RawURLEncoding.EncodeToString(reqData)
 	respGET, err := http.Get(ts.URL + "/dns-query?dns=" + b64Query)
-	if errScan != nil {
+	if err != nil {
 		t.Fatalf("DoH GET failed: %v", err)
 	}
-	defer respGET.Body.Close()
+	_ = respGET.Body.Close()
 
 	if respGET.StatusCode != http.StatusOK {
 		t.Errorf("Expected 200 OK for GET, got %d", respGET.StatusCode)
@@ -73,14 +73,14 @@ func TestDoH_E2E(t *testing.T) {
 	resPacket = packet.NewDNSPacket()
 	resBuf = packet.NewBytePacketBuffer()
 	resBuf.Load(resBody)
-	resPacket.FromBuffer(resBuf)
+	_ = resPacket.FromBuffer(resBuf)
 	if len(resPacket.Answers) != 1 || resPacket.Answers[0].IP.String() != "9.9.9.9" {
 		t.Errorf("DoH GET response mismatch")
 	}
 
 	// 3. Invalid Content-Type (POST)
 	respInv, err := http.Post(ts.URL+"/dns-query", "text/plain", bytes.NewReader(reqData))
-	if err == nil { respInv.Body.Close() }
+	if err == nil { _ = respInv.Body.Close() }
 	if respInv != nil && respInv.StatusCode != http.StatusBadRequest {
 		t.Errorf("Expected 400 Bad Request for invalid content-type, got %d", respInv.StatusCode)
 	}
@@ -88,21 +88,21 @@ func TestDoH_E2E(t *testing.T) {
 	// 4. Invalid Method
 	reqReq, _ := http.NewRequest("PUT", ts.URL+"/dns-query", nil)
 	respMeth, err := http.DefaultClient.Do(reqReq)
-	if err == nil { respMeth.Body.Close() }
+	if err == nil { _ = respMeth.Body.Close() }
 	if respMeth != nil && respMeth.StatusCode != http.StatusMethodNotAllowed {
 		t.Errorf("Expected 405 Method Not Allowed for PUT, got %d", respMeth.StatusCode)
 	}
 
 	// 5. Missing 'dns' parameter (GET)
 	respMiss, err := http.Get(ts.URL + "/dns-query")
-	if err == nil { respMiss.Body.Close() }
+	if err == nil { _ = respMiss.Body.Close() }
 	if respMiss != nil && respMiss.StatusCode != http.StatusBadRequest {
 		t.Errorf("Expected 400 Bad Request for missing dns param, got %d", respMiss.StatusCode)
 	}
 
 	// 6. Invalid base64 (GET)
 	respB64, err := http.Get(ts.URL + "/dns-query?dns=!!!")
-	if err == nil { respB64.Body.Close() }
+	if err == nil { _ = respB64.Body.Close() }
 	if respB64 != nil && respB64.StatusCode != http.StatusBadRequest {
 		t.Errorf("Expected 400 Bad Request for invalid base64, got %d", respB64.StatusCode)
 	}

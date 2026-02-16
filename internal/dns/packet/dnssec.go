@@ -15,11 +15,11 @@ func (r *DNSRecord) ComputeKeyTag() uint16 {
 	}
 
 	buf := NewBytePacketBuffer()
-	buf.Writeu16(r.Flags)
-	buf.Write(3) // Protocol
-	buf.Write(r.Algorithm)
+	if err := buf.Writeu16(r.Flags); err != nil { return 0 }
+	if err := buf.Write(3); err != nil { return 0 } // Protocol
+	if err := buf.Write(r.Algorithm); err != nil { return 0 }
 	for _, b := range r.PublicKey {
-		buf.Write(b)
+		if err := buf.Write(b); err != nil { return 0 }
 	}
 
 	data := buf.Buf[:buf.Position()]
@@ -43,12 +43,12 @@ func (r *DNSRecord) ComputeDS(digestType uint8) (DNSRecord, error) {
 
 	// 1. Prepare Buffer: owner name | RDATA
 	buf := NewBytePacketBuffer()
-	buf.WriteName(strings.ToLower(r.Name))
-	buf.Writeu16(r.Flags)
-	buf.Write(3) // Protocol
-	buf.Write(r.Algorithm)
+	if err := buf.WriteName(strings.ToLower(r.Name)); err != nil { return DNSRecord{}, err }
+	if err := buf.Writeu16(r.Flags); err != nil { return DNSRecord{}, err }
+	if err := buf.Write(3); err != nil { return DNSRecord{}, err } // Protocol
+	if err := buf.Write(r.Algorithm); err != nil { return DNSRecord{}, err }
 	for _, b := range r.PublicKey {
-		buf.Write(b)
+		if err := buf.Write(b); err != nil { return DNSRecord{}, err }
 	}
 
 	// 2. Hash it
@@ -97,20 +97,20 @@ func SignRRSet(records []DNSRecord, privKey *ecdsa.PrivateKey, signerName string
 	}
 
 	buf := NewBytePacketBuffer()
-	buf.Writeu16(sig.TypeCovered)
-	buf.Write(sig.Algorithm)
-	buf.Write(sig.Labels)
-	buf.Writeu32(sig.OrigTTL)
-	buf.Writeu32(sig.Expiration)
-	buf.Writeu32(sig.Inception)
-	buf.Writeu16(sig.KeyTag)
-	buf.WriteName(sig.SignerName)
+	if err := buf.Writeu16(sig.TypeCovered); err != nil { return DNSRecord{}, err }
+	if err := buf.Write(sig.Algorithm); err != nil { return DNSRecord{}, err }
+	if err := buf.Write(sig.Labels); err != nil { return DNSRecord{}, err }
+	if err := buf.Writeu32(sig.OrigTTL); err != nil { return DNSRecord{}, err }
+	if err := buf.Writeu32(sig.Expiration); err != nil { return DNSRecord{}, err }
+	if err := buf.Writeu32(sig.Inception); err != nil { return DNSRecord{}, err }
+	if err := buf.Writeu16(sig.KeyTag); err != nil { return DNSRecord{}, err }
+	if err := buf.WriteName(sig.SignerName); err != nil { return DNSRecord{}, err }
 
 	for _, r := range records {
-		buf.WriteName(strings.ToLower(r.Name))
-		buf.Writeu16(uint16(r.Type))
-		buf.Writeu16(uint16(1)) // Class IN
-		buf.Writeu32(r.TTL)
+		if err := buf.WriteName(strings.ToLower(r.Name)); err != nil { return DNSRecord{}, err }
+		if err := buf.Writeu16(uint16(r.Type)); err != nil { return DNSRecord{}, err }
+		if err := buf.Writeu16(uint16(1)); err != nil { return DNSRecord{}, err } // Class IN
+		if err := buf.Writeu32(r.TTL); err != nil { return DNSRecord{}, err }
 		// Simplified: Real DNSSEC requires canonical RDATA serialization here
 	}
 

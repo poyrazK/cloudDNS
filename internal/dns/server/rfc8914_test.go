@@ -20,7 +20,7 @@ func TestRFC8914_EDE(t *testing.T) {
 	})
 
 	reqBuf := packet.NewBytePacketBuffer()
-	req.Write(reqBuf)
+	_ = req.Write(reqBuf)
 
 	var capturedResp []byte
 	srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 53}, func(resp []byte) error {
@@ -31,7 +31,7 @@ func TestRFC8914_EDE(t *testing.T) {
 	res := packet.NewDNSPacket()
 	resBuf := packet.NewBytePacketBuffer()
 	copy(resBuf.Buf, capturedResp)
-	res.FromBuffer(resBuf)
+	_ = res.FromBuffer(resBuf)
 
 	// Check for EDE in OPT
 	foundEDE := false

@@ -28,7 +28,7 @@ func TestRFC4034_NSEC(t *testing.T) {
 	})
 	
 	reqBuf := packet.NewBytePacketBuffer()
-	req.Write(reqBuf)
+	_ = req.Write(reqBuf)
 
 	var capturedResp []byte
 	srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 53}, func(resp []byte) error {
@@ -39,7 +39,7 @@ func TestRFC4034_NSEC(t *testing.T) {
 	resPacket := packet.NewDNSPacket()
 	resBuf := packet.NewBytePacketBuffer()
 	copy(resBuf.Buf, capturedResp)
-	resPacket.FromBuffer(resBuf)
+	_ = resPacket.FromBuffer(resBuf)
 
 	if resPacket.Header.ResCode != 3 {
 		t.Errorf("Expected NXDOMAIN (3), got %d", resPacket.Header.ResCode)

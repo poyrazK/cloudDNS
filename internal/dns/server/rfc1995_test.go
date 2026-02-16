@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net"
 	"testing"
 
@@ -30,7 +31,7 @@ func TestHandleIXFR_UpToDate(t *testing.T) {
 	})
 
 	buffer := packet.NewBytePacketBuffer()
-	req.Write(buffer)
+	_ = req.Write(buffer)
 
 	// IXFR requires TCP
 	conn := &mockTCPConn{}
@@ -44,7 +45,7 @@ func TestHandleIXFR_UpToDate(t *testing.T) {
 	resp := packet.NewDNSPacket()
 	pBuf := packet.NewBytePacketBuffer()
 	pBuf.Load(conn.captured[0])
-	resp.FromBuffer(pBuf)
+	_ = resp.FromBuffer(pBuf)
 
 	if len(resp.Answers) != 1 || resp.Answers[0].Type != packet.SOA {
 		t.Errorf("Expected single SOA response")
@@ -64,7 +65,7 @@ func TestHandleIXFR_WithChanges(t *testing.T) {
 		},
 	}
 	// Add history: Client has 100, we are at 101
-	repo.RecordZoneChange(context.Background(), &domain.ZoneChange{
+	_ = repo.RecordZoneChange(context.Background(), &domain.ZoneChange{
 		ZoneID: "zone-1", Serial: 101, Action: "ADD", Name: "new.example.test.", Type: "A", Content: "1.2.3.4", TTL: 300,
 	})
 
@@ -92,7 +93,7 @@ func TestHandleIXFR_WithChanges(t *testing.T) {
 	resp1 := packet.NewDNSPacket()
 	pBuf1 := packet.NewBytePacketBuffer()
 	pBuf1.Load(conn.captured[0])
-	resp1.FromBuffer(pBuf1)
+	_ = resp1.FromBuffer(pBuf1)
 	if resp1.Answers[0].Serial != 101 {
 		t.Errorf("First packet should be current SOA (101), got %d", resp1.Answers[0].Serial)
 	}

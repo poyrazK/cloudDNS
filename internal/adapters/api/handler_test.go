@@ -20,7 +20,7 @@ type mockDNSService struct {
 }
 
 func (m *mockDNSService) CreateZone(ctx context.Context, zone *domain.Zone) error {
-	if m.errScan != nil {
+	if m.err != nil {
 		return m.err
 	}
 	zone.ID = "zone-123"
@@ -29,7 +29,7 @@ func (m *mockDNSService) CreateZone(ctx context.Context, zone *domain.Zone) erro
 }
 
 func (m *mockDNSService) CreateRecord(ctx context.Context, record *domain.Record) error {
-	if m.errScan != nil {
+	if m.err != nil {
 		return m.err
 	}
 	record.ID = "rec-456"
@@ -42,14 +42,14 @@ func (m *mockDNSService) Resolve(ctx context.Context, name string, qType domain.
 }
 
 func (m *mockDNSService) ListZones(ctx context.Context, tenantID string) ([]domain.Zone, error) {
-	if m.errScan != nil {
+	if m.err != nil {
 		return nil, m.err
 	}
 	return m.zones, nil
 }
 
 func (m *mockDNSService) ListRecordsForZone(ctx context.Context, zoneID string) ([]domain.Record, error) {
-	if m.errScan != nil {
+	if m.err != nil {
 		return nil, m.err
 	}
 	return m.records, nil
@@ -64,7 +64,7 @@ func (m *mockDNSService) DeleteRecord(ctx context.Context, id, zoneID string) er
 }
 
 func (m *mockDNSService) ImportZone(ctx context.Context, tenantID string, r io.Reader) (*domain.Zone, error) {
-	if m.errScan != nil {
+	if m.err != nil {
 		return nil, m.err
 	}
 	return &domain.Zone{ID: "zone-imported", TenantID: tenantID}, nil
@@ -133,7 +133,7 @@ func TestCreateZone_InternalError(t *testing.T) {
 	svc := &mockDNSService{err: errors.New("db error")}
 	handler := NewAPIHandler(svc)
 	
-	zoneReq := domain.Zone{Name: "test.com"}
+	zoneReq := domain.Zone{Name: "test.com."}
 	body, _ := json.Marshal(zoneReq)
 	req := httptest.NewRequest("POST", "/zones", bytes.NewBuffer(body))
 	w := httptest.NewRecorder()
@@ -149,7 +149,7 @@ func TestCreateZone(t *testing.T) {
 	svc := &mockDNSService{}
 	handler := NewAPIHandler(svc)
 	
-	zoneReq := domain.Zone{Name: "test.com", TenantID: "t1"}
+	zoneReq := domain.Zone{Name: "test.com.", TenantID: "t1"}
 	body, _ := json.Marshal(zoneReq)
 	
 	req := httptest.NewRequest("POST", "/zones", bytes.NewBuffer(body))
@@ -159,6 +159,38 @@ func TestCreateZone(t *testing.T) {
 	
 	if w.Code != http.StatusCreated {
 		t.Errorf("Expected status 201, got %d", w.Code)
+	}
+}
+
+func TestCreateZone_Validation(t *testing.T) {
+	svc := &mockDNSService{}
+	handler := NewAPIHandler(svc)
+
+	tests := []struct {
+		name    string
+		payload string
+		want    int
+	}{
+		{"Valid FQDN", `{"name": "example.com."}`, http.StatusCreated},
+		{"Valid Case Insensitive", `{"name": "ExAmPlE.CoM."}`, http.StatusCreated},
+		{"Invalid Missing Dot", `{"name": "example.com"}`, http.StatusBadRequest},
+		{"Invalid Empty", `{"name": ""}`, http.StatusBadRequest},
+		{"Invalid Root Zone", `{"name": "."}`, http.StatusCreated}, // Root is valid if svc handles it
+		{"Invalid Characters", `{"name": "invalid_chars.com."}`, http.StatusBadRequest},
+		{"Invalid Label Start Hyphen", `{"name": "-invalid.com."}`, http.StatusBadRequest},
+		{"Invalid Label End Hyphen", `{"name": "invalid-.com."}`, http.StatusBadRequest},
+		{"Invalid Long Label", `{"name": "thislabeliswaytoolongandexceedsthemaximumlengthofsixtythreecharacters.com."}`, http.StatusBadRequest},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("POST", "/zones", bytes.NewBuffer([]byte(tt.payload)))
+			w := httptest.NewRecorder()
+			handler.CreateZone(w, req)
+			if w.Code != tt.want {
+				t.Errorf("CreateZone(%s) status = %d, want %d", tt.name, w.Code, tt.want)
+			}
+		})
 	}
 }
 

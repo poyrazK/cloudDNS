@@ -42,7 +42,7 @@ func TestResolveRecursive(t *testing.T) {
 	}
 
 	resp, err := s.resolveRecursive("test.com.", packet.A)
-	if errScan != nil {
+	if err != nil {
 		t.Fatalf("Recursive resolve failed: %v", err)
 	}
 
@@ -64,7 +64,7 @@ func TestResolveRecursive_NXDOMAIN(t *testing.T) {
 	}
 
 	resp, err := s.resolveRecursive("nonexistent.io.", packet.A)
-	if errScan != nil {
+	if err != nil {
 		t.Fatalf("Expected no error for NXDOMAIN, got %v", err)
 	}
 
@@ -84,7 +84,7 @@ func TestRecursive_NoNextNS(t *testing.T) {
 	}
 
 	resp, err := s.resolveRecursive("deadend.test.", packet.A)
-	if errScan != nil {
+	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
 	if len(resp.Answers) != 0 {
@@ -95,11 +95,11 @@ func TestRecursive_NoNextNS(t *testing.T) {
 func TestSendQuery(t *testing.T) {
 	// 1. Start a mock UDP DNS server
 	addr, err := net.ResolveUDPAddr("udp", "127.0.0.1:0")
-	if errScan != nil { t.Fatalf("ResolveUDPAddr failed: %v", err) }
+	if err != nil { t.Fatalf("ResolveUDPAddr failed: %v", err) }
 	
 	conn, err := net.ListenUDP("udp", addr)
-	if errScan != nil { t.Fatalf("ListenUDP failed: %v", err) }
-	defer conn.Close()
+	if err != nil { t.Fatalf("ListenUDP failed: %v", err) }
+	_ = conn.Close()
 	
 	go func() {
 		buf := make([]byte, 512)
@@ -108,7 +108,7 @@ func TestSendQuery(t *testing.T) {
 		req := packet.NewDNSPacket()
 		pb := packet.NewBytePacketBuffer()
 		pb.Load(buf[:n])
-		req.FromBuffer(pb)
+		_ = req.FromBuffer(pb)
 		
 		resp := packet.NewDNSPacket()
 		resp.Header.ID = req.Header.ID
@@ -123,8 +123,8 @@ func TestSendQuery(t *testing.T) {
 		})
 		
 		resBuf := packet.NewBytePacketBuffer()
-		resp.Write(resBuf)
-		conn.WriteToUDP(resBuf.Buf[:resBuf.Position()], remote)
+		_ = resp.Write(resBuf)
+		_, _ = conn.WriteToUDP(resBuf.Buf[:resBuf.Position()], remote)
 	}()
 
 	// 2. Call sendQuery
@@ -132,7 +132,7 @@ func TestSendQuery(t *testing.T) {
 	serverAddr := conn.LocalAddr().String()
 	
 	resp, err := srv.sendQuery(serverAddr, "query.test.", packet.A)
-	if errScan != nil {
+	if err != nil {
 		t.Fatalf("sendQuery failed: %v", err)
 	}
 	

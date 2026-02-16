@@ -47,16 +47,16 @@ func (p *DNSPacket) VerifyTSIG(rawBuffer []byte, tsigStart int, secret []byte) e
 	// Add TSIG variables (RFC 2845 Section 3.4.1)
 	// Note: Names and Algorithms should be in canonical wire format
 	vBuf := NewBytePacketBuffer()
-	vBuf.WriteName(tsig.Name)
-	vBuf.Writeu16(tsig.Class)
-	vBuf.Writeu32(tsig.TTL)
-	vBuf.WriteName(tsig.AlgorithmName)
-	vBuf.Writeu16(uint16(tsig.TimeSigned >> 32))
-	vBuf.Writeu32(uint32(tsig.TimeSigned & 0xFFFFFFFF))
-	vBuf.Writeu16(tsig.Fudge)
-	vBuf.Writeu16(tsig.Error)
-	vBuf.Writeu16(uint16(len(tsig.Other)))
-	vBuf.WriteRange(vBuf.Position(), tsig.Other)
+	if err := vBuf.WriteName(tsig.Name); err != nil { return err }
+	if err := vBuf.Writeu16(tsig.Class); err != nil { return err }
+	if err := vBuf.Writeu32(tsig.TTL); err != nil { return err }
+	if err := vBuf.WriteName(tsig.AlgorithmName); err != nil { return err }
+	if err := vBuf.Writeu16(uint16(tsig.TimeSigned >> 32)); err != nil { return err }
+	if err := vBuf.Writeu32(uint32(tsig.TimeSigned & 0xFFFFFFFF)); err != nil { return err }
+	if err := vBuf.Writeu16(tsig.Fudge); err != nil { return err }
+	if err := vBuf.Writeu16(tsig.Error); err != nil { return err }
+	if err := vBuf.Writeu16(uint16(len(tsig.Other))); err != nil { return err }
+	if err := vBuf.WriteRange(vBuf.Position(), tsig.Other); err != nil { return err }
 	
 	h.Write(vBuf.Buf[:vBuf.Position()])
 	
@@ -89,16 +89,16 @@ func (p *DNSPacket) SignTSIG(buffer *BytePacketBuffer, keyName string, secret []
 	
 	// Add TSIG variables to HMAC
 	vBuf := NewBytePacketBuffer()
-	vBuf.WriteName(tsig.Name)
-	vBuf.Writeu16(tsig.Class)
-	vBuf.Writeu32(tsig.TTL)
-	vBuf.WriteName(tsig.AlgorithmName)
-	vBuf.Writeu16(uint16(tsig.TimeSigned >> 32))
-	vBuf.Writeu32(uint32(tsig.TimeSigned & 0xFFFFFFFF))
-	vBuf.Writeu16(tsig.Fudge)
-	vBuf.Writeu16(tsig.Error)
-	vBuf.Writeu16(uint16(len(tsig.Other)))
-	vBuf.WriteRange(vBuf.Position(), tsig.Other)
+	if err := vBuf.WriteName(tsig.Name); err != nil { return err }
+	if err := vBuf.Writeu16(tsig.Class); err != nil { return err }
+	if err := vBuf.Writeu32(tsig.TTL); err != nil { return err }
+	if err := vBuf.WriteName(tsig.AlgorithmName); err != nil { return err }
+	if err := vBuf.Writeu16(uint16(tsig.TimeSigned >> 32)); err != nil { return err }
+	if err := vBuf.Writeu32(uint32(tsig.TimeSigned & 0xFFFFFFFF)); err != nil { return err }
+	if err := vBuf.Writeu16(tsig.Fudge); err != nil { return err }
+	if err := vBuf.Writeu16(tsig.Error); err != nil { return err }
+	if err := vBuf.Writeu16(uint16(len(tsig.Other))); err != nil { return err }
+	if err := vBuf.WriteRange(vBuf.Position(), tsig.Other); err != nil { return err }
 	
 	h.Write(vBuf.Buf[:vBuf.Position()])
 	
@@ -109,8 +109,10 @@ func (p *DNSPacket) SignTSIG(buffer *BytePacketBuffer, keyName string, secret []
 	p.Header.ResourceEntries = uint16(len(p.Resources))
 
 	// 4. Update Header's ARCOUNT in the wire format (at offset 10)
-	buffer.Buf[10] = byte(p.Header.ResourceEntries >> 8)
-	buffer.Buf[11] = byte(p.Header.ResourceEntries & 0xFF)
+	if len(buffer.Buf) >= 12 {
+		buffer.Buf[10] = byte(p.Header.ResourceEntries >> 8)
+		buffer.Buf[11] = byte(p.Header.ResourceEntries & 0xFF)
+	}
 
 	// 5. Write TSIG record to buffer
 	p.TSIGStart = buffer.Position()

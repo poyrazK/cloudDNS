@@ -22,7 +22,7 @@ func TestGenerateNSEC(t *testing.T) {
 
 	// 1. Query for something in between 'a' and 'z'
 	nsec, err := srv.generateNSEC(context.Background(), zone, "m.example.com.")
-	if errScan != nil {
+	if err != nil {
 		t.Fatalf("generateNSEC failed: %v", err)
 	}
 	// example.com. < a.example.com. < m.example.com. < z.example.com.
@@ -56,7 +56,7 @@ func TestGenerateNSEC3(t *testing.T) {
 	zone := &domain.Zone{ID: "z1", Name: "example.com."}
 
 	nsec3, err := srv.generateNSEC3(context.Background(), zone, "missing.example.com.")
-	if errScan != nil {
+	if err != nil {
 		t.Fatalf("generateNSEC3 failed: %v", err)
 	}
 

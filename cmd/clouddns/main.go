@@ -41,7 +41,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	_ = db.Close()
 
 	repo := repository.NewPostgresRepository(db)
 	dnsSvc := services.NewDNSService(repo)

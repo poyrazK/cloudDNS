@@ -34,24 +34,24 @@ func TestEndToEnd_RFC_Extensions(t *testing.T) {
 	dnsSrv := NewServer(dnsAddr, repo, nil)
 	dnsSrv.TsigKeys["admin-key."] = []byte("secret123")
 	dnsSrv.NotifyPortOverride = 10059
-	go dnsSrv.Run()
+	_ = dnsSrv.Run()
 
 	apiHandler := api.NewAPIHandler(dnsSvc)
 	mux := http.NewServeMux()
 	apiHandler.RegisterRoutes(mux)
 	apiSrv := &http.Server{Addr: apiAddr, Handler: mux}
-	go apiSrv.ListenAndServe()
+	_ = apiSrv.ListenAndServe()
 
 	// Setup a mock "slave" to receive NOTIFY
 	notifyReceived := make(chan *packet.DNSPacket, 1)
 	slaveConn, err := net.ListenPacket("udp", slaveAddr)
-	if errScan != nil { t.Fatalf("Failed to listen on slave addr: %v", err) }
-	defer slaveConn.Close()
+	if err != nil { t.Fatalf("Failed to listen on slave addr: %v", err) }
+	defer func() { _ = slaveConn.Close() }()
 	go func() {
 		buf := make([]byte, 1024)
 		for {
 			n, _, err := slaveConn.ReadFrom(buf)
-			if errScan != nil { return }
+			if err != nil { return }
 			p := packet.NewDNSPacket()
 			pb := packet.NewBytePacketBuffer()
 			pb.Load(buf[:n])
@@ -65,16 +65,16 @@ func TestEndToEnd_RFC_Extensions(t *testing.T) {
 	}()
 
 	time.Sleep(200 * time.Millisecond)
-	defer apiSrv.Shutdown(context.Background())
+	_ = apiSrv.Shutdown(context.Background())
 
 	// 2. Create Zone via API with the slave listed in NS records
 	zoneReq := domain.Zone{Name: "rfc.test.", TenantID: "admin"}
 	body, _ := json.Marshal(zoneReq)
 	resp, err := http.Post(fmt.Sprintf("http://%s/zones", apiAddr), "application/json", bytes.NewBuffer(body))
-	if errScan != nil { t.Fatalf("POST /zones failed: %v", err) }
-	defer resp.Body.Close()
+	if err != nil { t.Fatalf("POST /zones failed: %v", err) }
+	_ = resp.Body.Close()
 	var createdZone domain.Zone
-	if err := json.NewDecoder(resp.Body).Decode(&createdZone); errScan != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&createdZone); err != nil {
 		t.Fatalf("Failed to decode created zone: %v", err)
 	}
 	if createdZone.ID == "" { t.Fatalf("Created zone ID is empty") }
@@ -99,7 +99,7 @@ func TestEndToEnd_RFC_Extensions(t *testing.T) {
 	recs, _ := repo.GetRecords(context.Background(), "rfc.test.", domain.TypeSOA, "")
 	if len(recs) == 0 { t.Fatalf("SOA record not found in repo") }
 	var startSerial uint32
-	fmt.Sscanf(strings.Fields(recs[0].Content)[2], "%d", &startSerial)
+	_, _ = fmt.Sscanf(strings.Fields(recs[0].Content)[2], "%d", &startSerial)
 
 	// 3. Perform Authenticated Dynamic Update via DNS
 	update := packet.NewDNSPacket()
@@ -110,23 +110,23 @@ func TestEndToEnd_RFC_Extensions(t *testing.T) {
 	})
 	
 	uBuf := packet.NewBytePacketBuffer()
-	update.Write(uBuf)
+	_ = update.Write(uBuf)
 	err = update.SignTSIG(uBuf, "admin-key.", []byte("secret123"))
-	if errScan != nil { t.Fatalf("TSIG sign failed: %v", err) }
+	if err != nil { t.Fatalf("TSIG sign failed: %v", err) }
 
 	dnsConn, err := net.Dial("udp", dnsAddr)
-	if errScan != nil { t.Fatalf("Dial DNS failed: %v", err) }
-	dnsConn.Write(uBuf.Buf[:uBuf.Position()])
+	if err != nil { t.Fatalf("Dial DNS failed: %v", err) }
+	_, _ = dnsConn.Write(uBuf.Buf[:uBuf.Position()])
 	
 	resBuf := make([]byte, 1024)
-	dnsConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_ = dnsConn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	n, err := dnsConn.Read(resBuf)
-	if errScan != nil { t.Fatalf("Read DNS response failed: %v", err) }
+	if err != nil { t.Fatalf("Read DNS response failed: %v", err) }
 	
 	resUpdate := packet.NewDNSPacket()
 	resPb := packet.NewBytePacketBuffer()
 	resPb.Load(resBuf[:n])
-	resUpdate.FromBuffer(resPb)
+	_ = resUpdate.FromBuffer(resPb)
 	if resUpdate.Header.ResCode != 0 {
 		t.Errorf("Dynamic Update failed with RCODE %d", resUpdate.Header.ResCode)
 	}
@@ -146,10 +146,10 @@ func TestEndToEnd_RFC_Extensions(t *testing.T) {
 
 	// 5. Verify change via API
 	respRecs, err := http.Get(fmt.Sprintf("http://%s/zones/%s/records?tenant_id=admin", apiAddr, createdZone.ID))
-	if errScan != nil { t.Fatalf("GET records failed: %v", err) }
+	if err != nil { t.Fatalf("GET records failed: %v", err) }
 	defer respRecs.Body.Close()
 	var zoneRecs []domain.Record
-	json.NewDecoder(respRecs.Body).Decode(&zoneRecs)
+	_ = json.NewDecoder(respRecs.Body).Decode(&zoneRecs)
 	foundDynamic := false
 	for _, r := range zoneRecs {
 		if r.Name == "dynamic.rfc.test." { foundDynamic = true }
@@ -162,8 +162,8 @@ func TestEndToEnd_RFC_Extensions(t *testing.T) {
 
 	// 6. Perform IXFR over TCP
 	tcpConn, err := net.Dial("tcp", dnsAddr)
-	if errScan != nil { t.Fatalf("Dial TCP DNS failed: %v", err) }
-	defer tcpConn.Close()
+	if err != nil { t.Fatalf("Dial TCP DNS failed: %v", err) }
+	defer func() { _ = tcpConn.Close() }()
 	
 	ixfr := packet.NewDNSPacket()
 	ixfr.Questions = append(ixfr.Questions, packet.DNSQuestion{Name: "rfc.test.", QType: packet.IXFR})
@@ -173,28 +173,28 @@ func TestEndToEnd_RFC_Extensions(t *testing.T) {
 	})
 	
 	ixBuf := packet.NewBytePacketBuffer()
-	ixfr.Write(ixBuf)
+	_ = ixfr.Write(ixBuf)
 	
 	tcpIxBuf := make([]byte, ixBuf.Position()+2)
 	tcpIxBuf[0] = byte(ixBuf.Position() >> 8)
 	tcpIxBuf[1] = byte(ixBuf.Position() & 0xFF)
 	copy(tcpIxBuf[2:], ixBuf.Buf[:ixBuf.Position()])
-	tcpConn.Write(tcpIxBuf)
+	_, _ = tcpConn.Write(tcpIxBuf)
 
 	lenB := make([]byte, 2)
-	tcpConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_ = tcpConn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	_, err = io.ReadFull(tcpConn, lenB)
-	if errScan != nil { t.Fatalf("Read IXFR len failed: %v", err) }
+	if err != nil { t.Fatalf("Read IXFR len failed: %v", err) }
 	
 	ixfrRLen := uint16(lenB[0])<<8 | uint16(lenB[1])
 	ixfrRData := make([]byte, ixfrRLen)
 	_, err = io.ReadFull(tcpConn, ixfrRData)
-	if errScan != nil { t.Fatalf("Read IXFR data failed: %v", err) }
+	if err != nil { t.Fatalf("Read IXFR data failed: %v", err) }
 	
 	resIXFR := packet.NewDNSPacket()
 	ixPb := packet.NewBytePacketBuffer()
 	ixPb.Load(ixfrRData)
-	resIXFR.FromBuffer(ixPb)
+	_ = resIXFR.FromBuffer(ixPb)
 	if len(resIXFR.Answers) == 0 || resIXFR.Answers[0].Type != packet.SOA {
 		t.Errorf("IXFR failed to start with SOA. Answers: %v", resIXFR.Answers)
 	}

@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
@@ -34,13 +35,20 @@ func (h *APIHandler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"status":"UP"}`))
+	if _, err := w.Write([]byte(`{"status":"UP"}`)); err != nil {
+		log.Printf("failed to write health check response: %v", err)
+	}
 }
 
 func (h *APIHandler) CreateZone(w http.ResponseWriter, r *http.Request) {
 	var zone domain.Zone
 	if err := json.NewDecoder(r.Body).Decode(&zone); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err := domain.ValidateZoneName(zone.Name); err != nil {
+		http.Error(w, "Invalid zone name: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -56,7 +64,9 @@ func (h *APIHandler) CreateZone(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(zone)
+	if err := json.NewEncoder(w).Encode(zone); err != nil {
+		log.Printf("failed to encode zone response: %v", err)
+	}
 }
 
 func (h *APIHandler) ListZones(w http.ResponseWriter, r *http.Request) {
@@ -72,7 +82,9 @@ func (h *APIHandler) ListZones(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(zones)
+	if err := json.NewEncoder(w).Encode(zones); err != nil {
+		log.Printf("failed to encode zones response: %v", err)
+	}
 }
 
 func (h *APIHandler) ListRecordsForZone(w http.ResponseWriter, r *http.Request) {
@@ -85,7 +97,9 @@ func (h *APIHandler) ListRecordsForZone(w http.ResponseWriter, r *http.Request) 
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(records)
+	if err := json.NewEncoder(w).Encode(records); err != nil {
+		log.Printf("failed to encode records response: %v", err)
+	}
 }
 
 func (h *APIHandler) CreateRecord(w http.ResponseWriter, r *http.Request) {
@@ -105,7 +119,9 @@ func (h *APIHandler) CreateRecord(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(record)
+	if err := json.NewEncoder(w).Encode(record); err != nil {
+		log.Printf("failed to encode record response: %v", err)
+	}
 }
 
 func (h *APIHandler) DeleteZone(w http.ResponseWriter, r *http.Request) {

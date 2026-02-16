@@ -91,8 +91,8 @@ func NewServer(addr string, repo ports.DNSRepository, logger *slog.Logger) *Serv
 func (s *Server) automateDNSSEC() {
 	ctx := context.Background()
 	// Get all zones
-	zones, err := s.Repo.ListZones(ctx, "")
-	if err != nil {
+	zones, errList := s.Repo.ListZones(ctx, "")
+	if errList != nil {
 		return
 	}
 
@@ -117,16 +117,20 @@ func (s *Server) Run() error {
 	// 1. Parallel UDP
 	for i := 0; i < runtime.NumCPU(); i++ {
 		go func(id int) {
-			conn, err := lc.ListenPacket(context.Background(), "udp", s.Addr)
-			if err != nil {
-				s.Logger.Error("failed to start UDP listener", "id", id, "error", err)
+			conn, errListen := lc.ListenPacket(context.Background(), "udp", s.Addr)
+			if errListen != nil {
+				s.Logger.Error("failed to start UDP listener", "id", id, "error", errListen)
 				return
 			}
-			defer conn.Close()
+			defer func() {
+				if err := conn.Close(); err != nil {
+					s.Logger.Error("failed to close UDP connection", "error", err)
+				}
+			}()
 			for {
 				buf := make([]byte, 512)
-				n, addr, err := conn.ReadFrom(buf)
-				if err != nil {
+				n, addr, errRead := conn.ReadFrom(buf)
+				if errRead != nil {
 					continue
 				}
 				data := make([]byte, n)
@@ -145,10 +149,14 @@ func (s *Server) Run() error {
 	tcpListener, err := lc.Listen(context.Background(), "tcp", s.Addr)
 	if err == nil {
 		go func() {
-			defer tcpListener.Close()
+			defer func() {
+				if err := tcpListener.Close(); err != nil {
+					s.Logger.Error("failed to close TCP listener", "error", err)
+				}
+			}()
 			for {
-				conn, err := tcpListener.Accept()
-				if err != nil {
+				conn, errAccept := tcpListener.Accept()
+				if errAccept != nil {
 					continue
 				}
 				go s.handleTCPConnection(conn)
@@ -164,7 +172,11 @@ func (s *Server) Run() error {
 		if err == nil {
 			s.Logger.Info("DNS over TLS (DoT) starting", "addr", dotAddr)
 			go func() {
-				defer dotListener.Close()
+				defer func() {
+					if err := dotListener.Close(); err != nil {
+						s.Logger.Error("failed to close DoT listener", "error", err)
+					}
+				}()
 				for {
 					conn, err := dotListener.Accept()
 					if err != nil {
@@ -181,7 +193,11 @@ func (s *Server) Run() error {
 		mux.HandleFunc("/dns-query", s.handleDoH)
 		dohServer := &http.Server{Addr: dohAddr, Handler: mux, TLSConfig: s.TLSConfig}
 		s.Logger.Info("DNS over HTTPS (DoH) starting", "addr", dohAddr)
-		go dohServer.ListenAndServeTLS("", "")
+		go func() {
+			if err := dohServer.ListenAndServeTLS("", ""); err != nil {
+				s.Logger.Error("DoH server failed", "error", err)
+			}
+		}()
 	}
 
 	select {}
@@ -221,10 +237,10 @@ func (s *Server) handleDoH(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.handlePacket(dnsMsg, r.RemoteAddr, func(resp []byte) error {
+	if err := s.handlePacket(dnsMsg, r.RemoteAddr, func(resp []byte) error {
 		w.Header().Set("Content-Type", "application/dns-message")
 		w.WriteHeader(http.StatusOK)
-		w.Write(resp)
+		_, _ = w.Write(resp)
 		return nil
 	})
 }
@@ -236,7 +252,7 @@ func (s *Server) udpWorker() {
 }
 
 func (s *Server) handleUDPConnection(pc net.PacketConn, addr net.Addr, data []byte) {
-	s.handlePacket(data, addr, func(resp []byte) error {
+	if err := s.handlePacket(data, addr, func(resp []byte) error {
 		_, err := pc.WriteTo(resp, addr)
 		return err
 	})
@@ -334,9 +350,9 @@ func (s *Server) handleAXFR(conn net.Conn, request *packet.DNSPacket) {
 	s.Logger.Info("AXFR starting", "zone", zone.Name, "records", len(stream))
 
 	for i, rec := range stream {
-		pRec, err := repository.ConvertDomainToPacketRecord(rec)
-		if err != nil {
-			s.Logger.Error("AXFR failed to convert record", "type", rec.Type, "error", err)
+		pRec, errConv := repository.ConvertDomainToPacketRecord(rec)
+		if errConv != nil {
+			s.Logger.Error("AXFR failed to convert record", "type", rec.Type, "error", errConv)
 			continue
 		}
 
@@ -349,8 +365,8 @@ func (s *Server) handleAXFR(conn net.Conn, request *packet.DNSPacket) {
 
 		resBuffer := packet.GetBuffer()
 		resBuffer.HasNames = true
-		if err := response.Write(resBuffer); err != nil {
-			s.Logger.Error("AXFR failed to write response", "error", err)
+		if errWrite := response.Write(resBuffer); errWrite != nil {
+			s.Logger.Error("AXFR failed to write response", "error", errWrite)
 			packet.PutBuffer(resBuffer)
 			continue
 		}
@@ -358,8 +374,8 @@ func (s *Server) handleAXFR(conn net.Conn, request *packet.DNSPacket) {
 
 		resLen := uint16(len(resData))
 		fullResp := append([]byte{byte(resLen >> 8), byte(resLen & 0xFF)}, resData...)
-		if _, err := conn.Write(fullResp); err != nil {
-			s.Logger.Error("AXFR connection broken", "error", err)
+		if _, errW := conn.Write(fullResp); errW != nil {
+			s.Logger.Error("AXFR connection broken", "error", errW)
 			packet.PutBuffer(resBuffer)
 			return
 		}
@@ -375,11 +391,11 @@ func (s *Server) sendTCPError(conn net.Conn, id uint16, rcode uint8) {
 	response.Header.Response = true
 	response.Header.ResCode = rcode
 	resBuffer := packet.GetBuffer()
-	response.Write(resBuffer)
+	_ = response.Write(resBuffer)
 	resData := resBuffer.Buf[:resBuffer.Position()]
 	resLen := uint16(len(resData))
 	fullResp := append([]byte{byte(resLen >> 8), byte(resLen & 0xFF)}, resData...)
-	conn.Write(fullResp)
+	_, _ = conn.Write(fullResp)
 	packet.PutBuffer(resBuffer)
 }
 
@@ -423,7 +439,7 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 		response.Header.ResCode = 4 // FORMERR
 		resBuffer := packet.GetBuffer()
 		defer packet.PutBuffer(resBuffer)
-		response.Write(resBuffer)
+		_ = response.Write(resBuffer)
 		return sendFn(resBuffer.Buf[:resBuffer.Position()])
 	}
 
@@ -518,11 +534,11 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 
 	// 2. Resolve Main Records
 	qTypeStr := queryTypeToRecordType(q.QType)
-	records, err := s.Repo.GetRecords(ctx, q.Name, qTypeStr, clientIP)
-	if err == nil && len(records) > 0 {
+	records, errRepo := s.Repo.GetRecords(ctx, q.Name, qTypeStr, clientIP)
+	if errRepo == nil && len(records) > 0 {
 		for _, rec := range records {
-			pRec, err := repository.ConvertDomainToPacketRecord(rec)
-			if err == nil {
+			pRec, errConv := repository.ConvertDomainToPacketRecord(rec)
+			if errConv == nil {
 				response.Answers = append(response.Answers, pRec)
 			}
 		}
@@ -531,13 +547,13 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 		labels := strings.Split(strings.TrimSuffix(q.Name, "."), ".")
 		for i := 0; i < len(labels)-1; i++ {
 			wildcardName := "*." + strings.Join(labels[i+1:], ".") + "."
-			wildcardRecords, err := s.Repo.GetRecords(ctx, wildcardName, qTypeStr, clientIP)
-			if err == nil && len(wildcardRecords) > 0 {
+			wildcardRecords, errWildcard := s.Repo.GetRecords(ctx, wildcardName, qTypeStr, clientIP)
+			if errWildcard == nil && len(wildcardRecords) > 0 {
 				source = "wildcard"
 				for _, rec := range wildcardRecords {
 					rec.Name = q.Name // RFC: Rewrite wildcard to query name
-					pRec, err := repository.ConvertDomainToPacketRecord(rec)
-					if err == nil {
+					pRec, errConv := repository.ConvertDomainToPacketRecord(rec)
+					if errConv == nil {
 						response.Answers = append(response.Answers, pRec)
 					}
 				}
@@ -553,8 +569,8 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 			// RFC: Include SOA in Authority section for negative caching
 			soaRecords, _ := s.Repo.GetRecords(ctx, zone.Name, domain.TypeSOA, clientIP)
 			for _, rec := range soaRecords {
-				pRec, err := repository.ConvertDomainToPacketRecord(rec)
-				if err == nil {
+				pRec, errConv := repository.ConvertDomainToPacketRecord(rec)
+				if errConv == nil {
 					response.Authorities = append(response.Authorities, pRec)
 				}
 			}
@@ -564,13 +580,13 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 				// Check for NSEC3PARAM to decide between NSEC and NSEC3
 				nsec3params, _ := s.Repo.GetRecords(ctx, zone.Name, "NSEC3PARAM", "")
 				if len(nsec3params) > 0 {
-					nsec3, err := s.generateNSEC3(ctx, zone, q.Name)
-					if err == nil {
+					nsec3, errNsec := s.generateNSEC3(ctx, zone, q.Name)
+					if errNsec == nil {
 						response.Authorities = append(response.Authorities, nsec3)
 					}
 				} else {
-					nsec, err := s.generateNSEC(ctx, zone, q.Name)
-					if err == nil {
+					nsec, errNsec := s.generateNSEC(ctx, zone, q.Name)
+					if errNsec == nil {
 						response.Authorities = append(response.Authorities, nsec)
 					}
 				}
@@ -593,15 +609,15 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 		// 4. Populate Authority Section (NS records)
 		nsRecords, _ := s.Repo.GetRecords(ctx, zone.Name, domain.TypeNS, clientIP)
 		for _, rec := range nsRecords {
-			pRec, err := repository.ConvertDomainToPacketRecord(rec)
-			if err == nil {
+			pRec, errConv := repository.ConvertDomainToPacketRecord(rec)
+			if errConv == nil {
 				response.Authorities = append(response.Authorities, pRec)
 
 				// 5. Populate Additional Section (Glue records)
 				glueRecords, _ := s.Repo.GetRecords(ctx, pRec.Host, domain.TypeA, clientIP)
 				for _, gRec := range glueRecords {
-					gpRec, err := repository.ConvertDomainToPacketRecord(gRec)
-					if err == nil {
+					gpRec, errGlue := repository.ConvertDomainToPacketRecord(gRec)
+					if errGlue == nil {
 						response.Resources = append(response.Resources, gpRec)
 					}
 				}
@@ -628,7 +644,7 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 	resBuffer := packet.GetBuffer()
 	defer packet.PutBuffer(resBuffer)
 	resBuffer.HasNames = true // Enable Name Compression
-	response.Write(resBuffer)
+	_ = response.Write(resBuffer)
 
 	if resBuffer.Position() > maxSize {
 		response.Header.TruncatedMessage = true
@@ -637,7 +653,7 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 		response.Resources = nil
 		resBuffer.Reset()
 		resBuffer.HasNames = true
-		response.Write(resBuffer)
+		_ = response.Write(resBuffer)
 	}
 
 	resData := resBuffer.Buf[:resBuffer.Position()]
@@ -699,8 +715,8 @@ func (s *Server) handleUpdate(request *packet.DNSPacket, rawData []byte, clientI
 			response.Header.ResCode = packet.RCODE_NOTAUTH
 			return s.sendUpdateResponse(response, sendFn)
 		}
-		if err := request.VerifyTSIG(rawData, request.TSIGStart, secret); err != nil {
-			s.Logger.Warn("update failed: TSIG verification failed", "error", err)
+		if errVerify := request.VerifyTSIG(rawData, request.TSIGStart, secret); errVerify != nil {
+			s.Logger.Warn("update failed: TSIG verification failed", "error", errVerify)
 			response.Header.ResCode = packet.RCODE_NOTAUTH
 			return s.sendUpdateResponse(response, sendFn)
 		}
@@ -729,9 +745,9 @@ func (s *Server) handleUpdate(request *packet.DNSPacket, rawData []byte, clientI
 
 	// 2. Prerequisite Checks (PRCOUNT)
 	for _, pr := range request.Answers {
-		if err := s.checkPrerequisite(ctx, dbZone, pr); err != nil {
-			s.Logger.Warn("update failed: prerequisite mismatch", "pr", pr.Name, "error", err)
-			if uErr, ok := err.(updateError); ok {
+		if errPrereq := s.checkPrerequisite(ctx, dbZone, pr); errPrereq != nil {
+			s.Logger.Warn("update failed: prerequisite mismatch", "pr", pr.Name, "error", errPrereq)
+			if uErr, ok := errPrereq.(updateError); ok {
 				response.Header.ResCode = uint8(uErr.rcode)
 			} else {
 				response.Header.ResCode = packet.RCODE_SERVFAIL
@@ -745,8 +761,8 @@ func (s *Server) handleUpdate(request *packet.DNSPacket, rawData []byte, clientI
 	var changes []domain.ZoneChange
 
 	for _, up := range request.Authorities {
-		if err := s.applyUpdate(ctx, dbZone, up); err != nil {
-			s.Logger.Error("update failed: failed to apply record change", "up", up.Name, "error", err)
+		if errApply := s.applyUpdate(ctx, dbZone, up); errApply != nil {
+			s.Logger.Error("update failed: failed to apply record change", "up", up.Name, "error", errApply)
 			response.Header.ResCode = packet.RCODE_SERVFAIL
 			return s.sendUpdateResponse(response, sendFn)
 		}
@@ -780,19 +796,19 @@ func (s *Server) handleUpdate(request *packet.DNSPacket, rawData []byte, clientI
 			soa := soaRecords[0]
 			parts := strings.Fields(soa.Content)
 			if len(parts) >= 3 {
-				fmt.Sscanf(parts[2], "%d", &newSerial)
+				_, _ = fmt.Sscanf(parts[2], "%d", &newSerial)
 				newSerial++
 				parts[2] = fmt.Sprintf("%d", newSerial)
 				soa.Content = strings.Join(parts, " ")
 
 				// Delete old SOA and create new one (simplified update)
-				s.Repo.DeleteRecord(ctx, soa.ID, dbZone.ID)
-				s.Repo.CreateRecord(ctx, &soa)
+				_ = s.Repo.DeleteRecord(ctx, soa.ID, dbZone.ID)
+				_ = s.Repo.CreateRecord(ctx, &soa)
 
 				// Persist changes with the new serial
 				for _, c := range changes {
 					c.Serial = newSerial
-					s.Repo.RecordZoneChange(ctx, &c)
+					_ = s.Repo.RecordZoneChange(ctx, &c)
 				}
 			}
 		}
@@ -841,7 +857,7 @@ func (s *Server) handleIXFR(conn net.Conn, request *packet.DNSPacket) {
 	}
 	currentSOA := soaRecords[0]
 	var currentSerial uint32
-	fmt.Sscanf(strings.Fields(currentSOA.Content)[2], "%d", &currentSerial)
+	_, _ = fmt.Sscanf(strings.Fields(currentSOA.Content)[2], "%d", &currentSerial)
 
 	if clientSerial == currentSerial {
 		// Client is up to date, just send current SOA
@@ -852,8 +868,8 @@ func (s *Server) handleIXFR(conn net.Conn, request *packet.DNSPacket) {
 	}
 
 	// Fetch changes since clientSerial
-	changes, err := s.Repo.ListZoneChanges(ctx, zone.ID, clientSerial)
-	if err != nil || len(changes) == 0 {
+	changes, errChanges := s.Repo.ListZoneChanges(ctx, zone.ID, clientSerial)
+	if errChanges != nil || len(changes) == 0 {
 		s.Logger.Info("IXFR history not found, falling back to AXFR", "zone", zone.Name, "client_serial", clientSerial)
 		s.handleAXFR(conn, request)
 		return
@@ -914,8 +930,8 @@ func (s *Server) signResponse(ctx context.Context, zone *domain.Zone, response *
 	if len(response.Answers) > 0 {
 		groups := s.groupRecords(response.Answers)
 		for _, group := range groups {
-			sigs, err := s.DNSSEC.SignRRSet(ctx, zone.Name, zone.ID, group)
-			if err == nil {
+			sigs, errSign := s.DNSSEC.SignRRSet(ctx, zone.Name, zone.ID, group)
+			if errSign == nil {
 				for _, sig := range sigs {
 					response.Answers = append(response.Answers, sig)
 				}
@@ -926,8 +942,8 @@ func (s *Server) signResponse(ctx context.Context, zone *domain.Zone, response *
 	if len(response.Authorities) > 0 {
 		groups := s.groupRecords(response.Authorities)
 		for _, group := range groups {
-			sigs, err := s.DNSSEC.SignRRSet(ctx, zone.Name, zone.ID, group)
-			if err == nil {
+			sigs, errSign := s.DNSSEC.SignRRSet(ctx, zone.Name, zone.ID, group)
+			if errSign == nil {
 				for _, sig := range sigs {
 					response.Authorities = append(response.Authorities, sig)
 				}
@@ -966,11 +982,11 @@ func (s *Server) sendSingleRecordResponse(conn net.Conn, id uint16, q packet.DNS
 	resp.Answers = append(resp.Answers, rec)
 
 	resBuffer := packet.GetBuffer()
-	resp.Write(resBuffer)
+	_ = resp.Write(resBuffer)
 	resData := resBuffer.Buf[:resBuffer.Position()]
 	resLen := uint16(len(resData))
 	fullResp := append([]byte{byte(resLen >> 8), byte(resLen & 0xFF)}, resData...)
-	conn.Write(fullResp)
+	_, _ = conn.Write(fullResp)
 	packet.PutBuffer(resBuffer)
 }
 
@@ -983,10 +999,10 @@ func (s *Server) sendIXFRDiff(conn net.Conn, id uint16, q packet.DNSQuestion, so
 	resp.Answers = append(resp.Answers, deletions...)
 
 	resBuffer := packet.GetBuffer()
-	resp.Write(resBuffer)
+	_ = resp.Write(resBuffer)
 	resData := resBuffer.Buf[:resBuffer.Position()]
 	resLen := uint16(len(resData))
-	conn.Write(append([]byte{byte(resLen >> 8), byte(resLen & 0xFF)}, resData...))
+	_, _ = conn.Write(append([]byte{byte(resLen >> 8), byte(resLen & 0xFF)}, resData...))
 	packet.PutBuffer(resBuffer)
 
 	// 2. Send New SOA + Additions
@@ -998,17 +1014,17 @@ func (s *Server) sendIXFRDiff(conn net.Conn, id uint16, q packet.DNSQuestion, so
 	resp.Answers = append(resp.Answers, additions...)
 
 	resBuffer = packet.GetBuffer()
-	resp.Write(resBuffer)
+	_ = resp.Write(resBuffer)
 	resData = resBuffer.Buf[:resBuffer.Position()]
 	resLen = uint16(len(resData))
-	conn.Write(append([]byte{byte(resLen >> 8), byte(resLen & 0xFF)}, resData...))
+	_, _ = conn.Write(append([]byte{byte(resLen >> 8), byte(resLen & 0xFF)}, resData...))
 	packet.PutBuffer(resBuffer)
 }
 
 func (s *Server) sendUpdateResponse(resp *packet.DNSPacket, sendFn func([]byte) error) error {
 	resBuffer := packet.GetBuffer()
 	defer packet.PutBuffer(resBuffer)
-	resp.Write(resBuffer)
+	_ = resp.Write(resBuffer)
 	return sendFn(resBuffer.Buf[:resBuffer.Position()])
 }
 
@@ -1092,19 +1108,19 @@ func (s *Server) notifySlaves(zoneName string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	dbZone, err := s.Repo.GetZone(ctx, zoneName)
-	if err != nil || dbZone == nil {
+	dbZone, errZone := s.Repo.GetZone(ctx, zoneName)
+	if errZone != nil || dbZone == nil {
 		return
 	}
 
-	nsRecords, err := s.Repo.GetRecords(ctx, zoneName, domain.TypeNS, "")
-	if err != nil {
+	nsRecords, errNS := s.Repo.GetRecords(ctx, zoneName, domain.TypeNS, "")
+	if errNS != nil {
 		return
 	}
 
 	for _, ns := range nsRecords {
-		ips, err := s.Repo.GetIPsForName(ctx, ns.Content, "")
-		if err != nil || len(ips) == 0 {
+		ips, errIPs := s.Repo.GetIPsForName(ctx, ns.Content, "")
+		if errIPs != nil || len(ips) == 0 {
 			continue
 		}
 
@@ -1132,11 +1148,11 @@ func (s *Server) notifySlaves(zoneName string) {
 			})
 
 			buf := packet.GetBuffer()
-			notify.Write(buf)
+			_ = notify.Write(buf)
 			data := buf.Buf[:buf.Position()]
 
-			conn, err := net.Dial("udp", targetAddr)
-			if err == nil {
+			conn, errDial := net.Dial("udp", targetAddr)
+			if errDial == nil {
 				conn.Write(data)
 				conn.Close()
 			}
@@ -1146,9 +1162,9 @@ func (s *Server) notifySlaves(zoneName string) {
 }
 
 func (s *Server) generateNSEC(ctx context.Context, zone *domain.Zone, queryName string) (packet.DNSRecord, error) {
-	records, err := s.Repo.ListRecordsForZone(ctx, zone.ID)
-	if err != nil {
-		return packet.DNSRecord{}, err
+	records, errZoneRecs := s.Repo.ListRecordsForZone(ctx, zone.ID)
+	if errZoneRecs != nil {
+		return packet.DNSRecord{}, errZoneRecs
 	}
 
 	master.SortRecordsCanonically(records)
@@ -1217,8 +1233,8 @@ func (s *Server) generateNSEC(ctx context.Context, zone *domain.Zone, queryName 
 }
 
 func (s *Server) generateNSEC3(ctx context.Context, zone *domain.Zone, queryName string) (packet.DNSRecord, error) {
-	params, err := s.Repo.GetRecords(ctx, zone.Name, "NSEC3PARAM", "")
-	if err != nil || len(params) == 0 {
+	params, errParams := s.Repo.GetRecords(ctx, zone.Name, "NSEC3PARAM", "")
+	if errParams != nil || len(params) == 0 {
 		return packet.DNSRecord{}, fmt.Errorf("no NSEC3PARAM")
 	}
 
@@ -1229,7 +1245,7 @@ func (s *Server) generateNSEC3(ctx context.Context, zone *domain.Zone, queryName
 
 	var alg, flags uint8
 	var iterations uint16
-	fmt.Sscanf(parts[0], "%d", &alg)
+	_, _ = fmt.Sscanf(parts[0], "%d", &alg)
 	fmt.Sscanf(parts[1], "%d", &flags)
 	fmt.Sscanf(parts[2], "%d", &iterations)
 	salt := parts[3]

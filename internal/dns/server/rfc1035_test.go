@@ -22,7 +22,7 @@ func TestRFC1035_MessageCompression(t *testing.T) {
 	req := packet.NewDNSPacket()
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "www.example.com.", QType: packet.A})
 	reqBuf := packet.NewBytePacketBuffer()
-	req.Write(reqBuf)
+	_ = req.Write(reqBuf)
 
 	var capturedResp []byte
 	srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 53}, func(resp []byte) error {
@@ -63,7 +63,7 @@ func TestRFC1035_ResponseFormat(t *testing.T) {
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "www.example.com.", QType: packet.A})
 	
 	reqBuf := packet.NewBytePacketBuffer()
-	req.Write(reqBuf)
+	_ = req.Write(reqBuf)
 
 	var capturedResp []byte
 	srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 53}, func(resp []byte) error {
@@ -74,7 +74,7 @@ func TestRFC1035_ResponseFormat(t *testing.T) {
 	resPacket := packet.NewDNSPacket()
 	resBuf := packet.NewBytePacketBuffer()
 	copy(resBuf.Buf, capturedResp)
-	resPacket.FromBuffer(resBuf)
+	_ = resPacket.FromBuffer(resBuf)
 
 	// RFC 1035: AA bit should be set for authoritative answers
 	if !resPacket.Header.AuthoritativeAnswer {
@@ -109,8 +109,8 @@ func TestRFC1035_AXFR(t *testing.T) {
 
 	// Mock TCP pipe
 	clientConn, serverConn := net.Pipe()
-	defer clientConn.Close()
-	defer serverConn.Close()
+	defer func() { _ = clientConn.Close() }()
+	defer func() { _ = serverConn.Close() }()
 
 	req := packet.NewDNSPacket()
 	req.Header.ID = 0x1234
@@ -131,12 +131,12 @@ func TestRFC1035_AXFR(t *testing.T) {
 		
 		respLen := uint16(lenBuf[0])<<8 | uint16(lenBuf[1])
 		respData := make([]byte, respLen)
-		clientConn.Read(respData)
+		_, _ = clientConn.Read(respData)
 
 		respPacket := packet.NewDNSPacket()
 		pBuf := packet.NewBytePacketBuffer()
 		pBuf.Load(respData)
-		respPacket.FromBuffer(pBuf)
+		_ = respPacket.FromBuffer(pBuf)
 
 		if len(respPacket.Answers) > 0 {
 			if i == 0 { firstRecordType = respPacket.Answers[0].Type }

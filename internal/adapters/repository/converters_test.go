@@ -279,7 +279,7 @@ func TestConvertDomainToPacketRecord_AllTypes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := ConvertDomainToPacketRecord(tt.rec)
-			if errScan != nil {
+			if err != nil {
 				t.Fatalf("ConvertDomainToPacketRecord failed: %v", err)
 			}
 			if got.Type != tt.want.Type {
