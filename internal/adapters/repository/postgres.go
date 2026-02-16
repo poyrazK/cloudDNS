@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"math"
 	"net"
 	"strings"
 
@@ -368,9 +369,16 @@ func ConvertDomainToPacketRecord(rec domain.Record) (packet.DNSRecord, error) {
 		name += "."
 	}
 
+	ttl := uint32(0)
+	if rec.TTL > 0 {
+		if rec.TTL >= 0 && int64(rec.TTL) <= math.MaxUint32 {
+			ttl = uint32(rec.TTL) // #nosec G115
+		}
+	}
+
 	pRec := packet.DNSRecord{
 		Name:  name,
-		TTL:   uint32(rec.TTL),
+		TTL:   ttl,
 		Class: 1, // IN
 	}
 
@@ -396,7 +404,15 @@ func ConvertDomainToPacketRecord(rec domain.Record) (packet.DNSRecord, error) {
 	case domain.TypeMX:
 		pRec.Type = packet.MX
 		if rec.Priority != nil {
-			pRec.Priority = uint16(*rec.Priority)
+			prio := uint16(0)
+			if *rec.Priority > 0 {
+				if *rec.Priority > 65535 {
+					prio = 65535
+				} else {
+					prio = uint16(*rec.Priority)
+				}
+			}
+			pRec.Priority = prio
 		}
 		pRec.Host = rec.Content
 		if !strings.HasSuffix(pRec.Host, ".") {
