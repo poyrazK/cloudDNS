@@ -3,12 +3,14 @@ package server
 import (
 	"bytes"
 	"context"
+	crand "crypto/rand"
 	"crypto/tls"
 	"encoding/base64"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"log/slog"
-	"math/rand"
+	"math"
 	"net"
 	"net/http"
 	"runtime"
@@ -109,7 +111,9 @@ func (s *Server) Run() error {
 	lc := net.ListenConfig{
 		Control: func(network, address string, c syscall.RawConn) error {
 			return c.Control(func(fd uintptr) {
-				setReusePort(fd)
+				if err := setReusePort(fd); err != nil {
+					s.Logger.Warn("failed to set reuse port", "error", err)
+				}
 			})
 		},
 	}
@@ -191,7 +195,12 @@ func (s *Server) Run() error {
 		dohAddr := net.JoinHostPort(host, "443")
 		mux := http.NewServeMux()
 		mux.HandleFunc("/dns-query", s.handleDoH)
-		dohServer := &http.Server{Addr: dohAddr, Handler: mux, TLSConfig: s.TLSConfig}
+		dohServer := &http.Server{
+			Addr:              dohAddr,
+			Handler:           mux,
+			TLSConfig:         s.TLSConfig,
+			ReadHeaderTimeout: 5 * time.Second,
+		}
 		s.Logger.Info("DNS over HTTPS (DoH) starting", "addr", dohAddr)
 		go func() {
 			if err := dohServer.ListenAndServeTLS("", ""); err != nil {
@@ -207,7 +216,8 @@ func (s *Server) handleDoH(w http.ResponseWriter, r *http.Request) {
 	var dnsMsg []byte
 	var err error
 
-	if r.Method == http.MethodGet {
+	switch r.Method {
+	case http.MethodGet:
 		query := r.URL.Query().Get("dns")
 		if query == "" {
 			http.Error(w, "missing dns parameter", http.StatusBadRequest)
@@ -222,7 +232,7 @@ func (s *Server) handleDoH(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-	} else if r.Method == http.MethodPost {
+	case http.MethodPost:
 		if r.Header.Get("Content-Type") != "application/dns-message" {
 			http.Error(w, "invalid request", http.StatusBadRequest)
 			return
@@ -232,7 +242,7 @@ func (s *Server) handleDoH(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "failed to read body", http.StatusBadRequest)
 			return
 		}
-	} else {
+	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
@@ -263,7 +273,7 @@ func (s *Server) handleUDPConnection(pc net.PacketConn, addr net.Addr, data []by
 }
 
 func (s *Server) handleTCPConnection(conn net.Conn) {
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	for {
 		lenBuf := make([]byte, 2)
 		if _, err := io.ReadFull(conn, lenBuf); err != nil {
@@ -477,7 +487,11 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 
 	// L3 Resolution
 	if s.SimulateDBLatency > 0 {
-		time.Sleep(time.Duration(float64(s.SimulateDBLatency) * (0.5 + rand.Float64())))
+		// Use crypto/rand for simulation jitter (safe for G404)
+		var b [8]byte
+		_, _ = crand.Read(b[:])
+		jitter := float64(binary.LittleEndian.Uint64(b[:])) / float64(math.MaxUint64)
+		time.Sleep(time.Duration(float64(s.SimulateDBLatency) * (0.5 + jitter)))
 	}
 
 	// EDNS(0) Support (RFC 6891)
@@ -771,9 +785,12 @@ func (s *Server) handleUpdate(request *packet.DNSPacket, rawData []byte, clientI
 			return s.sendUpdateResponse(response, sendFn)
 		}
 
-		// Record change for IXFR
+		// Record change for IXFR (using crand for secure ID)
+		var b [8]byte
+		_, _ = crand.Read(b[:])
+		randomPart := binary.LittleEndian.Uint64(b[:])
 		change := domain.ZoneChange{
-			ID:        fmt.Sprintf("%d-%d", time.Now().UnixNano(), rand.Int()),
+			ID:        fmt.Sprintf("%d-%x", time.Now().UnixNano(), randomPart),
 			ZoneID:    dbZone.ID,
 			Name:      up.Name,
 			Type:      domain.RecordType(up.Type.String()),
@@ -903,10 +920,16 @@ func (s *Server) handleIXFR(conn net.Conn, request *packet.DNSPacket) {
 			currentDiffSerial = c.Serial
 		}
 
+		var ttl uint32
+		// Explicit range check for G115
+		if c.TTL >= 0 && int64(c.TTL) <= math.MaxUint32 {
+			ttl = uint32(c.TTL) // #nosec G115 // #nosec G115
+		}
+
 		pRec := packet.DNSRecord{
 			Name:  c.Name,
 			Type:  packet.QueryType(master.RecordTypeToQueryType(c.Type)),
-			TTL:   uint32(c.TTL),
+			TTL:   ttl,
 			Class: 1,
 		}
 
@@ -936,9 +959,7 @@ func (s *Server) signResponse(ctx context.Context, zone *domain.Zone, response *
 		for _, group := range groups {
 			sigs, errSign := s.DNSSEC.SignRRSet(ctx, zone.Name, zone.ID, group)
 			if errSign == nil {
-				for _, sig := range sigs {
-					response.Answers = append(response.Answers, sig)
-				}
+				response.Answers = append(response.Answers, sigs...)
 			}
 		}
 	}
@@ -948,9 +969,7 @@ func (s *Server) signResponse(ctx context.Context, zone *domain.Zone, response *
 		for _, group := range groups {
 			sigs, errSign := s.DNSSEC.SignRRSet(ctx, zone.Name, zone.ID, group)
 			if errSign == nil {
-				for _, sig := range sigs {
-					response.Authorities = append(response.Authorities, sig)
-				}
+				response.Authorities = append(response.Authorities, sigs...)
 			}
 		}
 	}
@@ -1046,8 +1065,8 @@ func (s *Server) checkPrerequisite(ctx context.Context, zone *domain.Zone, pr pa
 		return updateError{rcode: int(packet.RCODE_SERVFAIL), msg: "failed to fetch records for prerequisite check"}
 	}
 
-	switch {
-	case pr.Class == 255: // ANY
+	switch pr.Class {
+	case 255: // ANY
 		if pr.Type == 255 { // ANY
 			if len(records) == 0 {
 				return updateError{rcode: int(packet.RCODE_NXDOMAIN), msg: "name not in use"}
@@ -1057,7 +1076,7 @@ func (s *Server) checkPrerequisite(ctx context.Context, zone *domain.Zone, pr pa
 				return updateError{rcode: int(packet.RCODE_NXRRSET), msg: "rrset does not exist"}
 			}
 		}
-	case pr.Class == 254: // NONE
+	case 254: // NONE
 		if pr.Type == 255 { // ANY
 			if len(records) > 0 {
 				return updateError{rcode: int(packet.RCODE_YXDOMAIN), msg: "name in use"}
@@ -1077,15 +1096,15 @@ func (s *Server) checkPrerequisite(ctx context.Context, zone *domain.Zone, pr pa
 }
 
 func (s *Server) applyUpdate(ctx context.Context, zone *domain.Zone, up packet.DNSRecord) error {
-	switch {
-	case up.Class == 255: // ANY
+	switch up.Class {
+	case 255: // ANY
 		if up.Type == 255 { // ANY
 			return s.Repo.DeleteRecordsByName(ctx, zone.ID, up.Name)
 		} else {
 			qTypeStr := queryTypeToRecordType(up.Type)
 			return s.Repo.DeleteRecordsByNameAndType(ctx, zone.ID, up.Name, qTypeStr)
 		}
-	case up.Class == 254: // NONE
+	case 254: // NONE
 		qTypeStr := queryTypeToRecordType(up.Type)
 		dRec, err := repository.ConvertPacketRecordToDomain(up, zone.ID)
 		if err != nil {
@@ -1098,7 +1117,10 @@ func (s *Server) applyUpdate(ctx context.Context, zone *domain.Zone, up packet.D
 			return err
 		}
 		if dRec.ID == "" {
-			dRec.ID = fmt.Sprintf("%d-%d", time.Now().UnixNano(), rand.Int())
+			// Use crand for secure ID generation (G404)
+			var bid [16]byte
+			_, _ = crand.Read(bid[:])
+			dRec.ID = fmt.Sprintf("%d-%x", time.Now().UnixNano(), bid)
 		}
 		if dRec.CreatedAt.IsZero() {
 			dRec.CreatedAt = time.Now()
@@ -1143,7 +1165,11 @@ func (s *Server) notifySlaves(zoneName string) {
 			s.Logger.Info("sending NOTIFY", "zone", zoneName, "slave", targetAddr)
 
 			notify := packet.NewDNSPacket()
-			notify.Header.ID = uint16(rand.Intn(65535))
+			// Use crand for secure NOTIFY ID (G404)
+			var bid [2]byte
+			_, _ = crand.Read(bid[:])
+			notify.Header.ID = binary.LittleEndian.Uint16(bid[:])
+
 			notify.Header.Opcode = packet.OPCODE_NOTIFY
 			notify.Header.AuthoritativeAnswer = true
 			notify.Questions = append(notify.Questions, packet.DNSQuestion{
@@ -1157,8 +1183,8 @@ func (s *Server) notifySlaves(zoneName string) {
 
 			conn, errDial := net.Dial("udp", targetAddr)
 			if errDial == nil {
-				conn.Write(data)
-				conn.Close()
+				_, _ = conn.Write(data)
+				_ = conn.Close()
 			}
 			packet.PutBuffer(buf)
 		}
@@ -1250,8 +1276,8 @@ func (s *Server) generateNSEC3(ctx context.Context, zone *domain.Zone, queryName
 	var alg, flags uint8
 	var iterations uint16
 	_, _ = fmt.Sscanf(parts[0], "%d", &alg)
-	fmt.Sscanf(parts[1], "%d", &flags)
-	fmt.Sscanf(parts[2], "%d", &iterations)
+	_, _ = fmt.Sscanf(parts[1], "%d", &flags)
+	_, _ = fmt.Sscanf(parts[2], "%d", &iterations)
 	salt := parts[3]
 	if salt == "-" {
 		salt = ""
