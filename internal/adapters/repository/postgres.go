@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"net"
 	"strings"
 
@@ -41,7 +42,7 @@ func (r *PostgresRepository) GetRecords(ctx context.Context, name string, qType 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { if err := rows.Close(); err != nil { log.Printf("failed to close rows: %v", err) } }()
 
 	var records []domain.Record
 	for rows.Next() {
@@ -69,7 +70,7 @@ func (r *PostgresRepository) GetIPsForName(ctx context.Context, name string, cli
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { if err := rows.Close(); err != nil { log.Printf("failed to close rows: %v", err) } }()
 
 	var ips []string
 	for rows.Next() {
@@ -101,7 +102,7 @@ func (r *PostgresRepository) ListRecordsForZone(ctx context.Context, zoneID stri
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { if err := rows.Close(); err != nil { log.Printf("failed to close rows: %v", err) } }()
 
 	var records []domain.Record
 	for rows.Next() {
@@ -131,7 +132,11 @@ func (r *PostgresRepository) CreateZoneWithRecords(ctx context.Context, zone *do
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		if err := tx.Rollback(); err != nil && err != sql.ErrTxDone {
+			log.Printf("failed to rollback transaction: %v", err)
+		}
+	}()
 
 	// 1. Insert Zone
 	zoneQuery := `INSERT INTO dns_zones (id, tenant_id, name, vpc_id, description, created_at, updated_at) 
@@ -176,7 +181,7 @@ func (r *PostgresRepository) ListZones(ctx context.Context, tenantID string) ([]
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { if err := rows.Close(); err != nil { log.Printf("failed to close rows: %v", err) } }()
 
 	var zones []domain.Zone
 	for rows.Next() {
@@ -233,7 +238,7 @@ func (r *PostgresRepository) ListZoneChanges(ctx context.Context, zoneID string,
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { if err := rows.Close(); err != nil { log.Printf("failed to close rows: %v", err) } }()
 
 	var changes []domain.ZoneChange
 	for rows.Next() {
@@ -264,7 +269,7 @@ func (r *PostgresRepository) GetAuditLogs(ctx context.Context, tenantID string) 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { if err := rows.Close(); err != nil { log.Printf("failed to close rows: %v", err) } }()
 
 	var logs []domain.AuditLog
 	for rows.Next() {
@@ -294,7 +299,7 @@ func (r *PostgresRepository) ListKeysForZone(ctx context.Context, zoneID string)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { if err := rows.Close(); err != nil { log.Printf("failed to close rows: %v", err) } }()
 
 	var keys []domain.DNSSECKey
 	for rows.Next() {
@@ -415,11 +420,21 @@ func ConvertDomainToPacketRecord(rec domain.Record) (packet.DNSRecord, error) {
 			if !strings.HasSuffix(pRec.MName, ".") { pRec.MName += "." }
 			pRec.RName = parts[1]
 			if !strings.HasSuffix(pRec.RName, ".") { pRec.RName += "." }
-			fmt.Sscanf(parts[2], "%d", &pRec.Serial)
-			fmt.Sscanf(parts[3], "%d", &pRec.Refresh)
-			fmt.Sscanf(parts[4], "%d", &pRec.Retry)
-			fmt.Sscanf(parts[5], "%d", &pRec.Expire)
-			fmt.Sscanf(parts[6], "%d", &pRec.Minimum)
+			if _, err := fmt.Sscanf(parts[2], "%d", &pRec.Serial); err != nil {
+				return pRec, fmt.Errorf("failed to parse SOA serial: %w", err)
+			}
+			if _, err := fmt.Sscanf(parts[3], "%d", &pRec.Refresh); err != nil {
+				return pRec, fmt.Errorf("failed to parse SOA refresh: %w", err)
+			}
+			if _, err := fmt.Sscanf(parts[4], "%d", &pRec.Retry); err != nil {
+				return pRec, fmt.Errorf("failed to parse SOA retry: %w", err)
+			}
+			if _, err := fmt.Sscanf(parts[5], "%d", &pRec.Expire); err != nil {
+				return pRec, fmt.Errorf("failed to parse SOA expire: %w", err)
+			}
+			if _, err := fmt.Sscanf(parts[6], "%d", &pRec.Minimum); err != nil {
+				return pRec, fmt.Errorf("failed to parse SOA minimum: %w", err)
+			}
 		}
 	default:
 		return pRec, fmt.Errorf("unsupported record type: %s", rec.Type)
