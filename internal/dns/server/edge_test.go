@@ -46,13 +46,13 @@ func TestHandleUpdate_FormErr(t *testing.T) {
 		p := packet.NewDNSPacket()
 		pb := packet.NewBytePacketBuffer()
 		pb.Load(resp)
-		p.FromBuffer(pb)
+		_ = p.FromBuffer(pb)
 		if p.Header.ResCode != packet.RCODE_FORMERR {
 			t.Errorf("Expected FORMERR for empty update, got %d", p.Header.ResCode)
 		}
 		return nil
 	})
-	if errScan != nil {
+	if err != nil {
 		t.Fatalf("handleUpdate failed: %v", err)
 	}
 }
@@ -83,19 +83,19 @@ func TestHandlePacket_NoQuestions(t *testing.T) {
 	req.Header.ID = 123
 	
 	buf := packet.NewBytePacketBuffer()
-	req.Write(buf)
+	_ = req.Write(buf)
 	
 	err := srv.handlePacket(buf.Buf[:buf.Position()], "127.0.0.1:1", func(resp []byte) error {
 		p := packet.NewDNSPacket()
 		pb := packet.NewBytePacketBuffer()
 		pb.Load(resp)
-		p.FromBuffer(pb)
+		_ = p.FromBuffer(pb)
 		if p.Header.ResCode != 4 {
 			t.Errorf("Expected FORMERR, got %d", p.Header.ResCode)
 		}
 		return nil
 	})
-	if errScan != nil {
+	if err != nil {
 		t.Fatalf("handlePacket failed: %v", err)
 	}
 }

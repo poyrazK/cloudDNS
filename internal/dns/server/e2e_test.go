@@ -24,23 +24,27 @@ func TestEndToEndDNS_Advanced(t *testing.T) {
 	apiAddr := "127.0.0.1:18081"
 
 	dnsSrv := NewServer(dnsAddr, repo, nil)
-	go dnsSrv.Run()
+	_ = dnsSrv.Run()
 
 	apiHandler := api.NewAPIHandler(svc)
 	mux := http.NewServeMux()
 	apiHandler.RegisterRoutes(mux)
 	apiSrv := &http.Server{Addr: apiAddr, Handler: mux}
-	go apiSrv.ListenAndServe()
+	_ = apiSrv.ListenAndServe()
 
 	time.Sleep(200 * time.Millisecond)
-	defer apiSrv.Shutdown(context.Background())
+	_ = apiSrv.Shutdown(context.Background())
 
 	// 2. Setup Zone with multiple records including Wildcards
 	zoneReq := domain.Zone{Name: "advanced.test.", TenantID: "admin"}
 	body, _ := json.Marshal(zoneReq)
-	resp, _ := http.Post(fmt.Sprintf("http://%s/zones", apiAddr), "application/json", bytes.NewBuffer(body))
+	resp, err := http.Post(fmt.Sprintf("http://%s/zones", apiAddr), "application/json", bytes.NewBuffer(body))
+	if err != nil {
+		t.Fatalf("Failed to create zone: %v", err)
+	}
+	_ = resp.Body.Close()
 	var createdZone domain.Zone
-	json.NewDecoder(resp.Body).Decode(&createdZone)
+	_ = json.NewDecoder(resp.Body).Decode(&createdZone)
 
 	records := []domain.Record{
 		{Name: "a.advanced.test.", Type: domain.TypeA, Content: "1.1.1.1", TTL: 300, ZoneID: createdZone.ID},
@@ -48,24 +52,24 @@ func TestEndToEndDNS_Advanced(t *testing.T) {
 	}
 	for _, r := range records {
 		b, _ := json.Marshal(r)
-		http.Post(fmt.Sprintf("http://%s/zones/%s/records", apiAddr, createdZone.ID), "application/json", bytes.NewBuffer(b))
+		_, _ = http.Post(fmt.Sprintf("http://%s/zones/%s/records", apiAddr, createdZone.ID), "application/json", bytes.NewBuffer(b))
 	}
 
 	// 3. Test Wildcard Resolution
 	query := packet.NewDNSPacket()
 	query.Questions = append(query.Questions, packet.DNSQuestion{Name: "anything.advanced.test.", QType: packet.TXT})
 	qBuf := packet.NewBytePacketBuffer()
-	query.Write(qBuf)
+	_ = query.Write(qBuf)
 
 	conn, _ := net.Dial("udp", dnsAddr)
-	conn.Write(qBuf.Buf[:qBuf.Position()])
+	_, _ = conn.Write(qBuf.Buf[:qBuf.Position()])
 	resBuf := make([]byte, 1024)
 	n, _ := conn.Read(resBuf)
 	
 	res := packet.NewDNSPacket()
 	pBuf := packet.NewBytePacketBuffer()
 	copy(pBuf.Buf, resBuf[:n])
-	res.FromBuffer(pBuf)
+	_ = res.FromBuffer(pBuf)
 
 	if len(res.Answers) == 0 || res.Answers[0].Txt != "wildcard" {
 		t.Errorf("Wildcard E2E failed")
@@ -77,25 +81,25 @@ func TestEndToEndDNS_Advanced(t *testing.T) {
 	axfrQuery.Header.ID = 0x1234
 	axfrQuery.Questions = append(axfrQuery.Questions, packet.DNSQuestion{Name: "advanced.test.", QType: packet.AXFR})
 	aqBuf := packet.NewBytePacketBuffer()
-	axfrQuery.Write(aqBuf)
+	_ = axfrQuery.Write(aqBuf)
 
 	tcpAQBuf := make([]byte, aqBuf.Position()+2)
 	tcpAQBuf[0] = byte(aqBuf.Position() >> 8)
 	tcpAQBuf[1] = byte(aqBuf.Position() & 0xFF)
 	copy(tcpAQBuf[2:], aqBuf.Buf[:aqBuf.Position()])
-	tcpConn.Write(tcpAQBuf)
+	_, _ = tcpConn.Write(tcpAQBuf)
 
 	// Read first SOA
 	lenB := make([]byte, 2)
-	tcpConn.Read(lenB)
+	_, _ = tcpConn.Read(lenB)
 	axfrRLen := uint16(lenB[0])<<8 | uint16(lenB[1])
 	axfrRData := make([]byte, axfrRLen)
-	tcpConn.Read(axfrRData)
+	_, _ = tcpConn.Read(axfrRData)
 	
 	axfrRes := packet.NewDNSPacket()
 	arb := packet.NewBytePacketBuffer()
 	copy(arb.Buf, axfrRData)
-	axfrRes.FromBuffer(arb)
+	_ = axfrRes.FromBuffer(arb)
 	
 	if len(axfrRes.Answers) == 0 || axfrRes.Answers[0].Type != packet.SOA {
 		t.Errorf("AXFR E2E failed to start with SOA")
@@ -110,14 +114,14 @@ func TestEndToEndDNS_Advanced(t *testing.T) {
 		Name: ".", Type: packet.OPT, UDPPayloadSize: 4096, Z: 0x8000,
 	})
 	qBuf2 := packet.NewBytePacketBuffer()
-	query2.Write(qBuf2)
-	conn2.Write(qBuf2.Buf[:qBuf2.Position()])
+	_ = query2.Write(qBuf2)
+	_, _ = conn2.Write(qBuf2.Buf[:qBuf2.Position()])
 	
 	n2, _ := conn2.Read(resBuf)
 	res2 := packet.NewDNSPacket()
 	pBuf2 := packet.NewBytePacketBuffer()
 	copy(pBuf2.Buf, resBuf[:n2])
-	res2.FromBuffer(pBuf2)
+	_ = res2.FromBuffer(pBuf2)
 
 	foundNSEC := false
 	for _, auth := range res2.Authorities {
