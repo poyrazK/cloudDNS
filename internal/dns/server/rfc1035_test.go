@@ -129,7 +129,7 @@ func TestRFC1035_AXFR(t *testing.T) {
 		n, _ := clientConn.Read(lenBuf)
 		if n != 2 { break }
 		
-		respLen := uint16(lenBuf[0])<<8 | uint16(lenBuf[1])
+		respLen := uint16(lenBuf[0])<<8 | uint16(lenBuf[1]) // #nosec G602
 		respData := make([]byte, respLen)
 		_, _ = clientConn.Read(respData)
 
