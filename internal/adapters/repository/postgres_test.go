@@ -19,7 +19,7 @@ import (
 func setupTestDB(t *testing.T) (*sql.DB, func()) {
 	ctx := context.Background()
 
-	pgContainer, err := postgres.Run(ctx,
+	pgContainer, errStart := postgres.Run(ctx,
 		"postgres:16-alpine",
 		postgres.WithDatabase("clouddns_test"),
 		postgres.WithUsername("postgres"),
@@ -28,28 +28,28 @@ func setupTestDB(t *testing.T) (*sql.DB, func()) {
 			wait.ForListeningPort("5432").
 				WithStartupTimeout(60*time.Second)),
 	)
-	if err != nil {
-		t.Fatalf("failed to start container: %s", err)
+	if errStart != nil {
+		t.Fatalf("failed to start container: %s", errStart)
 	}
 
-	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
-	if err != nil {
-		t.Fatalf("failed to get connection string: %s", err)
+	connStr, errConn := pgContainer.ConnectionString(ctx, "sslmode=disable")
+	if errConn != nil {
+		t.Fatalf("failed to get connection string: %s", errConn)
 	}
 
-	db, err := sql.Open("pgx", connStr)
-	if err != nil {
-		t.Fatalf("failed to open db: %s", err)
+	db, errOpen := sql.Open("pgx", connStr)
+	if errOpen != nil {
+		t.Fatalf("failed to open db: %s", errOpen)
 	}
 
 	schemaPath := filepath.Join(".", "schema.sql")
-	schema, err := os.ReadFile(schemaPath) // #nosec G304
-	if err != nil {
-		t.Fatalf("failed to read schema: %s", err)
+	schema, errRead := os.ReadFile(schemaPath) // #nosec G304
+	if errRead != nil {
+		t.Fatalf("failed to read schema: %s", errRead)
 	}
 
-	if _, err := db.Exec(string(schema)); err != nil {
-		t.Fatalf("failed to apply schema: %s", err)
+	if _, errExec := db.Exec(string(schema)); errExec != nil {
+		t.Fatalf("failed to apply schema: %s", errExec)
 	}
 
 	return db, func() {
@@ -75,21 +75,21 @@ func TestPostgresRepository_Integration(t *testing.T) {
 	ctx := context.Background()
 
 	// 1. Test Ping
-	if err := repo.Ping(ctx); err != nil {
-		t.Errorf("Ping failed: %v", err)
+	if errPing := repo.Ping(ctx); errPing != nil {
+		t.Errorf("Ping failed: %v", errPing)
 	}
 
 	// 2. Test CreateZone
 	zoneID1 := "550e8400-e29b-41d4-a716-446655440000"
 	zone := &domain.Zone{ID: zoneID1, Name: "base.test.", TenantID: "t1"}
-	if err := repo.CreateZone(ctx, zone); err != nil {
-		t.Fatalf("CreateZone failed: %v", err)
+	if errCreate := repo.CreateZone(ctx, zone); errCreate != nil {
+		t.Fatalf("CreateZone failed: %v", errCreate)
 	}
 
 	// 3. Test GetZone
-	gotZone, err := repo.GetZone(ctx,  "base.test.")
-	if err != nil || gotZone == nil || gotZone.ID != zoneID1 {
-		t.Errorf("GetZone failed: %v, got %+v", err, gotZone)
+	gotZone, errGet := repo.GetZone(ctx,  "base.test.")
+	if errGet != nil || gotZone == nil || gotZone.ID != zoneID1 {
+		t.Errorf("GetZone failed: %v, got %+v", errGet, gotZone)
 	}
 
 	// 4. Test CreateRecord
@@ -97,26 +97,26 @@ func TestPostgresRepository_Integration(t *testing.T) {
 	record := &domain.Record{
 		ID: recordID1, ZoneID: zoneID1, Name: "www.base.test.", Type: domain.TypeA, Content: "1.2.3.4", TTL: 300,
 	}
-	if err := repo.CreateRecord(ctx, record); err != nil {
-		t.Fatalf("CreateRecord failed: %v", err)
+	if errRec := repo.CreateRecord(ctx, record); errRec != nil {
+		t.Fatalf("CreateRecord failed: %v", errRec)
 	}
 
 	// 5. Test GetRecords (Case Insensitive)
-	recs, err := repo.GetRecords(ctx,  "WwW.BaSe.TeSt.", domain.TypeA, "8.8.8.8")
-	if err != nil || len(recs) != 1 {
-		t.Errorf("GetRecords failed: %v, count: %d", err, len(recs))
+	recs, errRecs := repo.GetRecords(ctx,  "WwW.BaSe.TeSt.", domain.TypeA, "8.8.8.8")
+	if errRecs != nil || len(recs) != 1 {
+		t.Errorf("GetRecords failed: %v, count: %d", errRecs, len(recs))
 	}
 
 	// 6. Test GetIPsForName
-	ips, err := repo.GetIPsForName(ctx,  "www.base.test.", "8.8.8.8")
-	if err != nil || len(ips) != 1 || ips[0] != "1.2.3.4" {
-		t.Errorf("GetIPsForName failed: %v, got %v", err, ips)
+	ips, errIPs := repo.GetIPsForName(ctx,  "www.base.test.", "8.8.8.8")
+	if errIPs != nil || len(ips) != 1 || ips[0] != "1.2.3.4" {
+		t.Errorf("GetIPsForName failed: %v, got %v", errIPs, ips)
 	}
 
 	// 7. Test ListRecordsForZone
-	allRecs, err := repo.ListRecordsForZone(ctx,  zoneID1)
-	if err != nil || len(allRecs) != 1 {
-		t.Errorf("ListRecordsForZone failed: %v, count: %d", err, len(allRecs))
+	allRecs, errList := repo.ListRecordsForZone(ctx,  zoneID1)
+	if errList != nil || len(allRecs) != 1 {
+		t.Errorf("ListRecordsForZone failed: %v, count: %d", errList, len(allRecs))
 	}
 
 	// 8. Test Audit Logs
@@ -125,38 +125,38 @@ func TestPostgresRepository_Integration(t *testing.T) {
 		ID: auditID1, TenantID: "t1", Action: "CREATE", ResourceType: "ZONE", ResourceID: zoneID1, Details: "...", CreatedAt: time.Now(),
 	}
 	_ = repo.SaveAuditLog(ctx, audit)
-	logs, err := repo.GetAuditLogs(ctx, "t1")
-	if err != nil {
-		t.Errorf("GetAuditLogs failed: %v", err)
+	logs, errAudit := repo.GetAuditLogs(ctx, "t1")
+	if errAudit != nil {
+		t.Errorf("GetAuditLogs failed: %v", errAudit)
 	}
 	if len(logs) != 1 {
 		t.Errorf("Audit logs expected 1, got %d", len(logs))
 	}
 
 	// 9. Test DeleteRecord
-	if err := repo.DeleteRecord(ctx,  recordID1, zoneID1); err != nil {
-		t.Errorf("DeleteRecord failed: %v", err)
+	if errDel := repo.DeleteRecord(ctx,  recordID1, zoneID1); errDel != nil {
+		t.Errorf("DeleteRecord failed: %v", errDel)
 	}
 
 	// 10. Test DeleteRecordsByNameAndType
 	rid2 := "550e8400-e29b-41d4-a716-446655440003"
 	_ = repo.CreateRecord(ctx, &domain.Record{ID: rid2, ZoneID: zoneID1, Name: "del.test.", Type: domain.TypeA, Content: "1.1.1.1", TTL: 60})
-	if err := repo.DeleteRecordsByNameAndType(ctx,  zoneID1, "del.test.", domain.TypeA); err != nil {
-		t.Errorf("DeleteRecordsByNameAndType failed: %v", err)
+	if errDelNT := repo.DeleteRecordsByNameAndType(ctx,  zoneID1, "del.test.", domain.TypeA); errDelNT != nil {
+		t.Errorf("DeleteRecordsByNameAndType failed: %v", errDelNT)
 	}
 
 	// 11. Test DeleteRecordsByName
 	rid3 := "550e8400-e29b-41d4-a716-446655440004"
 	_ = repo.CreateRecord(ctx, &domain.Record{ID: rid3, ZoneID: zoneID1, Name: "delname.test.", Type: domain.TypeA, Content: "1.1.1.1", TTL: 60})
-	if err := repo.DeleteRecordsByName(ctx,  zoneID1, "delname.test."); err != nil {
-		t.Errorf("DeleteRecordsByName failed: %v", err)
+	if errDelN := repo.DeleteRecordsByName(ctx,  zoneID1, "delname.test."); errDelN != nil {
+		t.Errorf("DeleteRecordsByName failed: %v", errDelN)
 	}
 
 	// 12. Test DeleteRecordSpecific
 	rid4 := "550e8400-e29b-41d4-a716-446655440005"
 	_ = repo.CreateRecord(ctx, &domain.Record{ID: rid4, ZoneID: zoneID1, Name: "specific.test.", Type: domain.TypeA, Content: "1.1.1.1", TTL: 60})
-	if err := repo.DeleteRecordSpecific(ctx,  zoneID1, "specific.test.", domain.TypeA, "1.1.1.1"); err != nil {
-		t.Errorf("DeleteRecordSpecific failed: %v", err)
+	if errDelS := repo.DeleteRecordSpecific(ctx,  zoneID1, "specific.test.", domain.TypeA, "1.1.1.1"); errDelS != nil {
+		t.Errorf("DeleteRecordSpecific failed: %v", errDelS)
 	}
 
 	// 13. Test Zone Changes (IXFR)
@@ -164,12 +164,12 @@ func TestPostgresRepository_Integration(t *testing.T) {
 	change := &domain.ZoneChange{
 		ID: changeID1, ZoneID: zoneID1, Serial: 100, Action: "ADD", Name: "new.test.", Type: domain.TypeA, Content: "4.4.4.4", TTL: 300, CreatedAt: time.Now(),
 	}
-	if err := repo.RecordZoneChange(ctx, change); err != nil {
-		t.Errorf("RecordZoneChange failed: %v", err)
+	if errChg := repo.RecordZoneChange(ctx, change); errChg != nil {
+		t.Errorf("RecordZoneChange failed: %v", errChg)
 	}
-	changes, err := repo.ListZoneChanges(ctx, zoneID1, 99)
-	if err != nil {
-		t.Errorf("ListZoneChanges failed: %v", err)
+	changes, errListChg := repo.ListZoneChanges(ctx, zoneID1, 99)
+	if errListChg != nil {
+		t.Errorf("ListZoneChanges failed: %v", errListChg)
 	}
 	if len(changes) != 1 || changes[0].ID != changeID1 {
 		t.Errorf("ListZoneChanges expected 1 change, got %d", len(changes))
@@ -181,25 +181,25 @@ func TestPostgresRepository_Integration(t *testing.T) {
 	_ = repo.CreateRecord(ctx, &domain.Record{ID: rid5, ZoneID: zoneID1, Name: "private.test.", Type: domain.TypeA, Content: "10.0.0.1", TTL: 60, Network: &netStr})
 	
 	// Should match from 192.168.1.50
-	recs, err = repo.GetRecords(ctx, "private.test.", domain.TypeA, "192.168.1.50")
-	if err != nil {
-		t.Errorf("GetRecords failed: %v", err)
+	recs, errPriv := repo.GetRecords(ctx, "private.test.", domain.TypeA, "192.168.1.50")
+	if errPriv != nil {
+		t.Errorf("GetRecords failed: %v", errPriv)
 	}
 	if len(recs) != 1 {
 		t.Errorf("Split-Horizon match failed")
 	}
 	// Should NOT match from 8.8.8.8
-	recs, err = repo.GetRecords(ctx, "private.test.", domain.TypeA, "8.8.8.8")
-	if err != nil {
-		t.Errorf("GetRecords failed: %v", err)
+	recs, errPub := repo.GetRecords(ctx, "private.test.", domain.TypeA, "8.8.8.8")
+	if errPub != nil {
+		t.Errorf("GetRecords failed: %v", errPub)
 	}
 	if len(recs) != 0 {
 		t.Errorf("Split-Horizon isolation failed")
 	}
 
 	// 15. Test DeleteZone
-	if err := repo.DeleteZone(ctx, zoneID1, "t1"); err != nil {
-		t.Errorf("DeleteZone failed: %v", err)
+	if errDelZone := repo.DeleteZone(ctx, zoneID1, "t1"); errDelZone != nil {
+		t.Errorf("DeleteZone failed: %v", errDelZone)
 	}
 }
 
@@ -226,13 +226,13 @@ func TestPostgresRepository_EdgeCases(t *testing.T) {
 	recs := []domain.Record{
 		{ID: "550e8400-e29b-41d4-a716-446655440010", ZoneID: zID, Name: "batch.test.", Type: domain.TypeA, Content: "1.1.1.1", TTL: 60},
 	}
-	if err := repo.CreateZoneWithRecords(ctx,  zone, recs); err != nil {
-		t.Errorf("CreateZoneWithRecords failed: %v", err)
+	if errCreateZR := repo.CreateZoneWithRecords(ctx,  zone, recs); errCreateZR != nil {
+		t.Errorf("CreateZoneWithRecords failed: %v", errCreateZR)
 	}
 
 	// 2. Test GetZone No Rows
-	z, err := repo.GetZone(ctx,  "missing.zone.")
-	if err != nil || z != nil {
+	z, errGZ := repo.GetZone(ctx,  "missing.zone.")
+	if errGZ != nil || z != nil {
 		t.Errorf("Expected nil for missing zone, got %v", z)
 	}
 

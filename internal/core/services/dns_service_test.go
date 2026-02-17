@@ -47,7 +47,7 @@ func (m *mockRepo) GetZone(ctx context.Context, name string) (*domain.Zone, erro
 	return nil, nil
 }
 
-func (m *mockRepo) ListRecordsForZone(ctx context.Context, zoneID string) ([]domain.Record, error) {
+func (m *mockRepo) ListRecordsForZone(_ context.Context, zoneID string) ([]domain.Record, error) {
 	if m.err != nil { return nil, m.err }
 	var res []domain.Record
 	for _, r := range m.records {
@@ -58,64 +58,64 @@ func (m *mockRepo) ListRecordsForZone(ctx context.Context, zoneID string) ([]dom
 	return res, nil
 }
 
-func (m *mockRepo) CreateZone(ctx context.Context, zone *domain.Zone) error {
+func (m *mockRepo) CreateZone(_ context.Context, zone *domain.Zone) error {
 	if m.err != nil { return m.err }
 	m.zones = append(m.zones, *zone)
 	return nil
 }
 
-func (m *mockRepo) CreateZoneWithRecords(ctx context.Context, zone *domain.Zone, records []domain.Record) error {
+func (m *mockRepo) CreateZoneWithRecords(_ context.Context, zone *domain.Zone, records []domain.Record) error {
 	if m.err != nil { return m.err }
 	m.zones = append(m.zones, *zone)
 	m.records = append(m.records, records...)
 	return nil
 }
 
-func (m *mockRepo) CreateRecord(ctx context.Context, record *domain.Record) error {
+func (m *mockRepo) CreateRecord(_ context.Context, record *domain.Record) error {
 	if m.err != nil { return m.err }
 	m.records = append(m.records, *record)
 	return nil
 }
 
-func (m *mockRepo) ListZones(ctx context.Context, tenantID string) ([]domain.Zone, error) {
+func (m *mockRepo) ListZones(_ context.Context, _ string) ([]domain.Zone, error) {
 	if m.err != nil { return nil, m.err }
 	return m.zones, nil
 }
 
-func (m *mockRepo) DeleteZone(ctx context.Context, id, tenantID string) error   { return m.err }
-func (m *mockRepo) DeleteRecord(ctx context.Context, id, zoneID string) error { return m.err }
+func (m *mockRepo) DeleteZone(_ context.Context, _, _ string) error   { return m.err }
+func (m *mockRepo) DeleteRecord(_ context.Context, _, _ string) error { return m.err }
 
-func (m *mockRepo) DeleteRecordsByNameAndType(ctx context.Context, zoneID string, name string, qType domain.RecordType) error {
+func (m *mockRepo) DeleteRecordsByNameAndType(_ context.Context, _, _ string, _ domain.RecordType) error {
 	return m.err
 }
 
-func (m *mockRepo) DeleteRecordsByName(ctx context.Context, zoneID string, name string) error {
+func (m *mockRepo) DeleteRecordsByName(_ context.Context, _, _ string) error {
 	return m.err
 }
 
-func (m *mockRepo) DeleteRecordSpecific(ctx context.Context, zoneID string, name string, qType domain.RecordType, content string) error {
+func (m *mockRepo) DeleteRecordSpecific(_ context.Context, _, _ string, _ domain.RecordType, _ string) error {
 	return m.err
 }
 
-func (m *mockRepo) RecordZoneChange(ctx context.Context, change *domain.ZoneChange) error {
+func (m *mockRepo) RecordZoneChange(_ context.Context, _ *domain.ZoneChange) error {
 	return m.err
 }
 
-func (m *mockRepo) ListZoneChanges(ctx context.Context, zoneID string, fromSerial uint32) ([]domain.ZoneChange, error) {
+func (m *mockRepo) ListZoneChanges(_ context.Context, _ string, _ uint32) ([]domain.ZoneChange, error) {
 	return nil, m.err
 }
 
-func (m *mockRepo) SaveAuditLog(ctx context.Context, log *domain.AuditLog) error { return m.err }
-func (m *mockRepo) GetAuditLogs(ctx context.Context, tenantID string) ([]domain.AuditLog, error) {
+func (m *mockRepo) SaveAuditLog(_ context.Context, _ *domain.AuditLog) error { return m.err }
+func (m *mockRepo) GetAuditLogs(_ context.Context, _ string) ([]domain.AuditLog, error) {
 	return nil, m.err
 }
-func (m *mockRepo) Ping(ctx context.Context) error { return m.err }
+func (m *mockRepo) Ping(_ context.Context) error { return m.err }
 
-func (m *mockRepo) CreateKey(ctx context.Context, key *domain.DNSSECKey) error { return m.err }
-func (m *mockRepo) ListKeysForZone(ctx context.Context, zoneID string) ([]domain.DNSSECKey, error) {
+func (m *mockRepo) CreateKey(_ context.Context, _ *domain.DNSSECKey) error { return m.err }
+func (m *mockRepo) ListKeysForZone(_ context.Context, _ string) ([]domain.DNSSECKey, error) {
 	return nil, m.err
 }
-func (m *mockRepo) UpdateKey(ctx context.Context, key *domain.DNSSECKey) error { return m.err }
+func (m *mockRepo) UpdateKey(_ context.Context, _ *domain.DNSSECKey) error { return m.err }
 
 func TestCreateZone(t *testing.T) {
 	repo := &mockRepo{}

@@ -165,18 +165,18 @@ func TestEndToEndDNSSEC_Lifecycle(t *testing.T) {
 	}
 
 	foundNSEC := false
-	foundNSEC_RRSIG := false
+	foundNSECRRSIG := false
 	for _, auth := range res2.Authorities {
 		if auth.Type == packet.NSEC { foundNSEC = true }
 		if auth.Type == packet.RRSIG && auth.TypeCovered == uint16(packet.NSEC) {
-			foundNSEC_RRSIG = true
+			foundNSECRRSIG = true
 		}
 	}
 
 	if !foundNSEC {
 		t.Errorf("NXDOMAIN response missing NSEC record")
 	}
-	if !foundNSEC_RRSIG {
+	if !foundNSECRRSIG {
 		t.Errorf("NSEC record in NXDOMAIN response is not signed (missing RRSIG)")
 	}
 }

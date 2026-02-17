@@ -29,7 +29,7 @@ func (m *auditMockRepo) ListRecordsForZone(ctx context.Context, zoneID string) (
 	return m.mockRepo.ListRecordsForZone(ctx, zoneID)
 }
 
-func (m *auditMockRepo) SaveAuditLog(ctx context.Context, log *domain.AuditLog) error {
+func (m *auditMockRepo) SaveAuditLog(_ context.Context, log *domain.AuditLog) error {
 	m.logs = append(m.logs, *log)
 	return nil
 }

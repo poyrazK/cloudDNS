@@ -19,7 +19,7 @@ type mockDNSService struct {
 	err     error
 }
 
-func (m *mockDNSService) CreateZone(ctx context.Context, zone *domain.Zone) error {
+func (m *mockDNSService) CreateZone(_ context.Context, zone *domain.Zone) error {
 	if m.err != nil {
 		return m.err
 	}
@@ -28,7 +28,7 @@ func (m *mockDNSService) CreateZone(ctx context.Context, zone *domain.Zone) erro
 	return nil
 }
 
-func (m *mockDNSService) CreateRecord(ctx context.Context, record *domain.Record) error {
+func (m *mockDNSService) CreateRecord(_ context.Context, record *domain.Record) error {
 	if m.err != nil {
 		return m.err
 	}
@@ -37,44 +37,44 @@ func (m *mockDNSService) CreateRecord(ctx context.Context, record *domain.Record
 	return nil
 }
 
-func (m *mockDNSService) Resolve(ctx context.Context, name string, qType domain.RecordType, clientIP string) ([]domain.Record, error) {
+func (m *mockDNSService) Resolve(_ context.Context, _ string, _ domain.RecordType, _ string) ([]domain.Record, error) {
 	return nil, m.err
 }
 
-func (m *mockDNSService) ListZones(ctx context.Context, tenantID string) ([]domain.Zone, error) {
+func (m *mockDNSService) ListZones(_ context.Context, _ string) ([]domain.Zone, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
 	return m.zones, nil
 }
 
-func (m *mockDNSService) ListRecordsForZone(ctx context.Context, zoneID string) ([]domain.Record, error) {
+func (m *mockDNSService) ListRecordsForZone(_ context.Context, _ string) ([]domain.Record, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
 	return m.records, nil
 }
 
-func (m *mockDNSService) DeleteZone(ctx context.Context, id, tenantID string) error {
+func (m *mockDNSService) DeleteZone(_ context.Context, _, _ string) error {
 	return m.err
 }
 
-func (m *mockDNSService) DeleteRecord(ctx context.Context, id, zoneID string) error {
+func (m *mockDNSService) DeleteRecord(_ context.Context, _, _ string) error {
 	return m.err
 }
 
-func (m *mockDNSService) ImportZone(ctx context.Context, tenantID string, r io.Reader) (*domain.Zone, error) {
+func (m *mockDNSService) ImportZone(_ context.Context, tenantID string, _ io.Reader) (*domain.Zone, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
 	return &domain.Zone{ID: "zone-imported", TenantID: tenantID}, nil
 }
 
-func (m *mockDNSService) HealthCheck(ctx context.Context) error {
+func (m *mockDNSService) HealthCheck(_ context.Context) error {
 	return m.err
 }
 
-func TestRegisterRoutes(t *testing.T) {
+func TestRegisterRoutes(_ *testing.T) {
 	svc := &mockDNSService{}
 	handler := NewAPIHandler(svc)
 	mux := http.NewServeMux()

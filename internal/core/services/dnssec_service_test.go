@@ -16,32 +16,32 @@ type mockDNSSECRepo struct {
 	err  error
 }
 
-func (m *mockDNSSECRepo) GetRecords(ctx context.Context, name string, qType domain.RecordType, clientIP string) ([]domain.Record, error) { return nil, nil }
-func (m *mockDNSSECRepo) GetIPsForName(ctx context.Context, name string, clientIP string) ([]string, error) { return nil, nil }
-func (m *mockDNSSECRepo) GetZone(ctx context.Context, name string) (*domain.Zone, error) { return nil, nil }
-func (m *mockDNSSECRepo) ListRecordsForZone(ctx context.Context, zoneID string) ([]domain.Record, error) { return nil, nil }
-func (m *mockDNSSECRepo) CreateZone(ctx context.Context, zone *domain.Zone) error { return nil }
-func (m *mockDNSSECRepo) CreateZoneWithRecords(ctx context.Context, zone *domain.Zone, records []domain.Record) error { return nil }
-func (m *mockDNSSECRepo) CreateRecord(ctx context.Context, record *domain.Record) error { return nil }
-func (m *mockDNSSECRepo) ListZones(ctx context.Context, tenantID string) ([]domain.Zone, error) { return nil, nil }
-func (m *mockDNSSECRepo) DeleteZone(ctx context.Context, zoneID string, tenantID string) error { return nil }
-func (m *mockDNSSECRepo) DeleteRecord(ctx context.Context, recordID string, zoneID string) error { return nil }
-func (m *mockDNSSECRepo) DeleteRecordsByNameAndType(ctx context.Context, zoneID string, name string, qType domain.RecordType) error { return nil }
-func (m *mockDNSSECRepo) DeleteRecordsByName(ctx context.Context, zoneID string, name string) error { return nil }
-func (m *mockDNSSECRepo) DeleteRecordSpecific(ctx context.Context, zoneID string, name string, qType domain.RecordType, content string) error { return nil }
-func (m *mockDNSSECRepo) RecordZoneChange(ctx context.Context, change *domain.ZoneChange) error { return nil }
-func (m *mockDNSSECRepo) ListZoneChanges(ctx context.Context, zoneID string, fromSerial uint32) ([]domain.ZoneChange, error) { return nil, nil }
-func (m *mockDNSSECRepo) SaveAuditLog(ctx context.Context, log *domain.AuditLog) error { return nil }
-func (m *mockDNSSECRepo) GetAuditLogs(ctx context.Context, tenantID string) ([]domain.AuditLog, error) { return nil, nil }
-func (m *mockDNSSECRepo) Ping(ctx context.Context) error { return nil }
+func (m *mockDNSSECRepo) GetRecords(_ context.Context, _ string, _ domain.RecordType, _ string) ([]domain.Record, error) { return nil, nil }
+func (m *mockDNSSECRepo) GetIPsForName(_ context.Context, _ string, _ string) ([]string, error) { return nil, nil }
+func (m *mockDNSSECRepo) GetZone(_ context.Context, _ string) (*domain.Zone, error) { return nil, nil }
+func (m *mockDNSSECRepo) ListRecordsForZone(_ context.Context, _ string) ([]domain.Record, error) { return nil, nil }
+func (m *mockDNSSECRepo) CreateZone(_ context.Context, _ *domain.Zone) error { return nil }
+func (m *mockDNSSECRepo) CreateZoneWithRecords(_ context.Context, _ *domain.Zone, _ []domain.Record) error { return nil }
+func (m *mockDNSSECRepo) CreateRecord(_ context.Context, _ *domain.Record) error { return nil }
+func (m *mockDNSSECRepo) ListZones(_ context.Context, _ string) ([]domain.Zone, error) { return nil, nil }
+func (m *mockDNSSECRepo) DeleteZone(_ context.Context, _, _ string) error { return nil }
+func (m *mockDNSSECRepo) DeleteRecord(_ context.Context, _, _ string) error { return nil }
+func (m *mockDNSSECRepo) DeleteRecordsByNameAndType(_ context.Context, _, _ string, _ domain.RecordType) error { return nil }
+func (m *mockDNSSECRepo) DeleteRecordsByName(_ context.Context, _, _ string) error { return nil }
+func (m *mockDNSSECRepo) DeleteRecordSpecific(_ context.Context, _, _ string, _ domain.RecordType, _ string) error { return nil }
+func (m *mockDNSSECRepo) RecordZoneChange(_ context.Context, _ *domain.ZoneChange) error { return nil }
+func (m *mockDNSSECRepo) ListZoneChanges(_ context.Context, _ string, _ uint32) ([]domain.ZoneChange, error) { return nil, nil }
+func (m *mockDNSSECRepo) SaveAuditLog(_ context.Context, _ *domain.AuditLog) error { return nil }
+func (m *mockDNSSECRepo) GetAuditLogs(_ context.Context, _ string) ([]domain.AuditLog, error) { return nil, nil }
+func (m *mockDNSSECRepo) Ping(_ context.Context) error { return nil }
 
-func (m *mockDNSSECRepo) CreateKey(ctx context.Context, key *domain.DNSSECKey) error {
+func (m *mockDNSSECRepo) CreateKey(_ context.Context, key *domain.DNSSECKey) error {
 	if m.err != nil { return m.err }
 	m.keys = append(m.keys, *key)
 	return nil
 }
 
-func (m *mockDNSSECRepo) ListKeysForZone(ctx context.Context, zoneID string) ([]domain.DNSSECKey, error) {
+func (m *mockDNSSECRepo) ListKeysForZone(_ context.Context, zoneID string) ([]domain.DNSSECKey, error) {
 	if m.err != nil { return nil, m.err }
 	var result []domain.DNSSECKey
 	for _, k := range m.keys {
@@ -52,7 +52,7 @@ func (m *mockDNSSECRepo) ListKeysForZone(ctx context.Context, zoneID string) ([]
 	return result, nil
 }
 
-func (m *mockDNSSECRepo) UpdateKey(ctx context.Context, key *domain.DNSSECKey) error {
+func (m *mockDNSSECRepo) UpdateKey(_ context.Context, key *domain.DNSSECKey) error {
 	if m.err != nil { return m.err }
 	for i, k := range m.keys {
 		if k.ID == key.ID {

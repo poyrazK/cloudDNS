@@ -6,7 +6,7 @@ import (
 )
 
 // RFC 5155: NSEC3 Hashing
-func HashName(name string, alg uint8, iterations uint16, salt []byte) []byte {
+func HashName(name string, _ uint8, iterations uint16, salt []byte) []byte {
 	// 1. Canonicalize name (lowercase and wire format)
 	name = strings.ToLower(name)
 	if !strings.HasSuffix(name, ".") {
@@ -33,7 +33,8 @@ func HashName(name string, alg uint8, iterations uint16, salt []byte) []byte {
 		h.Reset()
 		h.Write(res)
 		h.Write(salt)
-		res = h.Sum(nil)
+		iterRes := h.Sum(nil)
+		res = iterRes
 	}
 
 	return res

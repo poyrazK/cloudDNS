@@ -24,7 +24,7 @@ func TestHandleUpdateAddRecord(t *testing.T) {
 
 	req := packet.NewDNSPacket()
 	req.Header.ID = 100
-	req.Header.Opcode = packet.OPCODE_UPDATE
+	req.Header.Opcode = packet.OpcodeUpdate
 	// Zone Section: Specifies the zone being updated
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "example.test.", QType: packet.SOA})
 	// Update Section: The record to be added (Class IN)
@@ -55,7 +55,7 @@ func TestHandleUpdateAddRecord(t *testing.T) {
 	copy(pBuf.Buf, capturedResp)
 	_ = resPacket.FromBuffer(pBuf)
 
-	if resPacket.Header.ResCode != packet.RCODE_NOERROR {
+	if resPacket.Header.ResCode != packet.RcodeNoError {
 		t.Errorf("Expected NOERROR, got %d", resPacket.Header.ResCode)
 	}
 
@@ -88,7 +88,7 @@ func TestHandleUpdateDeleteRRSet(t *testing.T) {
 	srv := NewServer("127.0.0.1:0", repo, nil)
 
 	req := packet.NewDNSPacket()
-	req.Header.Opcode = packet.OPCODE_UPDATE
+	req.Header.Opcode = packet.OpcodeUpdate
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "example.test.", QType: packet.SOA})
 	// Delete RRSet: Class ANY (255), Type A
 	req.Authorities = append(req.Authorities, packet.DNSRecord{
@@ -133,7 +133,7 @@ func TestHandleUpdatePrerequisiteFail(t *testing.T) {
 	srv := NewServer("127.0.0.1:0", repo, nil)
 
 	req := packet.NewDNSPacket()
-	req.Header.Opcode = packet.OPCODE_UPDATE
+	req.Header.Opcode = packet.OpcodeUpdate
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "example.test.", QType: packet.SOA})
 	// Prerequisite: Name is in use (Class ANY, Type ANY)
 	req.Answers = append(req.Answers, packet.DNSRecord{
@@ -159,7 +159,7 @@ func TestHandleUpdatePrerequisiteFail(t *testing.T) {
 	copy(pBuf.Buf, capturedResp)
 	_ = resPacket.FromBuffer(pBuf)
 
-	if resPacket.Header.ResCode != packet.RCODE_NXDOMAIN {
+	if resPacket.Header.ResCode != packet.RcodeNxDomain {
 		t.Errorf("Expected NXDOMAIN (3) for failed prerequisite, got %d", resPacket.Header.ResCode)
 	}
 }
@@ -177,7 +177,7 @@ func TestHandleUpdateMorePrereqs(t *testing.T) {
 
 	// 1. Success case: Prerequisite check
 	req := packet.NewDNSPacket()
-	req.Header.Opcode = packet.OPCODE_UPDATE
+	req.Header.Opcode = packet.OpcodeUpdate
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "test.test.", QType: packet.SOA})
 	req.Answers = append(req.Answers, packet.DNSRecord{
 		Name: "exists.test.", Type: packet.A, Class: 255,
@@ -193,7 +193,7 @@ func TestHandleUpdateMorePrereqs(t *testing.T) {
 
 	// 2. Failure case: "Name NOT in use" but name exists
 	req2 := packet.NewDNSPacket()
-	req2.Header.Opcode = packet.OPCODE_UPDATE
+	req2.Header.Opcode = packet.OpcodeUpdate
 	req2.Questions = append(req2.Questions, packet.DNSQuestion{Name: "test.test.", QType: packet.SOA})
 	req2.Answers = append(req2.Answers, packet.DNSRecord{
 		Name: "exists.test.", Type: 255, Class: 254, // NONE/ANY -> YXDOMAIN if name in use
@@ -205,7 +205,7 @@ func TestHandleUpdateMorePrereqs(t *testing.T) {
 		pb := packet.NewBytePacketBuffer()
 		pb.Load(resp)
 		_ = p.FromBuffer(pb)
-		if p.Header.ResCode != packet.RCODE_YXDOMAIN {
+		if p.Header.ResCode != packet.RcodeYxDomain {
 			t.Errorf("Expected YXDOMAIN for existing name check, got %d", p.Header.ResCode)
 		}
 		return nil
@@ -227,7 +227,7 @@ func TestHandleUpdateDeleteSpecific(t *testing.T) {
 	srv := NewServer("127.0.0.1:0", repo, nil)
 
 	req := packet.NewDNSPacket()
-	req.Header.Opcode = packet.OPCODE_UPDATE
+	req.Header.Opcode = packet.OpcodeUpdate
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "test.test.", QType: packet.SOA})
 	// Delete specific record: Class NONE (254), Type A, matching IP 1.1.1.1
 	req.Authorities = append(req.Authorities, packet.DNSRecord{
@@ -262,7 +262,7 @@ func TestHandleUpdateTSIG(t *testing.T) {
 	srv.TsigKeys["testkey."] = []byte("secret123")
 
 	req := packet.NewDNSPacket()
-	req.Header.Opcode = packet.OPCODE_UPDATE
+	req.Header.Opcode = packet.OpcodeUpdate
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "tsig.test.", QType: packet.SOA})
 	req.Authorities = append(req.Authorities, packet.DNSRecord{
 		Name: "auth.tsig.test.",
@@ -293,7 +293,7 @@ func TestHandleUpdateTSIG(t *testing.T) {
 		resBuf := packet.NewBytePacketBuffer()
 		resBuf.Load(resp)
 		_ = resPacket.FromBuffer(resBuf)
-		if resPacket.Header.ResCode != packet.RCODE_NOERROR {
+		if resPacket.Header.ResCode != packet.RcodeNoError {
 			t.Errorf("Expected NOERROR for valid TSIG, got %d", resPacket.Header.ResCode)
 		}
 		return nil
@@ -322,7 +322,7 @@ func TestHandleUpdate_ErrorCases(t *testing.T) {
 
 	// 1. Invalid ZOCOUNT != 1
 	req := packet.NewDNSPacket()
-	req.Header.Opcode = packet.OPCODE_UPDATE
+	req.Header.Opcode = packet.OpcodeUpdate
 	// 0 questions
 	buf := packet.NewBytePacketBuffer()
 	_ = req.Write(buf)
@@ -331,7 +331,7 @@ func TestHandleUpdate_ErrorCases(t *testing.T) {
 		pb := packet.NewBytePacketBuffer()
 		pb.Load(resp)
 		_ = p.FromBuffer(pb)
-		if p.Header.ResCode != packet.RCODE_FORMERR {
+		if p.Header.ResCode != packet.RcodeFormErr {
 			t.Errorf("Expected FORMERR for ZOCOUNT=0, got %d", p.Header.ResCode)
 		}
 		return nil
@@ -341,7 +341,7 @@ func TestHandleUpdate_ErrorCases(t *testing.T) {
 
 	// 2. Unknown TSIG key
 	req2 := packet.NewDNSPacket()
-	req2.Header.Opcode = packet.OPCODE_UPDATE
+	req2.Header.Opcode = packet.OpcodeUpdate
 	req2.Questions = append(req2.Questions, packet.DNSQuestion{Name: "error.test.", QType: packet.SOA})
 	buf2 := packet.NewBytePacketBuffer()
 	_ = req2.Write(buf2)
@@ -351,7 +351,7 @@ func TestHandleUpdate_ErrorCases(t *testing.T) {
 		pb := packet.NewBytePacketBuffer()
 		pb.Load(resp)
 		_ = p.FromBuffer(pb)
-		if p.Header.ResCode != packet.RCODE_NOTAUTH {
+		if p.Header.ResCode != packet.RcodeNotAuth {
 			t.Errorf("Expected NOTAUTH for unknown TSIG, got %d", p.Header.ResCode)
 		}
 		return nil
@@ -361,7 +361,7 @@ func TestHandleUpdate_ErrorCases(t *testing.T) {
 
 	// 3. Not authoritative zone
 	req3 := packet.NewDNSPacket()
-	req3.Header.Opcode = packet.OPCODE_UPDATE
+	req3.Header.Opcode = packet.OpcodeUpdate
 	req3.Questions = append(req3.Questions, packet.DNSQuestion{Name: "notauth.test.", QType: packet.SOA})
 	buf3 := packet.NewBytePacketBuffer()
 	_ = req3.Write(buf3)
@@ -370,7 +370,7 @@ func TestHandleUpdate_ErrorCases(t *testing.T) {
 		pb := packet.NewBytePacketBuffer()
 		pb.Load(resp)
 		_ = p.FromBuffer(pb)
-		if p.Header.ResCode != packet.RCODE_NOTAUTH {
+		if p.Header.ResCode != packet.RcodeNotAuth {
 			t.Errorf("Expected NOTAUTH for non-existent zone, got %d", p.Header.ResCode)
 		}
 		return nil
@@ -387,21 +387,20 @@ func TestCheckPrerequisite_RRset(t *testing.T) {
 	}
 	srv := NewServer("127.0.0.1:0", repo, nil)
 	ctx := context.Background()
-	zone := &domain.Zone{ID: "z1"}
 
 	// 1. RRset exists (value independent) - SUCCESS
-	err := srv.checkPrerequisite(ctx, zone, packet.DNSRecord{Name: "exists.test.", Type: packet.A, Class: 255})
+	err := srv.checkPrerequisite(ctx, packet.DNSRecord{Name: "exists.test.", Type: packet.A, Class: 255})
 	if err != nil { t.Errorf("Expected success, got %v", err) }
 
 	// 2. RRset exists - FAILURE (doesn't exist)
-	err = srv.checkPrerequisite(ctx, zone, packet.DNSRecord{Name: "missing.test.", Type: packet.A, Class: 255})
+	err = srv.checkPrerequisite(ctx, packet.DNSRecord{Name: "missing.test.", Type: packet.A, Class: 255})
 	if err == nil { t.Errorf("Expected error for missing RRset") }
 
 	// 3. RRset does NOT exist - SUCCESS
-	err = srv.checkPrerequisite(ctx, zone, packet.DNSRecord{Name: "missing.test.", Type: packet.A, Class: 254})
+	err = srv.checkPrerequisite(ctx, packet.DNSRecord{Name: "missing.test.", Type: packet.A, Class: 254})
 	if err != nil { t.Errorf("Expected success, got %v", err) }
 
 	// 4. RRset does NOT exist - FAILURE (it exists)
-	err = srv.checkPrerequisite(ctx, zone, packet.DNSRecord{Name: "exists.test.", Type: packet.A, Class: 254})
+	err = srv.checkPrerequisite(ctx, packet.DNSRecord{Name: "exists.test.", Type: packet.A, Class: 254})
 	if err == nil { t.Errorf("Expected error for existing RRset check") }
 }

@@ -3,11 +3,11 @@ package server
 import (
 	"bytes"
 	"context"
-	"errors"
 	crand "crypto/rand"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -100,8 +100,8 @@ func (s *Server) automateDNSSEC() {
 	}
 
 	for _, z := range zones {
-		if err := s.DNSSEC.AutomateLifecycle(ctx, z.ID); err != nil {
-			s.Logger.Error("DNSSEC automation failed for zone", "zone", z.Name, "error", err)
+		if errAutomate := s.DNSSEC.AutomateLifecycle(ctx, z.ID); errAutomate != nil {
+			s.Logger.Error("DNSSEC automation failed for zone", "zone", z.Name, "error", errAutomate)
 		}
 	}
 }
@@ -112,8 +112,8 @@ func (s *Server) Run() error {
 	lc := net.ListenConfig{
 		Control: func(network, address string, c syscall.RawConn) error {
 			return c.Control(func(fd uintptr) {
-				if err := setReusePort(fd); err != nil {
-					s.Logger.Warn("failed to set reuse port", "error", err)
+				if errReuse := setReusePort(fd); errReuse != nil {
+					s.Logger.Warn("failed to set reuse port", "error", errReuse)
 				}
 			})
 		},
@@ -128,8 +128,8 @@ func (s *Server) Run() error {
 				return
 			}
 			defer func() {
-				if err := conn.Close(); err != nil {
-					s.Logger.Error("failed to close UDP connection", "error", err)
+				if errClose := conn.Close(); errClose != nil {
+					s.Logger.Error("failed to close UDP connection", "error", errClose)
 				}
 			}()
 			for {
@@ -151,12 +151,12 @@ func (s *Server) Run() error {
 	}
 
 	// 3. TCP Listener
-	tcpListener, err := lc.Listen(context.Background(), "tcp", s.Addr)
-	if err == nil {
+	tcpListener, errTCP := lc.Listen(context.Background(), "tcp", s.Addr)
+	if errTCP == nil {
 		go func() {
 			defer func() {
-				if err := tcpListener.Close(); err != nil {
-					s.Logger.Error("failed to close TCP listener", "error", err)
+				if errClose := tcpListener.Close(); errClose != nil {
+					s.Logger.Error("failed to close TCP listener", "error", errClose)
 				}
 			}()
 			for {
@@ -173,18 +173,18 @@ func (s *Server) Run() error {
 	if s.TLSConfig != nil {
 		host, _, _ := net.SplitHostPort(s.Addr)
 		dotAddr := net.JoinHostPort(host, "853")
-		dotListener, err := tls.Listen("tcp", dotAddr, s.TLSConfig)
-		if err == nil {
+		dotListener, errDoT := tls.Listen("tcp", dotAddr, s.TLSConfig)
+		if errDoT == nil {
 			s.Logger.Info("DNS over TLS (DoT) starting", "addr", dotAddr)
 			go func() {
 				defer func() {
-					if err := dotListener.Close(); err != nil {
-						s.Logger.Error("failed to close DoT listener", "error", err)
+					if errClose := dotListener.Close(); errClose != nil {
+						s.Logger.Error("failed to close DoT listener", "error", errClose)
 					}
 				}()
 				for {
-					conn, err := dotListener.Accept()
-					if err != nil {
+					conn, errAccept := dotListener.Accept()
+					if errAccept != nil {
 						continue
 					}
 					go s.handleTCPConnection(conn)
@@ -204,8 +204,8 @@ func (s *Server) Run() error {
 		}
 		s.Logger.Info("DNS over HTTPS (DoH) starting", "addr", dohAddr)
 		go func() {
-			if err := dohServer.ListenAndServeTLS("", ""); err != nil {
-				s.Logger.Error("DoH server failed", "error", err)
+			if errDoH := dohServer.ListenAndServeTLS("", ""); errDoH != nil {
+				s.Logger.Error("DoH server failed", "error", errDoH)
 			}
 		}()
 	}
@@ -215,7 +215,7 @@ func (s *Server) Run() error {
 
 func (s *Server) handleDoH(w http.ResponseWriter, r *http.Request) {
 	var dnsMsg []byte
-	var err error
+	var errDoH error
 
 	switch r.Method {
 	case http.MethodGet:
@@ -224,11 +224,11 @@ func (s *Server) handleDoH(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "missing dns parameter", http.StatusBadRequest)
 			return
 		}
-		dnsMsg, err = base64.RawURLEncoding.DecodeString(query)
-		if err != nil {
+		dnsMsg, errDoH = base64.RawURLEncoding.DecodeString(query)
+		if errDoH != nil {
 			// Try with padding if raw fails
-			dnsMsg, err = base64.URLEncoding.DecodeString(query)
-			if err != nil {
+			dnsMsg, errDoH = base64.URLEncoding.DecodeString(query)
+			if errDoH != nil {
 				http.Error(w, "invalid base64", http.StatusBadRequest)
 				return
 			}
@@ -238,8 +238,8 @@ func (s *Server) handleDoH(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "invalid request", http.StatusBadRequest)
 			return
 		}
-		dnsMsg, err = io.ReadAll(r.Body)
-		if err != nil {
+		dnsMsg, errDoH = io.ReadAll(r.Body)
+		if errDoH != nil {
 			http.Error(w, "failed to read body", http.StatusBadRequest)
 			return
 		}
@@ -248,12 +248,12 @@ func (s *Server) handleDoH(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.handlePacket(dnsMsg, r.RemoteAddr, func(resp []byte) error {
+	if errHandle := s.handlePacket(dnsMsg, r.RemoteAddr, func(resp []byte) error {
 		w.Header().Set("Content-Type", "application/dns-message")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(resp)
 		return nil
-	}); err != nil {
+	}); errHandle != nil {
 		http.Error(w, "server error", http.StatusInternalServerError)
 	}
 }
@@ -265,11 +265,11 @@ func (s *Server) udpWorker() {
 }
 
 func (s *Server) handleUDPConnection(pc net.PacketConn, addr net.Addr, data []byte) {
-	if err := s.handlePacket(data, addr, func(resp []byte) error {
-		_, err := pc.WriteTo(resp, addr)
-		return err
-	}); err != nil {
-		s.Logger.Error("failed to handle UDP packet", "error", err)
+	if errHandle := s.handlePacket(data, addr, func(resp []byte) error {
+		_, errWrite := pc.WriteTo(resp, addr)
+		return errWrite
+	}); errHandle != nil {
+		s.Logger.Error("failed to handle UDP packet", "error", errHandle)
 	}
 }
 
@@ -277,12 +277,12 @@ func (s *Server) handleTCPConnection(conn net.Conn) {
 	defer func() { _ = conn.Close() }()
 	for {
 		lenBuf := make([]byte, 2)
-		if _, err := io.ReadFull(conn, lenBuf); err != nil {
+		if _, errRead := io.ReadFull(conn, lenBuf); errRead != nil {
 			return
 		}
 		packetLen := uint16(lenBuf[0])<<8 | uint16(lenBuf[1])
 		data := make([]byte, packetLen)
-		if _, err := io.ReadFull(conn, data); err != nil {
+		if _, errRead := io.ReadFull(conn, data); errRead != nil {
 			return
 		}
 
@@ -290,7 +290,7 @@ func (s *Server) handleTCPConnection(conn net.Conn) {
 		reqBuffer := packet.GetBuffer()
 		reqBuffer.Load(data)
 		request := packet.NewDNSPacket()
-		if err := request.FromBuffer(reqBuffer); err == nil && len(request.Questions) > 0 {
+		if errFromBuf := request.FromBuffer(reqBuffer); errFromBuf == nil && len(request.Questions) > 0 {
 			if request.Questions[0].QType == packet.AXFR {
 				s.handleAXFR(conn, request)
 				packet.PutBuffer(reqBuffer)
@@ -304,13 +304,13 @@ func (s *Server) handleTCPConnection(conn net.Conn) {
 		}
 		packet.PutBuffer(reqBuffer)
 
-		if err := s.handlePacket(data, conn.RemoteAddr(), func(resp []byte) error {
+		if errHandle := s.handlePacket(data, conn.RemoteAddr(), func(resp []byte) error {
 			resLen := uint16(len(resp)) // #nosec G115
 			fullResp := append([]byte{byte(resLen >> 8), byte(resLen & 0xFF)}, resp...)
-			_, err := conn.Write(fullResp)
-			return err
-		}); err != nil {
-			s.Logger.Error("Failed to handle TCP packet", "error", err)
+			_, errWrite := conn.Write(fullResp)
+			return errWrite
+		}); errHandle != nil {
+			s.Logger.Error("Failed to handle TCP packet", "error", errHandle)
 		}
 	}
 }
@@ -329,9 +329,9 @@ func (s *Server) handleAXFR(conn net.Conn, request *packet.DNSPacket) {
 		return
 	}
 
-	records, err := s.Repo.ListRecordsForZone(ctx, zone.ID)
-	if err != nil {
-		s.Logger.Error("AXFR failed to list records", "zone", zone.ID, "error", err)
+	records, errList := s.Repo.ListRecordsForZone(ctx, zone.ID)
+	if errList != nil {
+		s.Logger.Error("AXFR failed to list records", "zone", zone.ID, "error", errList)
 		s.sendTCPError(conn, request.Header.ID, 2) // SERVFAIL
 		return
 	}
@@ -359,7 +359,9 @@ func (s *Server) handleAXFR(conn net.Conn, request *packet.DNSPacket) {
 	}
 
 	// Stream packets: SOA -> [all other records] -> SOA
-	stream := append([]domain.Record{*soa}, otherRecords...)
+	stream := make([]domain.Record, 0, len(otherRecords)+2)
+	stream = append(stream, *soa)
+	stream = append(stream, otherRecords...)
 	stream = append(stream, *soa)
 
 	s.Logger.Info("AXFR starting", "zone", zone.Name, "records", len(stream))
@@ -434,16 +436,16 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 	reqBuffer.Load(data)
 
 	request := packet.NewDNSPacket()
-	if err := request.FromBuffer(reqBuffer); err != nil {
-		s.Logger.Error("failed to parse packet", "error", err)
-		return err
+	if errParse := request.FromBuffer(reqBuffer); errParse != nil {
+		s.Logger.Error("failed to parse packet", "error", errParse)
+		return errParse
 	}
 
-	if request.Header.Opcode == packet.OPCODE_UPDATE {
+	if request.Header.Opcode == packet.OpcodeUpdate {
 		return s.handleUpdate(request, data, clientIP, sendFn)
 	}
 
-	if request.Header.Opcode == packet.OPCODE_NOTIFY {
+	if request.Header.Opcode == packet.OpcodeNotify {
 		return s.handleNotify(request, clientIP, sendFn)
 	}
 
@@ -620,7 +622,7 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 		if clientOPT != nil {
 			for i := range response.Resources {
 				if response.Resources[i].Type == packet.OPT {
-					response.Resources[i].AddEDE(packet.EDE_OTHER, "")
+					response.Resources[i].AddEDE(packet.EdeOther, "")
 				}
 			}
 		}
@@ -704,7 +706,7 @@ func (s *Server) handleNotify(request *packet.DNSPacket, clientIP string, sendFn
 	response := packet.NewDNSPacket()
 	response.Header.ID = request.Header.ID
 	response.Header.Response = true
-	response.Header.Opcode = packet.OPCODE_NOTIFY
+	response.Header.Opcode = packet.OpcodeNotify
 	response.Header.AuthoritativeAnswer = true
 	if len(request.Questions) > 0 {
 		response.Questions = append(response.Questions, request.Questions[0])
@@ -713,7 +715,7 @@ func (s *Server) handleNotify(request *packet.DNSPacket, clientIP string, sendFn
 	// TODO: If we are a slave, trigger refresh/IXFR here.
 	// For now, we just acknowledge.
 
-	response.Header.ResCode = packet.RCODE_NOERROR
+	response.Header.ResCode = packet.RcodeNoError
 	return s.sendUpdateResponse(response, sendFn)
 }
 
@@ -723,7 +725,7 @@ func (s *Server) handleUpdate(request *packet.DNSPacket, rawData []byte, clientI
 	response := packet.NewDNSPacket()
 	response.Header.ID = request.Header.ID
 	response.Header.Response = true
-	response.Header.Opcode = packet.OPCODE_UPDATE
+	response.Header.Opcode = packet.OpcodeUpdate
 
 	// 1. Validate TSIG if present
 	if request.TSIGStart != -1 {
@@ -731,12 +733,12 @@ func (s *Server) handleUpdate(request *packet.DNSPacket, rawData []byte, clientI
 		secret, ok := s.TsigKeys[tsig.Name]
 		if !ok {
 			s.Logger.Warn("update failed: unknown TSIG key", "key", tsig.Name)
-			response.Header.ResCode = packet.RCODE_NOTAUTH
+			response.Header.ResCode = packet.RcodeNotAuth
 			return s.sendUpdateResponse(response, sendFn)
 		}
 		if errVerify := request.VerifyTSIG(rawData, request.TSIGStart, secret); errVerify != nil {
 			s.Logger.Warn("update failed: TSIG verification failed", "error", errVerify)
-			response.Header.ResCode = packet.RCODE_NOTAUTH
+			response.Header.ResCode = packet.RcodeNotAuth
 			return s.sendUpdateResponse(response, sendFn)
 		}
 	}
@@ -744,7 +746,7 @@ func (s *Server) handleUpdate(request *packet.DNSPacket, rawData []byte, clientI
 	// 2. Validate Zone Section (ZOCOUNT must be 1)
 	if len(request.Questions) != 1 {
 		s.Logger.Warn("update failed: ZOCOUNT != 1", "count", len(request.Questions))
-		response.Header.ResCode = packet.RCODE_FORMERR
+		response.Header.ResCode = packet.RcodeFormErr
 		return s.sendUpdateResponse(response, sendFn)
 	}
 
@@ -758,19 +760,19 @@ func (s *Server) handleUpdate(request *packet.DNSPacket, rawData []byte, clientI
 	dbZone, _ := s.Repo.GetZone(ctx, zone.Name)
 	if dbZone == nil {
 		s.Logger.Warn("update failed: not authoritative for zone", "zone", zone.Name)
-		response.Header.ResCode = packet.RCODE_NOTAUTH
+		response.Header.ResCode = packet.RcodeNotAuth
 		return s.sendUpdateResponse(response, sendFn)
 	}
 
 	// 2. Prerequisite Checks (PRCOUNT)
 	for _, pr := range request.Answers {
-		if errPrereq := s.checkPrerequisite(ctx, dbZone, pr); errPrereq != nil {
+		if errPrereq := s.checkPrerequisite(ctx, pr); errPrereq != nil {
 			s.Logger.Warn("update failed: prerequisite mismatch", "pr", pr.Name, "error", errPrereq)
 			var uErr updateError
 			if errors.As(errPrereq, &uErr) {
 				response.Header.ResCode = uint8(uErr.rcode) // #nosec G115
 			} else {
-				response.Header.ResCode = packet.RCODE_SERVFAIL
+				response.Header.ResCode = packet.RcodeServFail
 			}
 			return s.sendUpdateResponse(response, sendFn)
 		}
@@ -778,12 +780,12 @@ func (s *Server) handleUpdate(request *packet.DNSPacket, rawData []byte, clientI
 
 	// 3. Perform Updates (UPCOUNT)
 	var newSerial uint32
-	var changes []domain.ZoneChange
+	changes := make([]domain.ZoneChange, 0, len(request.Authorities))
 
 	for _, up := range request.Authorities {
-		if errApply := s.applyUpdate(ctx, dbZone, up); errApply != nil {
-			s.Logger.Error("update failed: failed to apply record change", "up", up.Name, "error", errApply)
-			response.Header.ResCode = packet.RCODE_SERVFAIL
+		if errUpd := s.applyUpdate(ctx, dbZone, up); errUpd != nil {
+			s.Logger.Error("update failed: failed to apply record change", "up", up.Name, "error", errUpd)
+			response.Header.ResCode = packet.RcodeServFail
 			return s.sendUpdateResponse(response, sendFn)
 		}
 
@@ -829,16 +831,16 @@ func (s *Server) handleUpdate(request *packet.DNSPacket, rawData []byte, clientI
 				_ = s.Repo.CreateRecord(ctx, &soa)
 
 				// Persist changes with the new serial
-				for _, c := range changes {
-					c.Serial = newSerial
-					_ = s.Repo.RecordZoneChange(ctx, &c)
+				for i := range changes {
+					changes[i].Serial = newSerial
+					_ = s.Repo.RecordZoneChange(ctx, &changes[i])
 				}
 			}
 		}
 	}
 
 	// 5. Success
-	response.Header.ResCode = packet.RCODE_NOERROR
+	response.Header.ResCode = packet.RcodeNoError
 	s.Logger.Info("dynamic update successful", "zone", zone.Name)
 	s.Cache.Flush()
 
@@ -915,7 +917,7 @@ func (s *Server) handleIXFR(conn net.Conn, request *packet.DNSPacket) {
 				tempSOA := pCurrentSOA
 				tempSOA.Serial = currentDiffSerial
 
-				s.sendIXFRDiff(conn, request.Header.ID, q, tempSOA, deletions, additions)
+				s.sendIXFRDiff(conn, request.Header.ID, tempSOA, deletions, additions)
 				deletions = nil
 				additions = nil
 			}
@@ -925,7 +927,7 @@ func (s *Server) handleIXFR(conn net.Conn, request *packet.DNSPacket) {
 		var ttl uint32
 		// Explicit range check for G115
 		if c.TTL >= 0 && int64(c.TTL) <= math.MaxUint32 {
-			ttl = uint32(c.TTL) // #nosec G115 // #nosec G115
+			ttl = uint32(c.TTL) // #nosec G115
 		}
 
 		pRec := packet.DNSRecord{
@@ -946,7 +948,7 @@ func (s *Server) handleIXFR(conn net.Conn, request *packet.DNSPacket) {
 	if len(deletions) > 0 || len(additions) > 0 {
 		tempSOA := pCurrentSOA
 		tempSOA.Serial = currentDiffSerial
-		s.sendIXFRDiff(conn, request.Header.ID, q, tempSOA, deletions, additions)
+		s.sendIXFRDiff(conn, request.Header.ID, tempSOA, deletions, additions)
 	}
 
 	// Send Current SOA (marks end of IXFR)
@@ -1015,7 +1017,7 @@ func (s *Server) sendSingleRecordResponse(conn net.Conn, id uint16, q packet.DNS
 	packet.PutBuffer(resBuffer)
 }
 
-func (s *Server) sendIXFRDiff(conn net.Conn, id uint16, q packet.DNSQuestion, soa packet.DNSRecord, deletions, additions []packet.DNSRecord) {
+func (s *Server) sendIXFRDiff(conn net.Conn, id uint16, soa packet.DNSRecord, deletions, additions []packet.DNSRecord) {
 	// 1. Send Old SOA + Deletions
 	resp := packet.NewDNSPacket()
 	resp.Header.ID = id
@@ -1060,37 +1062,37 @@ type updateError struct {
 
 func (e updateError) Error() string { return e.msg }
 
-func (s *Server) checkPrerequisite(ctx context.Context, zone *domain.Zone, pr packet.DNSRecord) error {
+func (s *Server) checkPrerequisite(ctx context.Context, pr packet.DNSRecord) error {
 	qTypeStr := queryTypeToRecordType(pr.Type)
-	records, err := s.Repo.GetRecords(ctx, pr.Name, qTypeStr, "")
-	if err != nil {
-		return updateError{rcode: int(packet.RCODE_SERVFAIL), msg: "failed to fetch records for prerequisite check"}
+	records, errRecs := s.Repo.GetRecords(ctx, pr.Name, qTypeStr, "")
+	if errRecs != nil {
+		return updateError{rcode: int(packet.RcodeServFail), msg: "failed to fetch records for prerequisite check"}
 	}
 
 	switch pr.Class {
 	case 255: // ANY
 		if pr.Type == 255 { // ANY
 			if len(records) == 0 {
-				return updateError{rcode: int(packet.RCODE_NXDOMAIN), msg: "name not in use"}
+				return updateError{rcode: int(packet.RcodeNxDomain), msg: "name not in use"}
 			}
 		} else {
 			if len(records) == 0 {
-				return updateError{rcode: int(packet.RCODE_NXRRSET), msg: "rrset does not exist"}
+				return updateError{rcode: int(packet.RcodeNxRRSet), msg: "rrset does not exist"}
 			}
 		}
 	case 254: // NONE
 		if pr.Type == 255 { // ANY
 			if len(records) > 0 {
-				return updateError{rcode: int(packet.RCODE_YXDOMAIN), msg: "name in use"}
+				return updateError{rcode: int(packet.RcodeYxDomain), msg: "name in use"}
 			}
 		} else {
 			if len(records) > 0 {
-				return updateError{rcode: int(packet.RCODE_YXRRSET), msg: "rrset exists"}
+				return updateError{rcode: int(packet.RcodeYxRRSet), msg: "rrset exists"}
 			}
 		}
 	default:
 		if len(records) == 0 {
-			return updateError{rcode: int(packet.RCODE_NXRRSET), msg: "rrset does not exist"}
+			return updateError{rcode: int(packet.RcodeNxRRSet), msg: "rrset does not exist"}
 		}
 	}
 
@@ -1108,15 +1110,15 @@ func (s *Server) applyUpdate(ctx context.Context, zone *domain.Zone, up packet.D
 		}
 	case 254: // NONE
 		qTypeStr := queryTypeToRecordType(up.Type)
-		dRec, err := repository.ConvertPacketRecordToDomain(up, zone.ID)
-		if err != nil {
-			return err
+		dRec, errConv := repository.ConvertPacketRecordToDomain(up, zone.ID)
+		if errConv != nil {
+			return errConv
 		}
 		return s.Repo.DeleteRecordSpecific(ctx, zone.ID, up.Name, qTypeStr, dRec.Content)
 	default:
-		dRec, err := repository.ConvertPacketRecordToDomain(up, zone.ID)
-		if err != nil {
-			return err
+		dRec, errConv := repository.ConvertPacketRecordToDomain(up, zone.ID)
+		if errConv != nil {
+			return errConv
 		}
 		if dRec.ID == "" {
 			// Use crand for secure ID generation (G404)
@@ -1172,7 +1174,7 @@ func (s *Server) notifySlaves(zoneName string) {
 			_, _ = crand.Read(bid[:])
 			notify.Header.ID = binary.LittleEndian.Uint16(bid[:])
 
-			notify.Header.Opcode = packet.OPCODE_NOTIFY
+			notify.Header.Opcode = packet.OpcodeNotify
 			notify.Header.AuthoritativeAnswer = true
 			notify.Questions = append(notify.Questions, packet.DNSQuestion{
 				Name:  zoneName,
@@ -1297,11 +1299,7 @@ func (s *Server) generateNSEC3(ctx context.Context, zone *domain.Zone, queryName
 		nameToTypes[r.Name] = append(nameToTypes[r.Name], r.Type)
 	}
 
-	type hashEntry struct {
-		name string
-		hash []byte
-	}
-	var hashes []hashEntry
+	hashes := make([]hashEntry, 0, len(ownerNames))
 	for _, name := range ownerNames {
 		h := packet.HashName(name, alg, iterations, []byte(salt))
 		hashes = append(hashes, hashEntry{name: name, hash: h})
@@ -1365,6 +1363,11 @@ func (s *Server) generateNSEC3(ctx context.Context, zone *domain.Zone, queryName
 	}
 
 	return nsec3, nil
+}
+
+type hashEntry struct {
+	name string
+	hash []byte
 }
 
 func (s *Server) generateTypeBitMap(types []domain.RecordType) []byte {

@@ -39,7 +39,7 @@ func TestQueryTypeToRecordType_All(t *testing.T) {
 func TestHandleUpdate_FormErr(t *testing.T) {
 	srv := NewServer("127.0.0.1:0", &mockServerRepo{}, nil)
 	req := packet.NewDNSPacket()
-	req.Header.Opcode = packet.OPCODE_UPDATE
+	req.Header.Opcode = packet.OpcodeUpdate
 	// No questions (ZOCOUNT = 0)
 	
 	err := srv.handleUpdate(req, nil, "127.0.0.1", func(resp []byte) error {
@@ -47,7 +47,7 @@ func TestHandleUpdate_FormErr(t *testing.T) {
 		pb := packet.NewBytePacketBuffer()
 		pb.Load(resp)
 		_ = p.FromBuffer(pb)
-		if p.Header.ResCode != packet.RCODE_FORMERR {
+		if p.Header.ResCode != packet.RcodeFormErr {
 			t.Errorf("Expected FORMERR for empty update, got %d", p.Header.ResCode)
 		}
 		return nil

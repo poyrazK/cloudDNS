@@ -44,8 +44,8 @@ func TestRFC8914_EDE(t *testing.T) {
 						t.Errorf("EDE data too short")
 					}
 					infoCode := uint16(opt.Data[0])<<8 | uint16(opt.Data[1])
-					if infoCode != packet.EDE_OTHER {
-						t.Errorf("Expected EDE_OTHER (0), got %d", infoCode)
+					if infoCode != packet.EdeOther {
+						t.Errorf("Expected EdeOther (0), got %d", infoCode)
 					}
 				}
 			}

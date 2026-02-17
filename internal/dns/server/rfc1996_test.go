@@ -17,7 +17,7 @@ func TestHandleNotify(t *testing.T) {
 
 	req := packet.NewDNSPacket()
 	req.Header.ID = 789
-	req.Header.Opcode = packet.OPCODE_NOTIFY
+	req.Header.Opcode = packet.OpcodeNotify
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "notify.test.", QType: packet.SOA})
 
 	reqBuf := packet.NewBytePacketBuffer()
@@ -39,7 +39,7 @@ func TestHandleNotify(t *testing.T) {
 	_ = resp.FromBuffer(resBuf)
 
 	// RFC 1996: The response MUST have the same ID, Opcode, and the QR bit set.
-	if resp.Header.Opcode != packet.OPCODE_NOTIFY || !resp.Header.Response {
+	if resp.Header.Opcode != packet.OpcodeNotify || !resp.Header.Response {
 		t.Errorf("Expected NOTIFY response")
 	}
 	if resp.Header.ResCode != 0 {
@@ -90,7 +90,7 @@ func TestNotifySlaves(t *testing.T) {
 	pBuf.Load(buf[:n])
 	_ = p.FromBuffer(pBuf)
 
-	if p.Header.Opcode != packet.OPCODE_NOTIFY {
+	if p.Header.Opcode != packet.OpcodeNotify {
 		t.Errorf("Expected NOTIFY opcode, got %d", p.Header.Opcode)
 	}
 }

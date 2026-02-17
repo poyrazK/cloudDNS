@@ -38,7 +38,7 @@ func TestPrintEnhancedReport(t *testing.T) {
 	close(stats.Latencies)
 
 	// Verify it doesn't panic
-	printEnhancedReport(1*time.Second, stats, 1)
+	printEnhancedReport(1*time.Second, stats, 1, 10)
 }
 
 func TestRunBenchmark(t *testing.T) {

@@ -43,22 +43,22 @@ const (
 
 // RFC 8914: Extended DNS Error Codes
 const (
-	EDE_OTHER               uint16 = 0
-	EDE_UNSUPPORTED_DNSKEY  uint16 = 1
-	EDE_UNSUPPORTED_DS      uint16 = 2
-	EDE_STALE_ANSWER        uint16 = 3
-	EDE_FORGED_ANSWER       uint16 = 4
-	EDE_DNSSEC_INDETERMINATE uint16 = 5
-	EDE_DNSSEC_BOGUS        uint16 = 6
-	EDE_SIGNATURE_EXPIRED   uint16 = 7
-	EDE_SIGNATURE_NOT_YET   uint16 = 8
-	EDE_MISSING_DNSKEY      uint16 = 9
-	EDE_MISSING_DS          uint16 = 10
-	EDE_UNSUPPORTED_ALG     uint16 = 11
-	EDE_PROHIBITED          uint16 = 18
-	EDE_BLOCKED             uint16 = 15
-	EDE_CENSORED            uint16 = 16
-	EDE_FILTERED            uint16 = 17
+	EdeOther               uint16 = 0
+	EdeUnsupportedDnskey  uint16 = 1
+	EdeUnsupportedDs      uint16 = 2
+	EdeStaleAnswer        uint16 = 3
+	EdeForgedAnswer       uint16 = 4
+	EdeDnssecIndeterminate uint16 = 5
+	EdeDnssecBogus        uint16 = 6
+	EdeSignatureExpired   uint16 = 7
+	EdeSignatureNotYet   uint16 = 8
+	EdeMissingDnskey      uint16 = 9
+	EdeMissingDs          uint16 = 10
+	EdeUnsupportedAlg     uint16 = 11
+	EdeProhibited          uint16 = 18
+	EdeBlocked             uint16 = 15
+	EdeCensored            uint16 = 16
+	EdeFiltered            uint16 = 17
 )
 
 func RecordTypeToQueryType(t domain.RecordType) QueryType {
@@ -102,25 +102,25 @@ func (t QueryType) String() string {
 }
 
 const (
-	OPCODE_QUERY  uint8 = 0
-	OPCODE_IQUERY uint8 = 1
-	OPCODE_STATUS uint8 = 2
-	OPCODE_NOTIFY uint8 = 4
-	OPCODE_UPDATE uint8 = 5
+	OpcodeQuery  uint8 = 0
+	OpcodeIQuery uint8 = 1
+	OpcodeStatus uint8 = 2
+	OpcodeNotify uint8 = 4
+	OpcodeUpdate uint8 = 5
 )
 
 const (
-	RCODE_NOERROR  uint8 = 0
-	RCODE_FORMERR  uint8 = 1
-	RCODE_SERVFAIL uint8 = 2
-	RCODE_NXDOMAIN uint8 = 3
-	RCODE_NOTIMP   uint8 = 4
-	RCODE_REFUSED  uint8 = 5
-	RCODE_YXDOMAIN uint8 = 6
-	RCODE_YXRRSET  uint8 = 7
-	RCODE_NXRRSET  uint8 = 8
-	RCODE_NOTAUTH  uint8 = 9
-	RCODE_NOTZONE  uint8 = 10
+	RcodeNoError  uint8 = 0
+	RcodeFormErr  uint8 = 1
+	RcodeServFail uint8 = 2
+	RcodeNxDomain uint8 = 3
+	RcodeNotImp   uint8 = 4
+	RcodeRefused  uint8 = 5
+	RcodeYxDomain uint8 = 6
+	RcodeYxRRSet  uint8 = 7
+	RcodeNxRRSet  uint8 = 8
+	RcodeNotAuth  uint8 = 9
+	RcodeNotZone  uint8 = 10
 )
 
 type DNSHeader struct {

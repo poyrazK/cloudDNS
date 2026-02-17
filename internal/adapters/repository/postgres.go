@@ -32,19 +32,19 @@ func (r *PostgresRepository) GetRecords(ctx context.Context, name string, qType 
 	          WHERE LOWER(name) = LOWER($1) AND (network IS NULL OR $2::inet <<= network)`
 	
 	var rows *sql.Rows
-	var err error
+	var errQuery error
 
 	if qType != "" {
 		query += " AND type = $3"
-		rows, err = r.db.QueryContext(ctx, query, name, clientIP, string(qType))
+		rows, errQuery = r.db.QueryContext(ctx, query, name, clientIP, string(qType))
 	} else {
-		rows, err = r.db.QueryContext(ctx, query, name, clientIP)
+		rows, errQuery = r.db.QueryContext(ctx, query, name, clientIP)
 	}
 
-	if err != nil {
-		return nil, err
+	if errQuery != nil {
+		return nil, errQuery
 	}
-	defer func() { if err := rows.Close(); err != nil { log.Printf("failed to close rows: %v", err) } }()
+	defer func() { if errClose := rows.Close(); errClose != nil { log.Printf("failed to close rows: %v", errClose) } }()
 
 	var records []domain.Record
 	for rows.Next() {
@@ -68,11 +68,11 @@ func (r *PostgresRepository) GetIPsForName(ctx context.Context, name string, cli
 	query := `SELECT content FROM dns_records 
 	          WHERE LOWER(name) = LOWER($1) AND type = 'A' AND (network IS NULL OR $2::inet <<= network)`
 	
-	rows, err := r.db.QueryContext(ctx, query, name, clientIP)
-	if err != nil {
-		return nil, err
+	rows, errQuery := r.db.QueryContext(ctx, query, name, clientIP)
+	if errQuery != nil {
+		return nil, errQuery
 	}
-	defer func() { if err := rows.Close(); err != nil { log.Printf("failed to close rows: %v", err) } }()
+	defer func() { if errClose := rows.Close(); errClose != nil { log.Printf("failed to close rows: %v", errClose) } }()
 
 	var ips []string
 	for rows.Next() {
@@ -88,23 +88,23 @@ func (r *PostgresRepository) GetIPsForName(ctx context.Context, name string, cli
 func (r *PostgresRepository) GetZone(ctx context.Context, name string) (*domain.Zone, error) {
 	query := `SELECT id, tenant_id, name, vpc_id, description, created_at, updated_at FROM dns_zones WHERE LOWER(name) = LOWER($1)`
 	var z domain.Zone
-	err := r.db.QueryRowContext(ctx, query, name).Scan(&z.ID, &z.TenantID, &z.Name, &z.VPCID, &z.Description, &z.CreatedAt, &z.UpdatedAt)
-	if err == sql.ErrNoRows {
+	errRow := r.db.QueryRowContext(ctx, query, name).Scan(&z.ID, &z.TenantID, &z.Name, &z.VPCID, &z.Description, &z.CreatedAt, &z.UpdatedAt)
+	if errors.Is(errRow, sql.ErrNoRows) {
 		return nil, nil
 	}
-	if err != nil {
-		return nil, err
+	if errRow != nil {
+		return nil, errRow
 	}
 	return &z, nil
 }
 
 func (r *PostgresRepository) ListRecordsForZone(ctx context.Context, zoneID string) ([]domain.Record, error) {
 	query := `SELECT id, zone_id, name, type, content, ttl, priority, network FROM dns_records WHERE zone_id = $1`
-	rows, err := r.db.QueryContext(ctx, query, zoneID)
-	if err != nil {
-		return nil, err
+	rows, errQuery := r.db.QueryContext(ctx, query, zoneID)
+	if errQuery != nil {
+		return nil, errQuery
 	}
-	defer func() { if err := rows.Close(); err != nil { log.Printf("failed to close rows: %v", err) } }()
+	defer func() { if errClose := rows.Close(); errClose != nil { log.Printf("failed to close rows: %v", errClose) } }()
 
 	var records []domain.Record
 	for rows.Next() {
@@ -130,31 +130,31 @@ func (r *PostgresRepository) CreateZone(ctx context.Context, zone *domain.Zone) 
 }
 
 func (r *PostgresRepository) CreateZoneWithRecords(ctx context.Context, zone *domain.Zone, records []domain.Record) error {
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
+	tx, errTx := r.db.BeginTx(ctx, nil)
+	if errTx != nil {
+		return errTx
 	}
 	defer func() {
-		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
-			log.Printf("failed to rollback transaction: %v", err)
+		if errRollback := tx.Rollback(); errRollback != nil && !errors.Is(errRollback, sql.ErrTxDone) {
+			log.Printf("failed to rollback transaction: %v", errRollback)
 		}
 	}()
 
 	// 1. Insert Zone
 	zoneQuery := `INSERT INTO dns_zones (id, tenant_id, name, vpc_id, description, created_at, updated_at) 
 			      VALUES ($1, $2, $3, $4, $5, $6, $7)`
-	_, err = tx.ExecContext(ctx, zoneQuery, zone.ID, zone.TenantID, zone.Name, zone.VPCID, zone.Description, zone.CreatedAt, zone.UpdatedAt)
-	if err != nil {
-		return err
+	_, errExec := tx.ExecContext(ctx, zoneQuery, zone.ID, zone.TenantID, zone.Name, zone.VPCID, zone.Description, zone.CreatedAt, zone.UpdatedAt)
+	if errExec != nil {
+		return errExec
 	}
 
 	// 2. Insert Records
 	recordQuery := `INSERT INTO dns_records (id, zone_id, name, type, content, ttl, priority, created_at, updated_at) 
 			        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
 	for _, rec := range records {
-		_, err = tx.ExecContext(ctx, recordQuery, rec.ID, rec.ZoneID, rec.Name, rec.Type, rec.Content, rec.TTL, rec.Priority, rec.CreatedAt, rec.UpdatedAt)
-		if err != nil {
-			return err
+		_, errExecRecord := tx.ExecContext(ctx, recordQuery, rec.ID, rec.ZoneID, rec.Name, rec.Type, rec.Content, rec.TTL, rec.Priority, rec.CreatedAt, rec.UpdatedAt)
+		if errExecRecord != nil {
+			return errExecRecord
 		}
 	}
 
@@ -171,19 +171,19 @@ func (r *PostgresRepository) CreateRecord(ctx context.Context, record *domain.Re
 func (r *PostgresRepository) ListZones(ctx context.Context, tenantID string) ([]domain.Zone, error) {
 	query := `SELECT id, tenant_id, name, vpc_id, description, created_at, updated_at FROM dns_zones`
 	var rows *sql.Rows
-	var err error
+	var errQuery error
 
 	if tenantID != "" {
 		query += " WHERE tenant_id = $1"
-		rows, err = r.db.QueryContext(ctx, query, tenantID)
+		rows, errQuery = r.db.QueryContext(ctx, query, tenantID)
 	} else {
-		rows, err = r.db.QueryContext(ctx, query)
+		rows, errQuery = r.db.QueryContext(ctx, query)
 	}
 
-	if err != nil {
-		return nil, err
+	if errQuery != nil {
+		return nil, errQuery
 	}
-	defer func() { if err := rows.Close(); err != nil { log.Printf("failed to close rows: %v", err) } }()
+	defer func() { if errClose := rows.Close(); errClose != nil { log.Printf("failed to close rows: %v", errClose) } }()
 
 	var zones []domain.Zone
 	for rows.Next() {
@@ -236,11 +236,11 @@ func (r *PostgresRepository) RecordZoneChange(ctx context.Context, change *domai
 func (r *PostgresRepository) ListZoneChanges(ctx context.Context, zoneID string, fromSerial uint32) ([]domain.ZoneChange, error) {
 	query := `SELECT id, zone_id, serial, action, name, type, content, ttl, priority, created_at 
 	          FROM dns_zone_changes WHERE zone_id = $1 AND serial > $2 ORDER BY serial ASC, created_at ASC`
-	rows, err := r.db.QueryContext(ctx, query, zoneID, fromSerial)
-	if err != nil {
-		return nil, err
+	rows, errQuery := r.db.QueryContext(ctx, query, zoneID, fromSerial)
+	if errQuery != nil {
+		return nil, errQuery
 	}
-	defer func() { if err := rows.Close(); err != nil { log.Printf("failed to close rows: %v", err) } }()
+	defer func() { if errClose := rows.Close(); errClose != nil { log.Printf("failed to close rows: %v", errClose) } }()
 
 	var changes []domain.ZoneChange
 	for rows.Next() {
@@ -267,11 +267,11 @@ func (r *PostgresRepository) SaveAuditLog(ctx context.Context, log *domain.Audit
 
 func (r *PostgresRepository) GetAuditLogs(ctx context.Context, tenantID string) ([]domain.AuditLog, error) {
 	query := `SELECT id, tenant_id, action, resource_type, resource_id, details, created_at FROM audit_logs WHERE tenant_id = $1 ORDER BY created_at DESC`
-	rows, err := r.db.QueryContext(ctx, query, tenantID)
-	if err != nil {
-		return nil, err
+	rows, errQuery := r.db.QueryContext(ctx, query, tenantID)
+	if errQuery != nil {
+		return nil, errQuery
 	}
-	defer func() { if err := rows.Close(); err != nil { log.Printf("failed to close rows: %v", err) } }()
+	defer func() { if errClose := rows.Close(); errClose != nil { log.Printf("failed to close rows: %v", errClose) } }()
 
 	var logs []domain.AuditLog
 	for rows.Next() {
@@ -297,11 +297,11 @@ func (r *PostgresRepository) CreateKey(ctx context.Context, key *domain.DNSSECKe
 
 func (r *PostgresRepository) ListKeysForZone(ctx context.Context, zoneID string) ([]domain.DNSSECKey, error) {
 	query := `SELECT id, zone_id, key_type, algorithm, private_key, public_key, active, created_at, updated_at FROM dnssec_keys WHERE zone_id = $1`
-	rows, err := r.db.QueryContext(ctx, query, zoneID)
-	if err != nil {
-		return nil, err
+	rows, errQuery := r.db.QueryContext(ctx, query, zoneID)
+	if errQuery != nil {
+		return nil, errQuery
 	}
-	defer func() { if err := rows.Close(); err != nil { log.Printf("failed to close rows: %v", err) } }()
+	defer func() { if errClose := rows.Close(); errClose != nil { log.Printf("failed to close rows: %v", errClose) } }()
 
 	var keys []domain.DNSSECKey
 	for rows.Next() {

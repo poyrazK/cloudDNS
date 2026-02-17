@@ -601,7 +601,7 @@ func TestEDERecordSerialization(t *testing.T) {
 		Type:           OPT,
 		UDPPayloadSize: 4096,
 	}
-	record.AddEDE(EDE_BLOCKED, "Privacy policy violation")
+	record.AddEDE(EdeBlocked, "Privacy policy violation")
 
 	buffer := NewBytePacketBuffer()
 	_, err := record.Write(buffer)
@@ -625,8 +625,8 @@ func TestEDERecordSerialization(t *testing.T) {
 	}
 	
 	infoCode := uint16(opt.Data[0])<<8 | uint16(opt.Data[1])
-	if infoCode != EDE_BLOCKED {
-		t.Errorf("Expected EDE_BLOCKED (%d), got %d", EDE_BLOCKED, infoCode)
+	if infoCode != EdeBlocked {
+		t.Errorf("Expected EdeBlocked (%d), got %d", EdeBlocked, infoCode)
 	}
 	extraText := string(opt.Data[2:])
 	if extraText != "Privacy policy violation" {

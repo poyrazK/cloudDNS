@@ -92,18 +92,18 @@ func runBenchmark(target string, count int, concurrency int, rangeLimit uint64, 
 	duration := time.Since(start)
 	close(stats.Latencies)
 
-	printEnhancedReport(duration, &stats, concurrency)
+	printEnhancedReport(duration, &stats, concurrency, count)
 }
 
 func runRealisticWorker(target string, count int, workerID int, rangeLimit uint64, s float64, v float64, stats *Stats) {
-	conn, err := net.Dial("udp", target)
-	if err != nil {
-		fmt.Printf("Connection error: %v\n", err)
+	conn, errDial := net.Dial("udp", target)
+	if errDial != nil {
+		fmt.Printf("Connection error: %v\n", errDial)
 		return
 	}
 	defer func() {
-		if err := conn.Close(); err != nil {
-			fmt.Printf("Warning: failed to close connection: %v\n", err)
+		if errClose := conn.Close(); errClose != nil {
+			fmt.Printf("Warning: failed to close connection: %v\n", errClose)
 		}
 	}()
 
@@ -120,7 +120,7 @@ func runRealisticWorker(target string, count int, workerID int, rangeLimit uint6
 		p.Questions = append(p.Questions, packet.DNSQuestion{Name: currentDomain, QType: packet.A})
 
 		buf := packet.NewBytePacketBuffer()
-		if err := p.Write(buf); err != nil {
+		if errWrite := p.Write(buf); errWrite != nil {
 			atomic.AddUint64(&stats.Errors, 1)
 			continue
 		}
@@ -128,19 +128,19 @@ func runRealisticWorker(target string, count int, workerID int, rangeLimit uint6
 
 		queryStart := time.Now()
 		
-		n, err := conn.Write(data)
-		if err != nil {
+		n, errWrite := conn.Write(data)
+		if errWrite != nil {
 			atomic.AddUint64(&stats.Errors, 1)
 			continue
 		}
 		atomic.AddUint64(&stats.BytesSent, uint64(n)) // #nosec G115
 
-		if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
-			fmt.Printf("Warning: failed to set read deadline: %v\n", err)
+		if errDeadline := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); errDeadline != nil {
+			fmt.Printf("Warning: failed to set read deadline: %v\n", errDeadline)
 		}
-		n, err = conn.Read(recvBuf)
+		n, errRead := conn.Read(recvBuf)
 		
-		if err != nil {
+		if errRead != nil {
 			atomic.AddUint64(&stats.Errors, 1)
 		} else {
 			atomic.AddUint64(&stats.Success, 1)
@@ -151,12 +151,12 @@ func runRealisticWorker(target string, count int, workerID int, rangeLimit uint6
 	}
 }
 
-func printEnhancedReport(duration time.Duration, stats *Stats, concurrency int) {
+func printEnhancedReport(duration time.Duration, stats *Stats, concurrency int, count int) {
 	qps := float64(stats.Success) / duration.Seconds()
 	mbSent := float64(stats.BytesSent) / 1024 / 1024
 	mbRecv := float64(stats.BytesReceived) / 1024 / 1024
 	
-	var latencies []time.Duration
+	latencies := make([]time.Duration, 0, count)
 	for l := range stats.Latencies {
 		latencies = append(latencies, l)
 	}
@@ -196,15 +196,15 @@ func runSeed(total int) {
 		dbURL = "postgres://postgres:password@localhost:5432/clouddns?sslmode=disable"
 	}
 
-	db, err := sql.Open("pgx", dbURL)
-	if err != nil {
-		fmt.Printf("failed to connect: %v\n", err)
+	db, errConn := sql.Open("pgx", dbURL)
+	if errConn != nil {
+		fmt.Printf("failed to connect: %v\n", errConn)
 		return
 	}
-	_ = db.Close()
+	defer func() { _ = db.Close() }()
 
-	if err := seedDatabase(context.Background(), db, total); err != nil {
-		fmt.Printf("Seeding failed: %v\n", err)
+	if errSeed := seedDatabase(context.Background(), db, total); errSeed != nil {
+		fmt.Printf("Seeding failed: %v\n", errSeed)
 	} else {
 		fmt.Println("Seeding Completed Successfully.")
 	}
@@ -237,9 +237,9 @@ func seedDatabase(ctx context.Context, db *sql.DB, total int) error {
 
 		// #nosec G201
 		query := fmt.Sprintf("INSERT INTO dns_records (id, zone_id, name, type, content, ttl) VALUES %s", strings.Join(valueStrings, ","))
-		_, err := db.ExecContext(ctx, query, valueArgs...)
-		if err != nil {
-			return err
+		_, errExec := db.ExecContext(ctx, query, valueArgs...)
+		if errExec != nil {
+			return errExec
 		}
 
 		if i%100000 == 0 && i > 0 {

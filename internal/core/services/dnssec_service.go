@@ -151,7 +151,7 @@ func (s *DNSSECService) SignRRSet(ctx context.Context, zoneName string, zoneID s
 		return nil, err
 	}
 
-	var sigs []packet.DNSRecord
+	sigs := make([]packet.DNSRecord, 0, len(keys))
 	for _, key := range keys {
 		priv, err := x509.ParseECPrivateKey(key.PrivateKey)
 		if err != nil {
