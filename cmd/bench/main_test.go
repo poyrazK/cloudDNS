@@ -53,7 +53,7 @@ func TestRunBenchmark(t *testing.T) {
 		buf := make([]byte, 512)
 		for {
 			n, remote, err := conn.ReadFromUDP(buf)
-			if errScan != nil { return }
+			if err != nil { return }
 			
 			req := packet.NewDNSPacket()
 			pb := packet.NewBytePacketBuffer()
@@ -84,7 +84,7 @@ func TestRunRealisticWorker(t *testing.T) {
 		buf := make([]byte, 512)
 		for {
 			n, remote, err := conn.ReadFromUDP(buf)
-			if errScan != nil { return }
+			if err != nil { return }
 			
 			req := packet.NewDNSPacket()
 			pb := packet.NewBytePacketBuffer()
@@ -111,14 +111,14 @@ func TestRunRealisticWorker(t *testing.T) {
 
 func TestSeedDatabase(t *testing.T) {
 	db, mock, err := sqlmock.New()
-	if errScan != nil { t.Fatalf("failed to open sqlmock: %s", err) }
+	if err != nil { t.Fatalf("failed to open sqlmock: %s", err) }
 	defer db.Close()
 
 	mock.ExpectExec("INSERT INTO dns_zones").WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec("INSERT INTO dns_records").WillReturnResult(sqlmock.NewResult(1, 1))
 
 	err = seedDatabase(context.Background(), db, 10)
-	if errScan != nil {
+	if err != nil {
 		t.Errorf("seedDatabase failed: %v", err)
 	}
 }

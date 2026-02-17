@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net"
 	"testing"
 
@@ -24,8 +25,8 @@ func TestHandleIXFR_UpToDate(t *testing.T) {
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "example.test.", QType: packet.IXFR})
 	// Client SOA with serial 100
 	req.Authorities = append(req.Authorities, packet.DNSRecord{
-		Name: "example.test.",
-		Type: packet.SOA,
+		Name:   "example.test.",
+		Type:   packet.SOA,
 		Serial: 100,
 	})
 
@@ -40,7 +41,7 @@ func TestHandleIXFR_UpToDate(t *testing.T) {
 	if len(conn.captured) != 1 {
 		t.Fatalf("Expected 1 response packet, got %d", len(conn.captured))
 	}
-	
+
 	resp := packet.NewDNSPacket()
 	pBuf := packet.NewBytePacketBuffer()
 	pBuf.Load(conn.captured[0])
@@ -74,8 +75,8 @@ func TestHandleIXFR_WithChanges(t *testing.T) {
 	req.Header.ID = 456
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "example.test.", QType: packet.IXFR})
 	req.Authorities = append(req.Authorities, packet.DNSRecord{
-		Name: "example.test.",
-		Type: packet.SOA,
+		Name:   "example.test.",
+		Type:   packet.SOA,
 		Serial: 100,
 	})
 
@@ -111,4 +112,6 @@ func (m *mockTCPConn) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 func (m *mockTCPConn) Close() error { return nil }
-func (m *mockTCPConn) RemoteAddr() net.Addr { return &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345} }
+func (m *mockTCPConn) RemoteAddr() net.Addr {
+	return &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}
+}

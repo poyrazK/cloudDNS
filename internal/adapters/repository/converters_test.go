@@ -52,6 +52,28 @@ func TestConvertPacketRecordToDomain(t *testing.T) {
 			},
 		},
 		{
+			name: "SRV record",
+			pRec: packet.DNSRecord{
+				Name:      "_sip._tcp.test.",
+				Type:      packet.SRV,
+				TTL:       300,
+				Priority:  10,
+				Weight: 60,
+				Port:   5060,
+				Host:      "sip.test.",
+			},
+			want: domain.Record{
+				ZoneID:   zoneID,
+				Name:     "_sip._tcp.test.",
+				Type:     domain.TypeSRV,
+				Content:  "sip.test.",
+				TTL:      300,
+				Priority: intPtr(10),
+				Weight:   intPtr(60),
+				Port:     intPtr(5060),
+			},
+		},
+		{
 			name: "TXT record",
 			pRec: packet.DNSRecord{
 				Name: "test.",
@@ -112,6 +134,16 @@ func TestConvertPacketRecordToDomain(t *testing.T) {
 				if tt.want.Priority != nil {
 					if got.Priority == nil || *got.Priority != *tt.want.Priority {
 						t.Errorf("Priority mismatch: got %v, want %v", got.Priority, tt.want.Priority)
+					}
+				}
+				if tt.want.Weight != nil {
+					if got.Weight == nil || *got.Weight != *tt.want.Weight {
+						t.Errorf("Weight mismatch: got %v, want %v", got.Weight, tt.want.Weight)
+					}
+				}
+				if tt.want.Port != nil {
+					if got.Port == nil || *got.Port != *tt.want.Port {
+						t.Errorf("Port mismatch: got %v, want %v", got.Port, tt.want.Port)
 					}
 				}
 			}
@@ -274,12 +306,32 @@ func TestConvertDomainToPacketRecord_AllTypes(t *testing.T) {
 				Txt:  "simple text",
 			},
 		},
+		{
+			name: "SRV record",
+			rec: domain.Record{
+				Name:     "_sip._tcp.test.",
+				Type:     domain.TypeSRV,
+				Content:  "sip.test",
+				TTL:      300,
+				Priority: intPtr(10),
+				Weight:   intPtr(60),
+				Port:     intPtr(5060),
+			},
+			want: packet.DNSRecord{
+				Name:      "_sip._tcp.test.",
+				Type:      packet.SRV,
+				Priority:  10,
+				Weight: 60,
+				Port:   5060,
+				Host:      "sip.test.",
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := ConvertDomainToPacketRecord(tt.rec)
-			if errScan != nil {
+			if err != nil {
 				t.Fatalf("ConvertDomainToPacketRecord failed: %v", err)
 			}
 			if got.Type != tt.want.Type {
@@ -293,6 +345,17 @@ func TestConvertDomainToPacketRecord_AllTypes(t *testing.T) {
 			}
 			if tt.want.Txt != "" && got.Txt != tt.want.Txt {
 				t.Errorf("TXT mismatch")
+			}
+			if got.Type == packet.SRV {
+				if got.Priority != tt.want.Priority {
+					t.Errorf("SRV Priority mismatch: got %d, want %d", got.Priority, tt.want.Priority)
+				}
+				if got.Weight != tt.want.Weight {
+					t.Errorf("SRV Weight mismatch: got %d, want %d", got.Weight, tt.want.Weight)
+				}
+				if got.Port != tt.want.Port {
+					t.Errorf("SRV Port mismatch: got %d, want %d", got.Port, tt.want.Port)
+				}
 			}
 		})
 	}

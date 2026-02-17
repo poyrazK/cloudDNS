@@ -27,7 +27,7 @@ func (r *PostgresRepository) GetRecords(ctx context.Context, name string, qType 
 	// RFC 1034: Domain name comparisons must be case-insensitive.
 	query := `SELECT id, zone_id, name, type, content, ttl, priority, network FROM dns_records 
 	          WHERE LOWER(name) = LOWER($1) AND (network IS NULL OR $2::inet <<= network)`
-	
+
 	var rows *sql.Rows
 	var err error
 
@@ -64,7 +64,7 @@ func (r *PostgresRepository) GetIPsForName(ctx context.Context, name string, cli
 	// Optimized query returning only content for Type A
 	query := `SELECT content FROM dns_records 
 	          WHERE LOWER(name) = LOWER($1) AND type = 'A' AND (network IS NULL OR $2::inet <<= network)`
-	
+
 	rows, err := r.db.QueryContext(ctx, query, name, clientIP)
 	if err != nil {
 		return nil, err
@@ -333,24 +333,24 @@ func ConvertPacketRecordToDomain(pRec packet.DNSRecord, zoneID string) (domain.R
 		p := int(pRec.Priority)
 		rec.Priority = &p
 		rec.Content = pRec.Host
+	case packet.SRV:
+		rec.Type = domain.TypeSRV
+		p := int(pRec.Priority)
+		rec.Priority = &p
+		w := int(pRec.Weight)
+		rec.Weight = &w
+		pt := int(pRec.Port)
+		rec.Port = &pt
+		rec.Content = pRec.Host
 	case packet.TXT:
 		rec.Type = domain.TypeTXT
 		rec.Content = pRec.Txt
 	case packet.SOA:
 		rec.Type = domain.TypeSOA
-		rec.Content = fmt.Sprintf("%s %s %d %d %d %d %d", 
+		rec.Content = fmt.Sprintf("%s %s %d %d %d %d %d",
 			pRec.MName, pRec.RName, pRec.Serial, pRec.Refresh, pRec.Retry, pRec.Expire, pRec.Minimum)
 	default:
 		return rec, fmt.Errorf("unsupported record type for conversion: %d", pRec.Type)
-	}
-
-	// Manual mapping if String() is not what we want
-	switch pRec.Type {
-	case packet.A: rec.Type = domain.TypeA
-	case packet.AAAA: rec.Type = domain.TypeAAAA
-	case packet.CNAME: rec.Type = domain.TypeCNAME
-	case packet.NS: rec.Type = domain.TypeNS
-	case packet.PTR: rec.Type = domain.TypePTR
 	}
 
 	return rec, nil
@@ -397,6 +397,21 @@ func ConvertDomainToPacketRecord(rec domain.Record) (packet.DNSRecord, error) {
 		if !strings.HasSuffix(pRec.Host, ".") {
 			pRec.Host += "."
 		}
+	case domain.TypeSRV:
+		pRec.Type = packet.SRV
+		if rec.Priority != nil {
+			pRec.Priority = uint16(*rec.Priority)
+		}
+		if rec.Weight != nil {
+			pRec.Weight = uint16(*rec.Weight)
+		}
+		if rec.Port != nil {
+			pRec.Port = uint16(*rec.Port)
+		}
+		pRec.Host = rec.Content
+		if !strings.HasSuffix(pRec.Host, ".") {
+			pRec.Host += "."
+		}
 	case domain.TypeTXT:
 		pRec.Type = packet.TXT
 		pRec.Txt = rec.Content
@@ -412,9 +427,13 @@ func ConvertDomainToPacketRecord(rec domain.Record) (packet.DNSRecord, error) {
 		parts := strings.Fields(rec.Content)
 		if len(parts) >= 7 {
 			pRec.MName = parts[0]
-			if !strings.HasSuffix(pRec.MName, ".") { pRec.MName += "." }
+			if !strings.HasSuffix(pRec.MName, ".") {
+				pRec.MName += "."
+			}
 			pRec.RName = parts[1]
-			if !strings.HasSuffix(pRec.RName, ".") { pRec.RName += "." }
+			if !strings.HasSuffix(pRec.RName, ".") {
+				pRec.RName += "."
+			}
 			fmt.Sscanf(parts[2], "%d", &pRec.Serial)
 			fmt.Sscanf(parts[3], "%d", &pRec.Refresh)
 			fmt.Sscanf(parts[4], "%d", &pRec.Retry)

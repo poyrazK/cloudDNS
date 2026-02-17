@@ -260,7 +260,7 @@ func TestHandlePacketLocalHit(t *testing.T) {
 		return nil
 	})
 
-	if errScan != nil {
+	if err != nil {
 		t.Fatalf("HandlePacket failed: %v", err)
 	}
 
@@ -430,7 +430,7 @@ func TestHandlePacketEDNS(t *testing.T) {
 		return nil
 	})
 	
-	if errScan != nil {
+	if err != nil {
 		t.Errorf("HandlePacket failed with EDNS: %v", err)
 	}
 }
@@ -469,7 +469,7 @@ func TestHandlePacketTruncation(t *testing.T) {
 		}
 		return nil
 	})
-	if errScan != nil {
+	if err != nil {
 		t.Fatalf("handlePacket failed: %v", err)
 	}
 }

@@ -11,7 +11,7 @@ import (
 )
 
 type MasterParser struct {
-	Origin  string
+	Origin     string
 	DefaultTTL int
 }
 
@@ -29,7 +29,7 @@ type ZoneData struct {
 func (p *MasterParser) Parse(r io.Reader) (*ZoneData, error) {
 	scanner := bufio.NewScanner(r)
 	data := &ZoneData{}
-	
+
 	var lastName string
 	var inParen bool
 	var parenLines []string
@@ -37,17 +37,19 @@ func (p *MasterParser) Parse(r io.Reader) (*ZoneData, error) {
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		
+
 		if idx := strings.IndexByte(line, ';'); idx >= 0 {
 			line = line[:idx]
 		}
 
 		if !inParen {
 			trimmed := strings.TrimSpace(line)
-			if trimmed == "" { continue }
-			
+			if trimmed == "" {
+				continue
+			}
+
 			firstLineLeadingWS = len(line) > 0 && (line[0] == ' ' || line[0] == '\t')
-			
+
 			if strings.Contains(line, "(") {
 				inParen = true
 				parenLines = append(parenLines, strings.Replace(line, "(", " ", 1))
@@ -73,15 +75,21 @@ func (p *MasterParser) Parse(r io.Reader) (*ZoneData, error) {
 		}
 
 		trimmedFull := strings.TrimSpace(fullLine)
-		if trimmedFull == "" { continue }
+		if trimmedFull == "" {
+			continue
+		}
 
 		if strings.HasPrefix(trimmedFull, "$") {
 			parts := strings.Fields(trimmedFull)
-			if len(parts) < 2 { continue }
+			if len(parts) < 2 {
+				continue
+			}
 			switch strings.ToUpper(parts[0]) {
 			case "$ORIGIN":
 				p.Origin = parts[1]
-				if !strings.HasSuffix(p.Origin, ".") { p.Origin += "." }
+				if !strings.HasSuffix(p.Origin, ".") {
+					p.Origin += "."
+				}
 				data.Zone.Name = p.Origin
 			case "$TTL":
 				ttl, _ := strconv.Atoi(parts[1])
@@ -91,7 +99,9 @@ func (p *MasterParser) Parse(r io.Reader) (*ZoneData, error) {
 		}
 
 		fields := strings.Fields(trimmedFull)
-		if len(fields) == 0 { continue }
+		if len(fields) == 0 {
+			continue
+		}
 
 		var name string
 		if firstLineLeadingWS {
@@ -126,7 +136,9 @@ func (p *MasterParser) Parse(r io.Reader) (*ZoneData, error) {
 			break
 		}
 
-		if qType == "" || name == "" { continue }
+		if qType == "" || name == "" {
+			continue
+		}
 
 		data.Records = append(data.Records, domain.Record{
 			Name:    name,
@@ -144,9 +156,15 @@ func CompareNamesCanonically(a, b string) int {
 	a = strings.TrimSuffix(strings.ToLower(a), ".")
 	b = strings.TrimSuffix(strings.ToLower(b), ".")
 
-	if a == b { return 0 }
-	if a == "" { return -1 }
-	if b == "" { return 1 }
+	if a == b {
+		return 0
+	}
+	if a == "" {
+		return -1
+	}
+	if b == "" {
+		return 1
+	}
 
 	aLabels := strings.Split(a, ".")
 	bLabels := strings.Split(b, ".")
@@ -155,14 +173,22 @@ func CompareNamesCanonically(a, b string) int {
 	j := len(bLabels) - 1
 
 	for i >= 0 && j >= 0 {
-		if aLabels[i] < bLabels[j] { return -1 }
-		if aLabels[i] > bLabels[j] { return 1 }
+		if aLabels[i] < bLabels[j] {
+			return -1
+		}
+		if aLabels[i] > bLabels[j] {
+			return 1
+		}
 		i--
 		j--
 	}
 
-	if len(aLabels) < len(bLabels) { return -1 }
-	if len(aLabels) > len(bLabels) { return 1 }
+	if len(aLabels) < len(bLabels) {
+		return -1
+	}
+	if len(aLabels) > len(bLabels) {
+		return 1
+	}
 	return 0
 }
 
@@ -178,14 +204,25 @@ func SortRecordsCanonically(records []domain.Record) {
 
 func RecordTypeToQueryType(t domain.RecordType) uint16 {
 	switch t {
-	case domain.TypeA: return 1
-	case domain.TypeNS: return 2
-	case domain.TypeCNAME: return 5
-	case domain.TypeSOA: return 6
-	case domain.TypeMX: return 15
-	case domain.TypeTXT: return 16
-	case domain.TypeAAAA: return 28
-	case domain.TypePTR: return 12
-	default: return 0
+	case domain.TypeA:
+		return 1
+	case domain.TypeNS:
+		return 2
+	case domain.TypeCNAME:
+		return 5
+	case domain.TypeSOA:
+		return 6
+	case domain.TypeMX:
+		return 15
+	case domain.TypeTXT:
+		return 16
+	case domain.TypeAAAA:
+		return 28
+	case domain.TypePTR:
+		return 12
+	case domain.TypeSRV:
+		return 33
+	default:
+		return 0
 	}
 }

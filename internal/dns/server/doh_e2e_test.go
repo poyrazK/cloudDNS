@@ -33,7 +33,7 @@ func TestDoH_E2E(t *testing.T) {
 	reqData := reqBuf.Buf[:reqBuf.Position()]
 
 	resp, err := http.Post(ts.URL+"/dns-query", "application/dns-message", bytes.NewReader(reqData))
-	if errScan != nil {
+	if err != nil {
 		t.Fatalf("DoH POST failed: %v", err)
 	}
 	defer resp.Body.Close()
@@ -49,7 +49,7 @@ func TestDoH_E2E(t *testing.T) {
 	resPacket := packet.NewDNSPacket()
 	resBuf := packet.NewBytePacketBuffer()
 	resBuf.Load(resBody)
-	if err := resPacket.FromBuffer(resBuf); errScan != nil {
+	if err := resPacket.FromBuffer(resBuf); err != nil {
 		t.Fatalf("Failed to parse DoH response: %v", err)
 	}
 
@@ -60,7 +60,7 @@ func TestDoH_E2E(t *testing.T) {
 	// 2. Valid Query (GET)
 	b64Query := base64.RawURLEncoding.EncodeToString(reqData)
 	respGET, err := http.Get(ts.URL + "/dns-query?dns=" + b64Query)
-	if errScan != nil {
+	if err != nil {
 		t.Fatalf("DoH GET failed: %v", err)
 	}
 	defer respGET.Body.Close()

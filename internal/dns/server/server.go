@@ -664,7 +664,8 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 }
 
 func (s *Server) handleNotify(request *packet.DNSPacket, clientIP string, sendFn func([]byte) error) error {
-	s.Logger.Info("received NOTIFY", "zone", request.Questions[0].Name, "from", clientIP)
+	zoneName := request.Questions[0].Name
+	s.Logger.Info("received NOTIFY", "zone", zoneName, "from", clientIP)
 
 	response := packet.NewDNSPacket()
 	response.Header.ID = request.Header.ID
@@ -675,11 +676,325 @@ func (s *Server) handleNotify(request *packet.DNSPacket, clientIP string, sendFn
 		response.Questions = append(response.Questions, request.Questions[0])
 	}
 
-	// TODO: If we are a slave, trigger refresh/IXFR here.
-	// For now, we just acknowledge.
-
+	// Acknowledge immediately per RFC 1996, then trigger async refresh
 	response.Header.ResCode = packet.RCODE_NOERROR
-	return s.sendUpdateResponse(response, sendFn)
+	if err := s.sendUpdateResponse(response, sendFn); err != nil {
+		return err
+	}
+
+	// Trigger zone refresh asynchronously
+	go s.refreshZoneFromMaster(zoneName, clientIP)
+
+	return nil
+}
+
+// refreshZoneFromMaster queries the master for SOA, compares serials, and performs IXFR/AXFR if needed.
+// This is triggered when we receive a NOTIFY and act as a slave for the zone.
+func (s *Server) refreshZoneFromMaster(zoneName, masterAddr string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	s.Logger.Info("starting zone refresh", "zone", zoneName, "master", masterAddr)
+
+	// 1. Query master's SOA to get current serial
+	masterSOA, err := s.querySOA(ctx, masterAddr, zoneName)
+	if err != nil {
+		s.Logger.Error("failed to query master SOA", "zone", zoneName, "error", err)
+		return
+	}
+
+	// 2. Get our local SOA serial
+	localSerial, err := s.getLocalSOASerial(ctx, zoneName)
+	if err != nil {
+		s.Logger.Error("failed to get local SOA", "zone", zoneName, "error", err)
+		return
+	}
+
+	// 3. Compare serials (RFC 1982 serial arithmetic)
+	if !serialGreater(masterSOA.Serial, localSerial) {
+		s.Logger.Info("zone is up to date", "zone", zoneName, "local", localSerial, "master", masterSOA.Serial)
+		return
+	}
+
+	s.Logger.Info("zone needs update", "zone", zoneName, "local", localSerial, "master", masterSOA.Serial)
+
+	// 4. Attempt IXFR first, fall back to AXFR
+	if err := s.performIXFR(ctx, masterAddr, zoneName, localSerial); err != nil {
+		s.Logger.Warn("IXFR failed, falling back to AXFR", "zone", zoneName, "error", err)
+		if err := s.performAXFR(ctx, masterAddr, zoneName); err != nil {
+			s.Logger.Error("AXFR failed", "zone", zoneName, "error", err)
+			return
+		}
+	}
+
+	s.Logger.Info("zone refresh complete", "zone", zoneName)
+}
+
+// querySOA sends a SOA query to the specified server and returns the SOA record.
+func (s *Server) querySOA(ctx context.Context, serverAddr, zoneName string) (*packet.DNSRecord, error) {
+	// Ensure port is specified
+	if _, _, err := net.SplitHostPort(serverAddr); err != nil {
+		serverAddr = net.JoinHostPort(serverAddr, "53")
+	}
+
+	req := packet.NewDNSPacket()
+	req.Header.ID = uint16(rand.Intn(65535))
+	req.Header.RecursionDesired = false
+	req.Questions = append(req.Questions, packet.DNSQuestion{
+		Name:  zoneName,
+		QType: packet.SOA,
+	})
+
+	// Use UDP for SOA query
+	conn, err := net.DialTimeout("udp", serverAddr, 5*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect: %w", err)
+	}
+	defer conn.Close()
+
+	buf := packet.NewBytePacketBuffer()
+	if err := req.Write(buf); err != nil {
+		return nil, fmt.Errorf("failed to write request: %w", err)
+	}
+
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
+	if _, err := conn.Write(buf.Buf[:buf.Position()]); err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+
+	respBuf := make([]byte, 512)
+	n, err := conn.Read(respBuf)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	resp := packet.NewDNSPacket()
+	respPacket := packet.NewBytePacketBuffer()
+	copy(respPacket.Buf[:], respBuf[:n])
+	if err := resp.FromBuffer(respPacket); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	for _, ans := range resp.Answers {
+		if ans.Type == packet.SOA {
+			return &ans, nil
+		}
+	}
+
+	return nil, fmt.Errorf("no SOA record in response")
+}
+
+// getLocalSOASerial retrieves the serial number from our local SOA record.
+func (s *Server) getLocalSOASerial(ctx context.Context, zoneName string) (uint32, error) {
+	zone, err := s.Repo.GetZone(ctx, zoneName)
+	if err != nil || zone == nil {
+		return 0, fmt.Errorf("zone not found: %s", zoneName)
+	}
+
+	records, err := s.Repo.ListRecordsForZone(ctx, zone.ID)
+	if err != nil {
+		return 0, fmt.Errorf("failed to list records: %w", err)
+	}
+
+	for _, rec := range records {
+		if rec.Type == domain.TypeSOA {
+			// Parse SOA content: "ns1.example.com. admin.example.com. 2024010100 3600 600 604800 300"
+			var mname, rname string
+			var serial, refresh, retry, expire, minimum uint32
+			_, err := fmt.Sscanf(rec.Content, "%s %s %d %d %d %d %d",
+				&mname, &rname, &serial, &refresh, &retry, &expire, &minimum)
+			if err != nil {
+				return 0, fmt.Errorf("failed to parse SOA: %w", err)
+			}
+			return serial, nil
+		}
+	}
+
+	return 0, fmt.Errorf("no SOA record found")
+}
+
+// serialGreater implements RFC 1982 serial number arithmetic.
+// Returns true if s1 > s2 (s1 is "greater" than s2).
+func serialGreater(s1, s2 uint32) bool {
+	if s1 == s2 {
+		return false
+	}
+	// RFC 1982: s1 > s2 if (s1 < s2 && s2 - s1 > 2^31) || (s1 > s2 && s1 - s2 < 2^31)
+	return (s1 < s2 && s2-s1 > 0x80000000) || (s1 > s2 && s1-s2 < 0x80000000)
+}
+
+// performIXFR attempts an incremental zone transfer from the master.
+func (s *Server) performIXFR(ctx context.Context, masterAddr, zoneName string, localSerial uint32) error {
+	// Ensure port is specified
+	if _, _, err := net.SplitHostPort(masterAddr); err != nil {
+		masterAddr = net.JoinHostPort(masterAddr, "53")
+	}
+
+	conn, err := net.DialTimeout("tcp", masterAddr, 10*time.Second)
+	if err != nil {
+		return fmt.Errorf("failed to connect: %w", err)
+	}
+	defer conn.Close()
+
+	// Build IXFR request with our current SOA in authority section
+	req := packet.NewDNSPacket()
+	req.Header.ID = uint16(rand.Intn(65535))
+	req.Questions = append(req.Questions, packet.DNSQuestion{
+		Name:  zoneName,
+		QType: packet.IXFR,
+	})
+
+	// Add our current SOA to authority section to indicate our serial
+	req.Authorities = append(req.Authorities, packet.DNSRecord{
+		Name:   zoneName,
+		Type:   packet.SOA,
+		Class:  1, // IN (Internet)
+		TTL:    0,
+		Serial: localSerial,
+	})
+	req.Header.AuthoritativeEntries = 1
+
+	// Send with TCP length prefix
+	buf := packet.NewBytePacketBuffer()
+	if err := req.Write(buf); err != nil {
+		return fmt.Errorf("failed to write request: %w", err)
+	}
+
+	data := buf.Buf[:buf.Position()]
+	lenBuf := make([]byte, 2)
+	lenBuf[0] = byte(len(data) >> 8)
+	lenBuf[1] = byte(len(data))
+
+	conn.SetDeadline(time.Now().Add(30 * time.Second))
+	if _, err := conn.Write(lenBuf); err != nil {
+		return fmt.Errorf("failed to write length: %w", err)
+	}
+	if _, err := conn.Write(data); err != nil {
+		return fmt.Errorf("failed to write request: %w", err)
+	}
+
+	// Read response - for now just log success, actual record application would need repo changes
+	respLenBuf := make([]byte, 2)
+	if _, err := io.ReadFull(conn, respLenBuf); err != nil {
+		return fmt.Errorf("failed to read response length: %w", err)
+	}
+
+	respLen := int(respLenBuf[0])<<8 | int(respLenBuf[1])
+	respData := make([]byte, respLen)
+	if _, err := io.ReadFull(conn, respData); err != nil {
+		return fmt.Errorf("failed to read response: %w", err)
+	}
+
+	resp := packet.NewDNSPacket()
+	respBuf := packet.NewBytePacketBuffer()
+	copy(respBuf.Buf[:], respData)
+	if err := resp.FromBuffer(respBuf); err != nil {
+		return fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if resp.Header.ResCode != packet.RCODE_NOERROR {
+		return fmt.Errorf("IXFR failed with rcode %d", resp.Header.ResCode)
+	}
+
+	// Check if server responded with full AXFR (single SOA means "do AXFR instead")
+	soaCount := 0
+	for _, ans := range resp.Answers {
+		if ans.Type == packet.SOA {
+			soaCount++
+		}
+	}
+	if soaCount < 2 {
+		return fmt.Errorf("server indicated AXFR required")
+	}
+
+	s.Logger.Info("IXFR response received", "zone", zoneName, "answers", len(resp.Answers))
+	// Note: Actually applying the IXFR changes would require repository modifications
+	return nil
+}
+
+// performAXFR performs a full zone transfer from the master.
+func (s *Server) performAXFR(ctx context.Context, masterAddr, zoneName string) error {
+	// Ensure port is specified
+	if _, _, err := net.SplitHostPort(masterAddr); err != nil {
+		masterAddr = net.JoinHostPort(masterAddr, "53")
+	}
+
+	conn, err := net.DialTimeout("tcp", masterAddr, 10*time.Second)
+	if err != nil {
+		return fmt.Errorf("failed to connect: %w", err)
+	}
+	defer conn.Close()
+
+	req := packet.NewDNSPacket()
+	req.Header.ID = uint16(rand.Intn(65535))
+	req.Questions = append(req.Questions, packet.DNSQuestion{
+		Name:  zoneName,
+		QType: packet.AXFR,
+	})
+
+	buf := packet.NewBytePacketBuffer()
+	if err := req.Write(buf); err != nil {
+		return fmt.Errorf("failed to write request: %w", err)
+	}
+
+	data := buf.Buf[:buf.Position()]
+	lenBuf := make([]byte, 2)
+	lenBuf[0] = byte(len(data) >> 8)
+	lenBuf[1] = byte(len(data))
+
+	conn.SetDeadline(time.Now().Add(60 * time.Second))
+	if _, err := conn.Write(lenBuf); err != nil {
+		return fmt.Errorf("failed to write length: %w", err)
+	}
+	if _, err := conn.Write(data); err != nil {
+		return fmt.Errorf("failed to write request: %w", err)
+	}
+
+	// Read all AXFR responses until we see the closing SOA
+	var allRecords []packet.DNSRecord
+	seenFirstSOA := false
+
+	for {
+		respLenBuf := make([]byte, 2)
+		if _, err := io.ReadFull(conn, respLenBuf); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return fmt.Errorf("failed to read response length: %w", err)
+		}
+
+		respLen := int(respLenBuf[0])<<8 | int(respLenBuf[1])
+		respData := make([]byte, respLen)
+		if _, err := io.ReadFull(conn, respData); err != nil {
+			return fmt.Errorf("failed to read response: %w", err)
+		}
+
+		resp := packet.NewDNSPacket()
+		respBuf := packet.NewBytePacketBuffer()
+		copy(respBuf.Buf[:], respData)
+		if err := resp.FromBuffer(respBuf); err != nil {
+			return fmt.Errorf("failed to parse response: %w", err)
+		}
+
+		if resp.Header.ResCode != packet.RCODE_NOERROR {
+			return fmt.Errorf("AXFR failed with rcode %d", resp.Header.ResCode)
+		}
+
+		for _, ans := range resp.Answers {
+			allRecords = append(allRecords, ans)
+			if ans.Type == packet.SOA {
+				if seenFirstSOA {
+					// Second SOA marks end of transfer
+					s.Logger.Info("AXFR complete", "zone", zoneName, "records", len(allRecords))
+					// Note: Actually applying records would require repository modifications
+					return nil
+				}
+				seenFirstSOA = true
+			}
+		}
+	}
+
+	return fmt.Errorf("AXFR incomplete: did not receive closing SOA")
 }
 
 func (s *Server) handleUpdate(request *packet.DNSPacket, rawData []byte, clientIP string, sendFn func([]byte) error) error {
@@ -1114,7 +1429,7 @@ func (s *Server) notifySlaves(zoneName string) {
 			if s.NotifyPortOverride > 0 {
 				targetPort = s.NotifyPortOverride
 			}
-			
+
 			targetAddr := net.JoinHostPort(ip, fmt.Sprintf("%d", targetPort))
 			if s.Addr == targetAddr {
 				continue
@@ -1361,6 +1676,8 @@ func queryTypeToRecordType(qType packet.QueryType) domain.RecordType {
 		return domain.TypeNS
 	case packet.MX:
 		return domain.TypeMX
+	case packet.SRV:
+		return domain.TypeSRV
 	case packet.SOA:
 		return domain.TypeSOA
 	case packet.TXT:

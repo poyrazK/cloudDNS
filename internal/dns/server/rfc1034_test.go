@@ -108,7 +108,7 @@ func TestRFC1034_Recursion(t *testing.T) {
 	}
 
 	resp, err := s.resolveRecursive("test.com.", packet.A)
-	if errScan != nil {
+	if err != nil {
 		t.Fatalf("Recursive resolve failed: %v", err)
 	}
 

@@ -20,6 +20,7 @@ func TestQueryTypeToRecordType_All(t *testing.T) {
 		{packet.CNAME, domain.TypeCNAME},
 		{packet.NS, domain.TypeNS},
 		{packet.MX, domain.TypeMX},
+		{packet.SRV, domain.TypeSRV},
 		{packet.SOA, domain.TypeSOA},
 		{packet.TXT, domain.TypeTXT},
 		{packet.PTR, domain.TypePTR},
@@ -34,14 +35,14 @@ func TestQueryTypeToRecordType_All(t *testing.T) {
 	}
 }
 
-// TestHandleUpdate_FormErr verifies that a Dynamic Update with an invalid 
+// TestHandleUpdate_FormErr verifies that a Dynamic Update with an invalid
 // number of zones (ZOCOUNT != 1) returns a FORMERR response.
 func TestHandleUpdate_FormErr(t *testing.T) {
 	srv := NewServer("127.0.0.1:0", &mockServerRepo{}, nil)
 	req := packet.NewDNSPacket()
 	req.Header.Opcode = packet.OPCODE_UPDATE
 	// No questions (ZOCOUNT = 0)
-	
+
 	err := srv.handleUpdate(req, nil, "127.0.0.1", func(resp []byte) error {
 		p := packet.NewDNSPacket()
 		pb := packet.NewBytePacketBuffer()
@@ -52,18 +53,18 @@ func TestHandleUpdate_FormErr(t *testing.T) {
 		}
 		return nil
 	})
-	if errScan != nil {
+	if err != nil {
 		t.Fatalf("handleUpdate failed: %v", err)
 	}
 }
 
-// TestHandleIXFR_NoAuthority verifies that an IXFR request without the 
+// TestHandleIXFR_NoAuthority verifies that an IXFR request without the
 // client's current SOA in the Authority section returns a FORMERR.
 func TestHandleIXFR_NoAuthority(t *testing.T) {
 	srv := NewServer("127.0.0.1:0", &mockServerRepo{}, nil)
 	req := packet.NewDNSPacket()
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "test.", QType: packet.IXFR})
-	
+
 	// No Authority section
 	srv.handleIXFR(&mockConn{}, req)
 }
@@ -81,10 +82,10 @@ func TestHandlePacket_NoQuestions(t *testing.T) {
 	srv := NewServer("127.0.0.1:0", &mockServerRepo{}, nil)
 	req := packet.NewDNSPacket()
 	req.Header.ID = 123
-	
+
 	buf := packet.NewBytePacketBuffer()
 	req.Write(buf)
-	
+
 	err := srv.handlePacket(buf.Buf[:buf.Position()], "127.0.0.1:1", func(resp []byte) error {
 		p := packet.NewDNSPacket()
 		pb := packet.NewBytePacketBuffer()
@@ -95,7 +96,7 @@ func TestHandlePacket_NoQuestions(t *testing.T) {
 		}
 		return nil
 	})
-	if errScan != nil {
+	if err != nil {
 		t.Fatalf("handlePacket failed: %v", err)
 	}
 }

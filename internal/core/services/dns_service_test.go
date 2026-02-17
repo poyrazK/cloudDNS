@@ -16,7 +16,7 @@ type mockRepo struct {
 }
 
 func (m *mockRepo) GetRecords(ctx context.Context, name string, qType domain.RecordType, clientIP string) ([]domain.Record, error) {
-	if m.errScan != nil { return nil, m.err }
+	if m.err != nil { return nil, m.err }
 	var res []domain.Record
 	for _, r := range m.records {
 		if r.Name == name && (qType == "" || r.Type == qType) {
@@ -27,7 +27,7 @@ func (m *mockRepo) GetRecords(ctx context.Context, name string, qType domain.Rec
 }
 
 func (m *mockRepo) GetIPsForName(ctx context.Context, name string, clientIP string) ([]string, error) {
-	if m.errScan != nil { return nil, m.err }
+	if m.err != nil { return nil, m.err }
 	var res []string
 	for _, r := range m.records {
 		if r.Name == name && r.Type == domain.TypeA {
@@ -38,7 +38,7 @@ func (m *mockRepo) GetIPsForName(ctx context.Context, name string, clientIP stri
 }
 
 func (m *mockRepo) GetZone(ctx context.Context, name string) (*domain.Zone, error) {
-	if m.errScan != nil { return nil, m.err }
+	if m.err != nil { return nil, m.err }
 	for _, z := range m.zones {
 		if z.Name == name {
 			return &z, nil
@@ -48,7 +48,7 @@ func (m *mockRepo) GetZone(ctx context.Context, name string) (*domain.Zone, erro
 }
 
 func (m *mockRepo) ListRecordsForZone(ctx context.Context, zoneID string) ([]domain.Record, error) {
-	if m.errScan != nil { return nil, m.err }
+	if m.err != nil { return nil, m.err }
 	var res []domain.Record
 	for _, r := range m.records {
 		if r.ZoneID == zoneID {
@@ -59,26 +59,26 @@ func (m *mockRepo) ListRecordsForZone(ctx context.Context, zoneID string) ([]dom
 }
 
 func (m *mockRepo) CreateZone(ctx context.Context, zone *domain.Zone) error {
-	if m.errScan != nil { return m.err }
+	if m.err != nil { return m.err }
 	m.zones = append(m.zones, *zone)
 	return nil
 }
 
 func (m *mockRepo) CreateZoneWithRecords(ctx context.Context, zone *domain.Zone, records []domain.Record) error {
-	if m.errScan != nil { return m.err }
+	if m.err != nil { return m.err }
 	m.zones = append(m.zones, *zone)
 	m.records = append(m.records, records...)
 	return nil
 }
 
 func (m *mockRepo) CreateRecord(ctx context.Context, record *domain.Record) error {
-	if m.errScan != nil { return m.err }
+	if m.err != nil { return m.err }
 	m.records = append(m.records, *record)
 	return nil
 }
 
 func (m *mockRepo) ListZones(ctx context.Context, tenantID string) ([]domain.Zone, error) {
-	if m.errScan != nil { return nil, m.err }
+	if m.err != nil { return nil, m.err }
 	return m.zones, nil
 }
 
@@ -124,13 +124,13 @@ func TestCreateZone(t *testing.T) {
 	// Case 1: Name with dot
 	zone := &domain.Zone{Name: "example.com.", TenantID: "t1"}
 	err := svc.CreateZone(context.Background(), zone)
-	if errScan != nil { t.Fatalf("Expected no error, got %v", err) }
+	if err != nil { t.Fatalf("Expected no error, got %v", err) }
 	if zone.Name != "example.com." { t.Errorf("Expected example.com., got %s", zone.Name) }
 
 	// Case 2: Name without dot
 	zone2 := &domain.Zone{Name: "nodot.com", TenantID: "t1"}
 	err = svc.CreateZone(context.Background(), zone2)
-	if errScan != nil { t.Fatalf("Expected no error, got %v", err) }
+	if err != nil { t.Fatalf("Expected no error, got %v", err) }
 	if zone2.Name != "nodot.com." { t.Errorf("Expected nodot.com., got %s", zone2.Name) }
 
 	if zone.ID == "" {
@@ -143,7 +143,7 @@ func TestDeleteZone(t *testing.T) {
 	svc := NewDNSService(repo)
 
 	err := svc.DeleteZone(context.Background(), "z1", "t1")
-	if errScan != nil {
+	if err != nil {
 		t.Fatalf("DeleteZone failed: %v", err)
 	}
 
@@ -160,7 +160,7 @@ func TestDeleteRecord(t *testing.T) {
 	svc := NewDNSService(repo)
 
 	err := svc.DeleteRecord(context.Background(), "r1", "z1")
-	if errScan != nil {
+	if err != nil {
 		t.Fatalf("DeleteRecord failed: %v", err)
 	}
 
@@ -184,7 +184,7 @@ www IN  A   1.2.3.4
 `
 	ctx := context.Background()
 	zone, err := svc.ImportZone(ctx, "t1", strings.NewReader(zoneFile))
-	if errScan != nil {
+	if err != nil {
 		t.Fatalf("ImportZone failed: %v", err)
 	}
 
@@ -206,7 +206,7 @@ func TestImportZone_Error(t *testing.T) {
 	malformed := "$ORIGIN test.com.\nwww A"
 	_, err := svc.ImportZone(context.Background(), "t1", strings.NewReader(malformed))
 	
-	if errScan != nil {
+	if err != nil {
 		t.Errorf("Expected skip/partial rather than fatal err, got %v", err)
 	}
 }
@@ -254,7 +254,7 @@ func TestHealthCheck(t *testing.T) {
 	repo := &mockRepo{}
 	svc := NewDNSService(repo)
 
-	if err := svc.HealthCheck(context.Background()); errScan != nil {
+	if err := svc.HealthCheck(context.Background()); err != nil {
 		t.Errorf("HealthCheck failed: %v", err)
 	}
 }
