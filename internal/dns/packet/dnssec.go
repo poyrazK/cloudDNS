@@ -4,11 +4,13 @@ import (
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/rand"
+	"crypto/sha1" // #nosec G505 -- SHA-1 required for DNSSEC DS records (RFC 4034)
 	"crypto/sha256"
 	"strings"
 )
 
-// RFC 4034 Appendix B: Key Tag Calculation
+// ComputeKeyTag calculates the key tag for a DNSKEY record according to RFC 4034 Appendix B.
+// This is used to quickly identify which DNSKEY a signature refers to.
 func (r *DNSRecord) ComputeKeyTag() uint16 {
 	if r.Type != DNSKEY {
 		return 0
@@ -16,7 +18,7 @@ func (r *DNSRecord) ComputeKeyTag() uint16 {
 
 	buf := NewBytePacketBuffer()
 	if err := buf.Writeu16(r.Flags); err != nil { return 0 }
-	if err := buf.Write(3); err != nil { return 0 } // Protocol
+	if err := buf.Write(3); err != nil { return 0 } // Protocol: MUST be 3 (RFC 4034 Section 2.1.2)
 	if err := buf.Write(r.Algorithm); err != nil { return 0 }
 	for _, b := range r.PublicKey {
 		if err := buf.Write(b); err != nil { return 0 }
@@ -35,13 +37,17 @@ func (r *DNSRecord) ComputeKeyTag() uint16 {
 	return uint16(ac & 0xFFFF) // #nosec G115
 }
 
-// RFC 4034 Section 5.2: DS RDATA Calculation
+// ComputeDS generates a Delegation Signer (DS) record from a DNSKEY record (RFC 4034 Section 5.2).
+// Supported digest types:
+//   - 1: SHA-1
+//   - 2: SHA-256
 func (r *DNSRecord) ComputeDS(digestType uint8) (DNSRecord, error) {
 	if r.Type != DNSKEY {
 		return DNSRecord{}, nil
 	}
 
-	// 1. Prepare Buffer: owner name | RDATA
+	// 1. Prepare Buffer: The digest is calculated over [owner name | DNSKEY RDATA]
+	// Owner name MUST be in its canonical wire format (lowercase, no compression).
 	buf := NewBytePacketBuffer()
 	if err := buf.WriteName(strings.ToLower(r.Name)); err != nil { return DNSRecord{}, err }
 	if err := buf.Writeu16(r.Flags); err != nil { return DNSRecord{}, err }
@@ -51,14 +57,17 @@ func (r *DNSRecord) ComputeDS(digestType uint8) (DNSRecord, error) {
 		if err := buf.Write(b); err != nil { return DNSRecord{}, err }
 	}
 
-	// 2. Hash it
+	// 2. Calculate the cryptographic digest
 	var digest []byte
 	switch digestType {
+	case 1: // SHA-1
+		hashed := sha1.Sum(buf.Buf[:buf.Position()]) // #nosec G401
+		digest = hashed[:]
 	case 2: // SHA-256
 		hashed := sha256.Sum256(buf.Buf[:buf.Position()])
 		digest = hashed[:]
 	default:
-		// Unsupported or fallback
+		// Unsupported digest type - return empty record per RFC 4034 expectations in some contexts
 		return DNSRecord{}, nil
 	}
 
@@ -74,8 +83,8 @@ func (r *DNSRecord) ComputeDS(digestType uint8) (DNSRecord, error) {
 	}, nil
 }
 
-// SignRRSet generates an RRSIG for a set of records
-// Simplified implementation for ECDSA P-256 (Algorithm 13)
+// SignRRSet generates an RRSIG for a set of records.
+// This is a simplified implementation optimized for ECDSA P-256 (Algorithm 13).
 func SignRRSet(records []DNSRecord, privKey *ecdsa.PrivateKey, signerName string, keyTag uint16, inception, expiration uint32) (DNSRecord, error) {
 	if len(records) == 0 {
 		return DNSRecord{}, nil
