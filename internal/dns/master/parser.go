@@ -1,3 +1,4 @@
+// Package master provides functionality for parsing DNS master zone files (RFC 1035).
 package master
 
 import (
@@ -10,22 +11,26 @@ import (
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
 )
 
+// MasterParser implements a parser for DNS master zone files.
 type MasterParser struct {
 	Origin  string
 	DefaultTTL int
 }
 
+// NewMasterParser creates and returns a new MasterParser instance.
 func NewMasterParser() *MasterParser {
 	return &MasterParser{
 		DefaultTTL: 3600,
 	}
 }
 
+// ZoneData holds the parsed records and metadata from a zone file.
 type ZoneData struct {
 	Zone    domain.Zone
 	Records []domain.Record
 }
 
+// Parse reads a master zone file from the provided reader and returns the parsed data.
 func (p *MasterParser) Parse(r io.Reader) (*ZoneData, error) {
 	scanner := bufio.NewScanner(r)
 	data := &ZoneData{}
