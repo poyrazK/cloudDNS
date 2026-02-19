@@ -155,3 +155,27 @@ func TestRFC1035_AXFR(t *testing.T) {
 		t.Errorf("RFC 1035 Violation: AXFR stream must end with SOA")
 	}
 }
+
+func TestHandleAXFR_ErrorPaths(t *testing.T) {
+	// 1. Non-existent zone
+	repo := &mockServerRepo{}
+	srv := NewServer("127.0.0.1:0", repo, nil)
+	conn := &mockTCPConn{}
+	req := packet.NewDNSPacket()
+	req.Header.ID = 1
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "missing.zone.", QType: packet.AXFR})
+	
+	srv.handleAXFR(conn, req)
+	if len(conn.captured) != 1 {
+		t.Errorf("Expected NXDOMAIN response")
+	}
+
+	// 2. Zone exists but no SOA
+	repo.zones = append(repo.zones, domain.Zone{ID: "z1", Name: "nosoa.zone."})
+	req.Questions[0].Name = "nosoa.zone."
+	conn.captured = nil
+	srv.handleAXFR(conn, req)
+	if len(conn.captured) != 1 {
+		t.Errorf("Expected SERVFAIL response")
+	}
+}
