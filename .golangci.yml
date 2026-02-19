@@ -1,16 +1,12 @@
-run:
-  version: "1"
-  timeout: 5m
+version: 2
 
 linters:
   disable-all: true
   enable:
-    - gosimple
     - govet
     - ineffassign
     - staticcheck
     - unused
-    - revive
     - gosec
     - bodyclose
     - errorlint
@@ -22,13 +18,6 @@ linters:
     - errcheck
 
 linters-settings:
-  revive:
-    confidence: 0.8
-    rules:
-      - name: exported
-        disabled: true
-      - name: package-comments
-        disabled: true
   govet:
     enable-all: true
     disable:

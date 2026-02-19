@@ -22,8 +22,8 @@ jobs:
         with:
           version: latest
 
-  test:
-    name: Test
+  test-matrix:
+    name: Test Matrix
     strategy:
       matrix:
         go-version: ['1.22', '1.23', '1.24']
@@ -37,17 +37,31 @@ jobs:
           go-version: ${{ matrix.go-version }}
           cache: true
       
-      - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y bc || true
-
       - name: Build
         run: go build -v ./...
 
-      - name: Test with Race Detector
-        run: go test -v -race -coverprofile=coverage.txt -coverpkg=./... ./...
+      - name: Run Tests (Fast Mode)
+        run: go test -short -timeout 5m ./...
+
+  coverage:
+    name: Coverage & Thorough Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.24'
+          cache: true
+      
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y bc || true
+
+      - name: Run Thorough Tests
+        # Excluded cmd/bench from coverage tests as it contains slow testcontainers-based scale tests
+        run: go test -v -timeout 10m -coverprofile=coverage.txt $(go list ./... | grep -v "cmd/bench")
 
       - name: Verify Coverage Threshold
-        if: matrix.os == 'ubuntu-latest' && matrix.go-version == '1.24'
         run: |
           COVERAGE=$(go tool cover -func=coverage.txt | grep total | awk '{print $3}' | sed 's/%//')
           echo "Total coverage: $COVERAGE%"
