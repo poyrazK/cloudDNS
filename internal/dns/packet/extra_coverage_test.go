@@ -165,7 +165,7 @@ func TestTSIG_TimeDrift_Future(t *testing.T) {
 		Type:          TSIG,
 		Class:         255,
 		AlgorithmName: "hmac-md5.sig-alg.reg.int.",
-		TimeSigned:    uint64(time.Now().Add(10 * time.Minute).Unix()), // Future
+		TimeSigned:    uint64(time.Now().Add(10 * time.Minute).Unix()), // #nosec G115 -- Future time for drift test
 		Fudge:         300,
 		MAC:           []byte{1, 2, 3},
 	}

@@ -126,7 +126,7 @@ func TestDNSRecord_RoundTrip_AllTypes(t *testing.T) {
 				t.Errorf("Type mismatch: got %v, want %v", parsed.Type, tc.rec.Type)
 			}
 			
-			if parsed.Name != tc.rec.Name && !(tc.rec.Name == "" && parsed.Name == ".") {
+			if parsed.Name != tc.rec.Name && (tc.rec.Name != "" || parsed.Name != ".") {
 				t.Errorf("Name mismatch: got %s, want %s", parsed.Name, tc.rec.Name)
 			}
 		})
