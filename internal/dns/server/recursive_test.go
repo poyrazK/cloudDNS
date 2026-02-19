@@ -9,6 +9,9 @@ import (
 )
 
 func TestResolveRecursive(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping slow recursive lookup test in short mode")
+	}
 	s := NewServer(":0", nil, nil)
 
 	// Mock queryFn to simulate iterative lookups
@@ -104,8 +107,8 @@ func TestSendQuery(t *testing.T) {
 	go func() {
 		defer func() { _ = conn.Close() }() 
 		buf := make([]byte, 512)
-		n, remote, err := conn.ReadFromUDP(buf)
-		if err != nil { return }
+		n, remote, errRead := conn.ReadFromUDP(buf)
+		if errRead != nil { return }
 		
 		req := packet.NewDNSPacket()
 		pb := packet.NewBytePacketBuffer()
