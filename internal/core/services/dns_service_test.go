@@ -15,7 +15,7 @@ type mockRepo struct {
 	err     error
 }
 
-func (m *mockRepo) GetRecords(ctx context.Context, name string, qType domain.RecordType, clientIP string) ([]domain.Record, error) {
+func (m *mockRepo) GetRecords(_ context.Context, name string, qType domain.RecordType, _ string) ([]domain.Record, error) {
 	if m.err != nil { return nil, m.err }
 	var res []domain.Record
 	for _, r := range m.records {
@@ -26,7 +26,7 @@ func (m *mockRepo) GetRecords(ctx context.Context, name string, qType domain.Rec
 	return res, nil
 }
 
-func (m *mockRepo) GetIPsForName(ctx context.Context, name string, clientIP string) ([]string, error) {
+func (m *mockRepo) GetIPsForName(_ context.Context, name string, _ string) ([]string, error) {
 	if m.err != nil { return nil, m.err }
 	var res []string
 	for _, r := range m.records {
@@ -37,7 +37,7 @@ func (m *mockRepo) GetIPsForName(ctx context.Context, name string, clientIP stri
 	return res, nil
 }
 
-func (m *mockRepo) GetZone(ctx context.Context, name string) (*domain.Zone, error) {
+func (m *mockRepo) GetZone(_ context.Context, name string) (*domain.Zone, error) {
 	if m.err != nil { return nil, m.err }
 	for _, z := range m.zones {
 		if z.Name == name {
@@ -256,6 +256,24 @@ func TestHealthCheck(t *testing.T) {
 
 	if err := svc.HealthCheck(context.Background()); err != nil {
 		t.Errorf("HealthCheck failed: %v", err)
+	}
+}
+
+func TestListRecordsForZone(t *testing.T) {
+	repo := &mockRepo{
+		records: []domain.Record{
+			{ID: "r1", ZoneID: "z1", Name: "www.z1.test.", Type: domain.TypeA},
+			{ID: "r2", ZoneID: "z2", Name: "www.z2.test.", Type: domain.TypeA},
+		},
+	}
+	svc := NewDNSService(repo)
+
+	recs, err := svc.ListRecordsForZone(context.Background(), "z1")
+	if err != nil {
+		t.Fatalf("ListRecordsForZone failed: %v", err)
+	}
+	if len(recs) != 1 || recs[0].ID != "r1" {
+		t.Errorf("Expected only r1 for zone z1, got %d records", len(recs))
 	}
 }
 

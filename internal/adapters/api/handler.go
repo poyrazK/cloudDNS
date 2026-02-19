@@ -9,14 +9,17 @@ import (
 	"github.com/poyrazK/cloudDNS/internal/core/ports"
 )
 
+// APIHandler handles HTTP requests for zone and record management.
 type APIHandler struct {
 	svc ports.DNSService
 }
 
+// NewAPIHandler creates and returns a new APIHandler instance.
 func NewAPIHandler(svc ports.DNSService) *APIHandler {
 	return &APIHandler{svc: svc}
 }
 
+// RegisterRoutes registers the API routes with the provided ServeMux.
 func (h *APIHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /health", h.HealthCheck)
 	mux.HandleFunc("POST /zones", h.CreateZone)
@@ -27,6 +30,7 @@ func (h *APIHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /zones/{zone_id}/records/{id}", h.DeleteRecord)
 }
 
+// HealthCheck handles health check requests.
 func (h *APIHandler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 	if err := h.svc.HealthCheck(r.Context()); err != nil {
 		http.Error(w, "Degraded: "+err.Error(), http.StatusServiceUnavailable)
