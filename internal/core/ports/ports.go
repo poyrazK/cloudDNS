@@ -1,3 +1,4 @@
+// Package ports defines the input and output ports for the hexagonal architecture.
 package ports
 
 import (
@@ -6,6 +7,7 @@ import (
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
 )
 
+// DNSRepository defines the interface for DNS data persistence.
 type DNSRepository interface {
 	GetRecords(ctx context.Context, name string, qType domain.RecordType, clientIP string) ([]domain.Record, error)
 	GetIPsForName(ctx context.Context, name string, clientIP string) ([]string, error)
@@ -32,6 +34,7 @@ type DNSRepository interface {
 	UpdateKey(ctx context.Context, key *domain.DNSSECKey) error
 }
 
+// DNSService defines the interface for core DNS business logic.
 type DNSService interface {
 	CreateZone(ctx context.Context, zone *domain.Zone) error
 	CreateRecord(ctx context.Context, record *domain.Record) error
