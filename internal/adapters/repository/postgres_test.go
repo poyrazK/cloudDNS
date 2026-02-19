@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,49 +17,76 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
+var (
+	testDB      *sql.DB
+	containerOnce sync.Once
+	containerErr  error
+	containerCleanup func()
+)
+
 func setupTestDB(t *testing.T) (*sql.DB, func()) {
-	ctx := context.Background()
+	containerOnce.Do(func() {
+		ctx := context.Background()
+		pgContainer, err := postgres.Run(ctx,
+			"postgres:16-alpine",
+			postgres.WithDatabase("clouddns_test"),
+			postgres.WithUsername("postgres"),
+			postgres.WithPassword("postgres"),
+			testcontainers.WithWaitStrategy(
+				wait.ForListeningPort("5432").
+					WithStartupTimeout(60*time.Second)),
+		)
+		if err != nil {
+			containerErr = err
+			return
+		}
 
-	pgContainer, errStart := postgres.Run(ctx,
-		"postgres:16-alpine",
-		postgres.WithDatabase("clouddns_test"),
-		postgres.WithUsername("postgres"),
-		postgres.WithPassword("postgres"),
-		testcontainers.WithWaitStrategy(
-			wait.ForListeningPort("5432").
-				WithStartupTimeout(60*time.Second)),
-	)
-	if errStart != nil {
-		t.Fatalf("failed to start container: %s", errStart)
+		connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
+		if err != nil {
+			containerErr = err
+			return
+		}
+
+		db, err := sql.Open("pgx", connStr)
+		if err != nil {
+			containerErr = err
+			return
+		}
+
+		schemaPath := filepath.Join(".", "schema.sql")
+		schema, err := os.ReadFile(schemaPath) // #nosec G304
+		if err != nil {
+			containerErr = err
+			return
+		}
+
+		if _, err := db.Exec(string(schema)); err != nil {
+			containerErr = err
+			return
+		}
+
+		testDB = db
+		containerCleanup = func() {
+			_ = db.Close()
+			_ = pgContainer.Terminate(ctx)
+		}
+	})
+
+	if containerErr != nil {
+		t.Fatalf("failed to setup global test container: %v", containerErr)
 	}
 
-	connStr, errConn := pgContainer.ConnectionString(ctx, "sslmode=disable")
-	if errConn != nil {
-		t.Fatalf("failed to get connection string: %s", errConn)
-	}
-
-	db, errOpen := sql.Open("pgx", connStr)
-	if errOpen != nil {
-		t.Fatalf("failed to open db: %s", errOpen)
-	}
-
-	schemaPath := filepath.Join(".", "schema.sql")
-	schema, errRead := os.ReadFile(schemaPath) // #nosec G304
-	if errRead != nil {
-		t.Fatalf("failed to read schema: %s", errRead)
-	}
-
-	if _, errExec := db.Exec(string(schema)); errExec != nil {
-		t.Fatalf("failed to apply schema: %s", errExec)
-	}
-
-	return db, func() {
-		_ = db.Close()
-		_ = pgContainer.Terminate(ctx)
+	return testDB, func() {
+		// We don't terminate the global container here, 
+		// just clean up data if needed. For now, we trust tests to be clean.
+		_, _ = testDB.Exec("TRUNCATE dns_records, dns_zones, audit_logs, zone_changes CASCADE")
 	}
 }
 
 func TestPostgresRepository_Integration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}

@@ -34,6 +34,54 @@ func TestConvertPacketRecordToDomain(t *testing.T) {
 			},
 		},
 		{
+			name: "AAAA record",
+			pRec: packet.DNSRecord{
+				Name: "v6.test.",
+				Type: packet.AAAA,
+				TTL:  300,
+				IP:   net.ParseIP("2001:db8::1"),
+			},
+			want: domain.Record{
+				ZoneID:  zoneID,
+				Name:    "v6.test.",
+				Type:    domain.TypeAAAA,
+				Content: "2001:db8::1",
+				TTL:     300,
+			},
+		},
+		{
+			name: "NS record",
+			pRec: packet.DNSRecord{
+				Name: "test.",
+				Type: packet.NS,
+				TTL:  3600,
+				Host: "ns1.test.",
+			},
+			want: domain.Record{
+				ZoneID:  zoneID,
+				Name:    "test.",
+				Type:    domain.TypeNS,
+				Content: "ns1.test.",
+				TTL:     3600,
+			},
+		},
+		{
+			name: "PTR record",
+			pRec: packet.DNSRecord{
+				Name: "1.0.0.127.in-addr.arpa.",
+				Type: packet.PTR,
+				TTL:  3600,
+				Host: "localhost.",
+			},
+			want: domain.Record{
+				ZoneID:  zoneID,
+				Name:    "1.0.0.127.in-addr.arpa.",
+				Type:    domain.TypePTR,
+				Content: "localhost.",
+				TTL:     3600,
+			},
+		},
+		{
 			name: "MX record",
 			pRec: packet.DNSRecord{
 				Name:     "test.",
@@ -142,6 +190,53 @@ func TestConvertDomainToPacketRecord(t *testing.T) {
 			},
 		},
 		{
+			name: "AAAA record",
+			rec: domain.Record{
+				Name:    "v6.test",
+				Type:    domain.TypeAAAA,
+				Content: "2001:db8::1",
+				TTL:     300,
+			},
+			want: packet.DNSRecord{
+				Name: "v6.test.",
+				Type: packet.AAAA,
+				IP:   net.ParseIP("2001:db8::1"),
+				TTL:  300,
+			},
+		},
+		{
+			name: "NS record",
+			rec: domain.Record{
+				Name:    "test.",
+				Type:    domain.TypeNS,
+				Content: "ns1.test.",
+				TTL:     3600,
+			},
+			want: packet.DNSRecord{
+				Name: "test.",
+				Type: packet.NS,
+				Host: "ns1.test.",
+				TTL:  3600,
+			},
+		},
+		{
+			name: "MX record",
+			rec: domain.Record{
+				Name:     "test",
+				Type:     domain.TypeMX,
+				Content:  "mail.test",
+				TTL:      600,
+				Priority: intPtr(10),
+			},
+			want: packet.DNSRecord{
+				Name:     "test.",
+				Type:     packet.MX,
+				Priority: 10,
+				Host:     "mail.test.",
+				TTL:      600,
+			},
+		},
+		{
 			name: "CNAME record",
 			rec: domain.Record{
 				Name:    "alias",
@@ -154,6 +249,21 @@ func TestConvertDomainToPacketRecord(t *testing.T) {
 				Type: packet.CNAME,
 				Host: "target.test.",
 				TTL:  300,
+			},
+		},
+		{
+			name: "PTR record",
+			rec: domain.Record{
+				Name:    "1.0.0.127.in-addr.arpa",
+				Type:    domain.TypePTR,
+				Content: "localhost.",
+				TTL:     3600,
+			},
+			want: packet.DNSRecord{
+				Name: "1.0.0.127.in-addr.arpa.",
+				Type: packet.PTR,
+				Host: "localhost.",
+				TTL:  3600,
 			},
 		},
 		{
