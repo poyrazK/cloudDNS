@@ -1,3 +1,4 @@
+// Package packet provides functionality for parsing and serializing DNS packets.
 package packet
 
 import (
@@ -6,14 +7,16 @@ import (
 	"sync"
 )
 
-// BytePacketBuffer simplifies reading and writing the DNS packet buffer
+// BytePacketBuffer simplifies reading and writing the DNS packet buffer.
 type BytePacketBuffer struct {
 	Buf      []byte
 	Pos      int
+	Len      int            // Actual data length loaded
 	names    map[string]int // For Name Compression
 	HasNames bool           // Enable/Disable name compression tracking
 }
 
+// MaxPacketSize is the maximum size of a DNS packet over UDP (RFC 1035).
 const MaxPacketSize = 65535
 
 var bufferPool = sync.Pool{
@@ -21,24 +24,27 @@ var bufferPool = sync.Pool{
 		return &BytePacketBuffer{
 			Buf: make([]byte, MaxPacketSize),
 			Pos: 0,
+			Len: 0,
 		}
 	},
 }
 
-// GetBuffer retrieves a buffer from the pool
+// GetBuffer retrieves a buffer from the pool.
 func GetBuffer() *BytePacketBuffer {
 	b := bufferPool.Get().(*BytePacketBuffer)
 	b.Reset()
 	return b
 }
 
-// PutBuffer returns a buffer to the pool
+// PutBuffer returns a buffer to the pool.
 func PutBuffer(b *BytePacketBuffer) {
 	bufferPool.Put(b)
 }
 
+// Reset clears the buffer state for reuse.
 func (b *BytePacketBuffer) Reset() {
 	b.Pos = 0
+	b.Len = 0
 	if b.names == nil {
 		b.names = make(map[string]int)
 	} else {
@@ -47,17 +53,21 @@ func (b *BytePacketBuffer) Reset() {
 	b.HasNames = false
 }
 
+// NewBytePacketBuffer creates and returns a new BytePacketBuffer instance.
 func NewBytePacketBuffer() *BytePacketBuffer {
 	return &BytePacketBuffer{
 		Buf:   make([]byte, MaxPacketSize),
 		Pos:   0,
+		Len:   0,
 		names: make(map[string]int),
 	}
 }
 
+// Load copies the provided data into the buffer and sets its length.
 func (b *BytePacketBuffer) Load(data []byte) {
 	copy(b.Buf, data)
 	b.Pos = 0
+	b.Len = len(data)
 	if b.names == nil {
 		b.names = make(map[string]int)
 	} else {
@@ -72,19 +82,25 @@ func (b *BytePacketBuffer) Position() int {
 
 // Step moves the cursor forward by steps
 func (b *BytePacketBuffer) Step(steps int) error {
+	if b.Pos+steps > MaxPacketSize || (b.Len > 0 && b.Pos+steps > b.Len) {
+		return errors.New("step out of bounds")
+	}
 	b.Pos += steps
 	return nil
 }
 
 // Seek moves the cursor to a specific position
 func (b *BytePacketBuffer) Seek(pos int) error {
+	if pos > MaxPacketSize {
+		return errors.New("seek out of bounds")
+	}
 	b.Pos = pos
 	return nil
 }
 
 // Read reads a single byte
 func (b *BytePacketBuffer) Read() (byte, error) {
-	if b.Pos >= MaxPacketSize {
+	if b.Pos >= MaxPacketSize || (b.Len > 0 && b.Pos >= b.Len) {
 		return 0, errors.New("end of buffer")
 	}
 	res := b.Buf[b.Pos]
@@ -94,7 +110,7 @@ func (b *BytePacketBuffer) Read() (byte, error) {
 
 // ReadRange reads a slice of bytes
 func (b *BytePacketBuffer) ReadRange(start int, length int) ([]byte, error) {
-	if start+length > MaxPacketSize {
+	if start+length > MaxPacketSize || (b.Len > 0 && start+length > b.Len) {
 		return nil, errors.New("out of bounds")
 	}
 	res := make([]byte, length)
@@ -104,7 +120,7 @@ func (b *BytePacketBuffer) ReadRange(start int, length int) ([]byte, error) {
 
 // Readu16 reads 2 bytes as uint16 (Big Endian)
 func (b *BytePacketBuffer) Readu16() (uint16, error) {
-	if b.Pos+2 > MaxPacketSize {
+	if b.Pos+2 > MaxPacketSize || (b.Len > 0 && b.Pos+2 > b.Len) {
 		return 0, errors.New("end of buffer")
 	}
 	b1 := b.Buf[b.Pos]
@@ -115,7 +131,7 @@ func (b *BytePacketBuffer) Readu16() (uint16, error) {
 
 // Readu32 reads 4 bytes as uint32 (Big Endian)
 func (b *BytePacketBuffer) Readu32() (uint32, error) {
-	if b.Pos+4 > MaxPacketSize {
+	if b.Pos+4 > MaxPacketSize || (b.Len > 0 && b.Pos+4 > b.Len) {
 		return 0, errors.New("end of buffer")
 	}
 	b1 := b.Buf[b.Pos]
@@ -200,7 +216,7 @@ func (b *BytePacketBuffer) ReadName() (string, error) {
 
 // Get reads a byte at a specific position without moving cursor
 func (b *BytePacketBuffer) Get(pos int) (byte, error) {
-	if pos >= MaxPacketSize {
+	if pos >= MaxPacketSize || (b.Len > 0 && pos >= b.Len) {
 		return 0, errors.New("end of buffer")
 	}
 	return b.Buf[pos], nil
@@ -208,7 +224,7 @@ func (b *BytePacketBuffer) Get(pos int) (byte, error) {
 
 // GetRange reads a range without moving cursor
 func (b *BytePacketBuffer) GetRange(start int, length int) ([]byte, error) {
-	if start+length > MaxPacketSize {
+	if start+length > MaxPacketSize || (b.Len > 0 && start+length > b.Len) {
 		return nil, errors.New("out of bounds")
 	}
 	return b.Buf[start : start+length], nil
@@ -221,6 +237,9 @@ func (b *BytePacketBuffer) Write(val byte) error {
 	}
 	b.Buf[b.Pos] = val
 	b.Pos++
+	if b.Pos > b.Len {
+		b.Len = b.Pos
+	}
 	return nil
 }
 
@@ -232,6 +251,9 @@ func (b *BytePacketBuffer) Writeu16(val uint16) error {
 	b.Buf[b.Pos] = byte(val >> 8)
 	b.Buf[b.Pos+1] = byte(val & 0xFF)
 	b.Pos += 2
+	if b.Pos > b.Len {
+		b.Len = b.Pos
+	}
 	return nil
 }
 
@@ -245,13 +267,18 @@ func (b *BytePacketBuffer) Writeu32(val uint32) error {
 	b.Buf[b.Pos+2] = byte(val >> 8)
 	b.Buf[b.Pos+3] = byte(val & 0xFF)
 	b.Pos += 4
+	if b.Pos > b.Len {
+		b.Len = b.Pos
+	}
 	return nil
 }
 
 // WriteName writes a domain name with compression support
 func (b *BytePacketBuffer) WriteName(name string) error {
 	if name == "" || name == "." {
-		return b.Write(0)
+		err := b.Write(0)
+		if err == nil && b.Pos > b.Len { b.Len = b.Pos }
+		return err
 	}
 
 	// Standardize: ensure name ends with a dot
@@ -262,13 +289,17 @@ func (b *BytePacketBuffer) WriteName(name string) error {
 	curr := name
 	for {
 		if curr == "" || curr == "." {
-			return b.Write(0)
+			err := b.Write(0)
+			if err == nil && b.Pos > b.Len { b.Len = b.Pos }
+			return err
 		}
 
 		if b.HasNames {
 			lower := strings.ToLower(curr)
 			if pos, ok := b.names[lower]; ok {
-				return b.Writeu16(uint16(pos) | 0xC000) // #nosec G115
+				err := b.Writeu16(uint16(pos) | 0xC000) // #nosec G115
+				if err == nil && b.Pos > b.Len { b.Len = b.Pos }
+				return err
 			}
 			if b.Pos < 0x4000 {
 				b.names[lower] = b.Pos
@@ -290,6 +321,7 @@ func (b *BytePacketBuffer) WriteName(name string) error {
 		}
 		curr = curr[dotIdx+1:]
 	}
+	if b.Pos > b.Len { b.Len = b.Pos }
 	return nil
 }
 
@@ -301,6 +333,9 @@ func (b *BytePacketBuffer) WriteRange(start int, data []byte) error {
 	copy(b.Buf[start:start+len(data)], data)
 	if start+len(data) > b.Pos {
 		b.Pos = start + len(data)
+	}
+	if b.Pos > b.Len {
+		b.Len = b.Pos
 	}
 	return nil
 }

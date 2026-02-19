@@ -1,3 +1,4 @@
+// Package packet provides functionality for parsing and serializing DNS packets.
 package packet
 
 import (
@@ -6,61 +7,109 @@ import (
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
 )
 
+// QueryType represents the DNS record type field (e.g., A, NS, MX).
 type QueryType uint16
 
 const (
+	// UNKNOWN represents an unrecognized DNS query type.
 	UNKNOWN    QueryType = 0
+	// A represents an IPv4 address record.
 	A          QueryType = 1
+	// NS represents an authoritative name server record.
 	NS         QueryType = 2
+	// MD represents a mail destination record (obsolete).
 	MD         QueryType = 3
+	// MF represents a mail forwarder record (obsolete).
 	MF         QueryType = 4
+	// CNAME represents a canonical name for an alias.
 	CNAME      QueryType = 5
+	// SOA represents the start of a zone of authority record.
 	SOA        QueryType = 6
+	// MB represents a mailbox domain name record (experimental).
 	MB         QueryType = 7
+	// MG represents a mail group member record (experimental).
 	MG         QueryType = 8
+	// MR represents a mail rename domain name record (experimental).
 	MR         QueryType = 9
+	// NULL represents a null RR (experimental).
 	NULL       QueryType = 10
+	// WKS represents a well known service description record.
 	WKS        QueryType = 11
+	// PTR represents a domain name pointer record.
 	PTR        QueryType = 12
+	// HINFO represents host information records.
 	HINFO      QueryType = 13
+	// MINFO represents mailbox or mail list information record.
 	MINFO      QueryType = 14
+	// MX represents a mail exchange record.
 	MX         QueryType = 15
+	// TXT represents text records.
 	TXT        QueryType = 16
+	// AAAA represents an IPv6 address record.
 	AAAA       QueryType = 28
+	// SRV represents service location records (RFC 2782).
 	SRV        QueryType = 33
+	// DS represents a delegation signer record (RFC 4034).
 	DS         QueryType = 43
+	// RRSIG represents a DNSSEC signature record (RFC 4034).
 	RRSIG      QueryType = 46
+	// NSEC represents a next secure record (RFC 4034).
 	NSEC       QueryType = 47
+	// DNSKEY represents a DNS public key record (RFC 4034).
 	DNSKEY     QueryType = 48
+	// NSEC3 represents a next secure record version 3 (RFC 5155).
 	NSEC3      QueryType = 50
+	// NSEC3PARAM represents NSEC3 parameters (RFC 5155).
 	NSEC3PARAM QueryType = 51
+	// AXFR represents a request for a full zone transfer.
 	AXFR       QueryType = 252
+	// IXFR represents a request for an incremental zone transfer.
 	IXFR       QueryType = 251
+	// ANY represents a request for all records.
 	ANY        QueryType = 255
+	// OPT represents an EDNS(0) pseudo-RR (RFC 6891).
 	OPT        QueryType = 41
+	// TSIG represents a transaction signature record (RFC 2845).
 	TSIG       QueryType = 250
 )
 
 // RFC 8914: Extended DNS Error Codes
 const (
+	// EdeOther represents a generic error.
 	EdeOther               uint16 = 0
+	// EdeUnsupportedDnskey indicates an unsupported DNSKEY algorithm.
 	EdeUnsupportedDnskey  uint16 = 1
+	// EdeUnsupportedDs indicates an unsupported DS digest algorithm.
 	EdeUnsupportedDs      uint16 = 2
+	// EdeStaleAnswer indicates the answer is stale.
 	EdeStaleAnswer        uint16 = 3
+	// EdeForgedAnswer indicates the answer may be forged.
 	EdeForgedAnswer       uint16 = 4
+	// EdeDnssecIndeterminate indicates DNSSEC validation is indeterminate.
 	EdeDnssecIndeterminate uint16 = 5
+	// EdeDnssecBogus indicates DNSSEC validation failed.
 	EdeDnssecBogus        uint16 = 6
+	// EdeSignatureExpired indicates the RRSIG has expired.
 	EdeSignatureExpired   uint16 = 7
+	// EdeSignatureNotYet indicates the RRSIG is not yet valid.
 	EdeSignatureNotYet   uint16 = 8
+	// EdeMissingDnskey indicates a required DNSKEY was missing.
 	EdeMissingDnskey      uint16 = 9
+	// EdeMissingDs indicates a required DS record was missing.
 	EdeMissingDs          uint16 = 10
+	// EdeUnsupportedAlg indicates an unsupported DNSSEC algorithm.
 	EdeUnsupportedAlg     uint16 = 11
+	// EdeProhibited indicates the query is prohibited.
 	EdeProhibited          uint16 = 18
+	// EdeBlocked indicates the query was blocked by policy.
 	EdeBlocked             uint16 = 15
+	// EdeCensored indicates the query was censored.
 	EdeCensored            uint16 = 16
+	// EdeFiltered indicates the query was filtered.
 	EdeFiltered            uint16 = 17
 )
 
+// RecordTypeToQueryType converts a domain model RecordType to its corresponding packet QueryType.
 func RecordTypeToQueryType(t domain.RecordType) QueryType {
 	switch t {
 	case domain.TypeA: return A
@@ -75,6 +124,7 @@ func RecordTypeToQueryType(t domain.RecordType) QueryType {
 	}
 }
 
+// String returns the human-readable representation of a QueryType.
 func (t QueryType) String() string {
 	switch t {
 	case A: return "A"
@@ -102,27 +152,44 @@ func (t QueryType) String() string {
 }
 
 const (
+	// OpcodeQuery represents a standard DNS query.
 	OpcodeQuery  uint8 = 0
+	// OpcodeIQuery represents an inverse DNS query (obsolete).
 	OpcodeIQuery uint8 = 1
+	// OpcodeStatus represents a server status request.
 	OpcodeStatus uint8 = 2
+	// OpcodeNotify represents a zone change notification (RFC 1996).
 	OpcodeNotify uint8 = 4
+	// OpcodeUpdate represents a dynamic update request (RFC 2136).
 	OpcodeUpdate uint8 = 5
 )
 
 const (
+	// RcodeNoError indicates no error condition.
 	RcodeNoError  uint8 = 0
+	// RcodeFormErr indicates a format error in the request.
 	RcodeFormErr  uint8 = 1
+	// RcodeServFail indicates a server failure.
 	RcodeServFail uint8 = 2
+	// RcodeNxDomain indicates the domain name does not exist.
 	RcodeNxDomain uint8 = 3
+	// RcodeNotImp indicates the request is not implemented.
 	RcodeNotImp   uint8 = 4
+	// RcodeRefused indicates the server refuses to perform the operation.
 	RcodeRefused  uint8 = 5
+	// RcodeYxDomain indicates a name exists that should not (RFC 2136).
 	RcodeYxDomain uint8 = 6
+	// RcodeYxRRSet indicates an RRset exists that should not (RFC 2136).
 	RcodeYxRRSet  uint8 = 7
+	// RcodeNxRRSet indicates an RRset does not exist that should (RFC 2136).
 	RcodeNxRRSet  uint8 = 8
+	// RcodeNotAuth indicates the server is not authoritative for the zone.
 	RcodeNotAuth  uint8 = 9
+	// RcodeNotZone indicates a name is not within the zone (RFC 2136).
 	RcodeNotZone  uint8 = 10
 )
 
+// DNSHeader represents the header section of a DNS packet.
 type DNSHeader struct {
 	ID             uint16
 	RecursionDesired bool
@@ -147,10 +214,12 @@ type DNSHeader struct {
 	ResourceEntries uint16
 }
 
+// NewDNSHeader creates and returns a pointer to a new DNSHeader.
 func NewDNSHeader() *DNSHeader {
 	return &DNSHeader{}
 }
 
+// Read populates the DNSHeader fields by reading from the provided buffer.
 func (h *DNSHeader) Read(buffer *BytePacketBuffer) error {
 	var err error
 	h.ID, err = buffer.Readu16()
@@ -186,10 +255,11 @@ func (h *DNSHeader) Read(buffer *BytePacketBuffer) error {
 	return nil
 }
 
+// Write serializes the DNSHeader into the provided buffer.
 func (h *DNSHeader) Write(buffer *BytePacketBuffer) error {
 	if err := buffer.Writeu16(h.ID); err != nil { return err }
 
-	var flags uint16 = 0
+	var flags uint16
 	if h.Response { flags |= (1 << 15) }
 	flags |= (uint16(h.Opcode) << 11)
 	if h.AuthoritativeAnswer { flags |= (1 << 10) }
@@ -210,11 +280,13 @@ func (h *DNSHeader) Write(buffer *BytePacketBuffer) error {
 	return nil
 }
 
+// DNSQuestion represents a single question in the DNS question section.
 type DNSQuestion struct {
 	Name  string
 	QType QueryType
 }
 
+// NewDNSQuestion creates and returns a pointer to a new DNSQuestion.
 func NewDNSQuestion(name string, qtype QueryType) *DNSQuestion {
 	return &DNSQuestion{
 		Name:  name,
@@ -222,6 +294,7 @@ func NewDNSQuestion(name string, qtype QueryType) *DNSQuestion {
 	}
 }
 
+// Read populates the DNSQuestion fields by reading from the provided buffer.
 func (q *DNSQuestion) Read(buffer *BytePacketBuffer) error {
 	var err error
 	q.Name, err = buffer.ReadName()
@@ -237,6 +310,7 @@ func (q *DNSQuestion) Read(buffer *BytePacketBuffer) error {
 	return nil
 }
 
+// Write serializes the DNSQuestion into the provided buffer.
 func (q *DNSQuestion) Write(buffer *BytePacketBuffer) error {
 	if err := buffer.WriteName(q.Name); err != nil { return err }
 	if err := buffer.Writeu16(uint16(q.QType)); err != nil { return err }
@@ -244,11 +318,13 @@ func (q *DNSQuestion) Write(buffer *BytePacketBuffer) error {
 	return nil
 }
 
+// EdnsOption represents a single option in an OPT pseudo-RR (RFC 6891).
 type EdnsOption struct {
 	Code uint16
 	Data []byte
 }
 
+// DNSRecord represents a single DNS resource record.
 type DNSRecord struct {
 	Name     string
 	Type     QueryType
@@ -312,6 +388,7 @@ type DNSRecord struct {
 	Other         []byte
 }
 
+// AddEDE adds an Extended DNS Error (RFC 8914) option to an OPT record.
 func (r *DNSRecord) AddEDE(code uint16, text string) {
 	data := []byte{byte(code >> 8), byte(code & 0xFF)}
 	if text != "" {
@@ -320,6 +397,7 @@ func (r *DNSRecord) AddEDE(code uint16, text string) {
 	r.Options = append(r.Options, EdnsOption{Code: 15, Data: data})
 }
 
+// Read populates the DNSRecord fields by reading from the provided buffer.
 func (r *DNSRecord) Read(buffer *BytePacketBuffer) error {
 	var err error
 	r.Name, err = buffer.ReadName()
@@ -335,40 +413,39 @@ func (r *DNSRecord) Read(buffer *BytePacketBuffer) error {
 	r.TTL, err = buffer.Readu32() 
 	if err != nil { return err } 
 
-	dataLen, err := buffer.Readu16()
-	if err != nil { return err }
+	dataLen, errReadLen := buffer.Readu16()
+	if errReadLen != nil { return errReadLen }
 	startPos := buffer.Position()
 
-	// fmt.Printf("DEBUG: Reading %v dataLen=%d\n", r.Type, dataLen)
+	if dataLen == 0 && r.Type != OPT {
+		return nil
+	}
 
 	switch r.Type {
 	case A:
-		rawIP, err := buffer.ReadRange(buffer.Position(), 4)
-		if err != nil { return err }
+		rawIP, errRead := buffer.ReadRange(buffer.Position(), 4)
+		if errRead != nil { return errRead }
 		r.IP = net.IP(rawIP)
-		if err := buffer.Step(4); err != nil { return err }
+		if errStep := buffer.Step(4); errStep != nil { return errStep }
 	case AAAA:
-		rawIP, err := buffer.ReadRange(buffer.Position(), 16)
-		if err != nil { return err }
+		rawIP, errRead := buffer.ReadRange(buffer.Position(), 16)
+		if errRead != nil { return errRead }
 		r.IP = net.IP(rawIP)
-		if err := buffer.Step(16); err != nil { return err }
+		if errStep := buffer.Step(16); errStep != nil { return errStep }
 	case NS, CNAME, PTR, MD, MF, MB, MG, MR:
 		r.Host, err = buffer.ReadName()
 		if err != nil { return err }
 	case MX:
-		r.Priority, err = buffer.Readu16()
-		if err != nil { return err }
-		r.Host, err = buffer.ReadName()
-		if err != nil { return err }
+		if r.Priority, err = buffer.Readu16(); err != nil { return err }
+		if r.Host, err = buffer.ReadName(); err != nil { return err }
 	case TXT:
-		txtLen, err := buffer.Read()
-		if err != nil { return err }
-		txtData, err := buffer.ReadRange(buffer.Position(), int(txtLen))
-		if err != nil { return err }
+		txtLen, errReadTxt := buffer.Read()
+		if errReadTxt != nil { return errReadTxt }
+		txtData, errRange := buffer.ReadRange(buffer.Position(), int(txtLen))
+		if errRange != nil { return errRange }
 		r.Txt = string(txtData)
-		if err := buffer.Step(int(txtLen)); err != nil { return err }
+		if errStep := buffer.Step(int(txtLen)); errStep != nil { return errStep }
 	case SOA:
-		var err error
 		if r.MName, err = buffer.ReadName(); err != nil { return err }
 		if r.RName, err = buffer.ReadName(); err != nil { return err }
 		if r.Serial, err = buffer.Readu32(); err != nil { return err }
@@ -377,40 +454,34 @@ func (r *DNSRecord) Read(buffer *BytePacketBuffer) error {
 		if r.Expire, err = buffer.Readu32(); err != nil { return err }
 		if r.Minimum, err = buffer.Readu32(); err != nil { return err }
 	case HINFO:
-		cpuLen, err := buffer.Read()
-		if err != nil { return err }
-		cpu, err := buffer.ReadRange(buffer.Position(), int(cpuLen))
-		if err != nil { return err }
+		cpuLen, errReadCPU := buffer.Read()
+		if errReadCPU != nil { return errReadCPU }
+		cpu, errRange := buffer.ReadRange(buffer.Position(), int(cpuLen))
+		if errRange != nil { return errRange }
 		r.CPU = string(cpu)
-		if err := buffer.Step(int(cpuLen)); err != nil { return err }
-		osLen, err := buffer.Read()
-		if err != nil { return err }
-		osData, err := buffer.ReadRange(buffer.Position(), int(osLen))
-		if err != nil { return err }
+		if errStep := buffer.Step(int(cpuLen)); errStep != nil { return errStep }
+		osLen, errReadOS := buffer.Read()
+		if errReadOS != nil { return errReadOS }
+		osData, errRange2 := buffer.ReadRange(buffer.Position(), int(osLen))
+		if errRange2 != nil { return errRange2 }
 		r.OS = string(osData)
-		if err := buffer.Step(int(osLen)); err != nil { return err }
+		if errStep2 := buffer.Step(int(osLen)); errStep2 != nil { return errStep2 }
 	case MINFO:
-		var err error
 		if r.RMailBX, err = buffer.ReadName(); err != nil { return err }
 		if r.EMailBX, err = buffer.ReadName(); err != nil { return err }
 	case NSEC:
-		var err error
 		if r.NextName, err = buffer.ReadName(); err != nil { return err }
 		remaining := int(dataLen) - (buffer.Position() - startPos)
 		if r.TypeBitMap, err = buffer.ReadRange(buffer.Position(), remaining); err != nil { return err }
-		if err := buffer.Step(remaining); err != nil { return err }
+		if errStep := buffer.Step(remaining); errStep != nil { return errStep }
 	case DNSKEY:
-		var err error
 		if r.Flags, err = buffer.Readu16(); err != nil { return err }
-		protocol, err := buffer.Read() // Must be 3
-		if err != nil { return err }
-		_ = protocol
+		if _, errReadProto := buffer.Read(); errReadProto != nil { return errReadProto } // Protocol
 		if r.Algorithm, err = buffer.Read(); err != nil { return err }
 		remaining := int(dataLen) - (buffer.Position() - startPos)
 		if r.PublicKey, err = buffer.ReadRange(buffer.Position(), remaining); err != nil { return err }
-		if err := buffer.Step(remaining); err != nil { return err }
+		if errStep := buffer.Step(remaining); errStep != nil { return errStep }
 	case RRSIG:
-		var err error
 		if r.TypeCovered, err = buffer.Readu16(); err != nil { return err }
 		if r.Algorithm, err = buffer.Read(); err != nil { return err }
 		if r.Labels, err = buffer.Read(); err != nil { return err }
@@ -421,64 +492,55 @@ func (r *DNSRecord) Read(buffer *BytePacketBuffer) error {
 		if r.SignerName, err = buffer.ReadName(); err != nil { return err }
 		remaining := int(dataLen) - (buffer.Position() - startPos)
 		if r.Signature, err = buffer.ReadRange(buffer.Position(), remaining); err != nil { return err }
-		if err := buffer.Step(remaining); err != nil { return err }
+		if errStep := buffer.Step(remaining); errStep != nil { return errStep }
 	case NSEC3:
-		var err error
 		if r.HashAlg, err = buffer.Read(); err != nil { return err }
-		r.Flags = 0 // simplified
-		f, err := buffer.Read()
-		if err != nil { return err }
-		_ = f
+		if _, errReadFlags := buffer.Read(); errReadFlags != nil { return errReadFlags } // Flags
 		if r.Iterations, err = buffer.Readu16(); err != nil { return err }
-		saltLen, err := buffer.Read()
-		if err != nil { return err }
+		saltLen, errReadSalt := buffer.Read()
+		if errReadSalt != nil { return errReadSalt }
 		if r.Salt, err = buffer.ReadRange(buffer.Position(), int(saltLen)); err != nil { return err }
-		if err := buffer.Step(int(saltLen)); err != nil { return err }
-		hashLen, err := buffer.Read()
-		if err != nil { return err }
+		if errStep := buffer.Step(int(saltLen)); errStep != nil { return errStep }
+		hashLen, errReadHash := buffer.Read()
+		if errReadHash != nil { return errReadHash }
 		if r.NextHash, err = buffer.ReadRange(buffer.Position(), int(hashLen)); err != nil { return err }
-		if err := buffer.Step(int(hashLen)); err != nil { return err }
+		if errStep2 := buffer.Step(int(hashLen)); errStep2 != nil { return errStep2 }
 		remaining := int(dataLen) - (buffer.Position() - startPos)
 		if r.TypeBitMap, err = buffer.ReadRange(buffer.Position(), remaining); err != nil { return err }
-		if err := buffer.Step(remaining); err != nil { return err }
+		if errStep3 := buffer.Step(remaining); errStep3 != nil { return errStep3 }
 	case NSEC3PARAM:
-		var err error
 		if r.HashAlg, err = buffer.Read(); err != nil { return err }
-		f, err := buffer.Read()
-		if err != nil { return err }
-		_ = f
+		if _, errReadFlags := buffer.Read(); errReadFlags != nil { return errReadFlags } // Flags
 		if r.Iterations, err = buffer.Readu16(); err != nil { return err }
-		saltLen, err := buffer.Read()
-		if err != nil { return err }
+		saltLen, errReadSalt := buffer.Read()
+		if errReadSalt != nil { return errReadSalt }
 		if r.Salt, err = buffer.ReadRange(buffer.Position(), int(saltLen)); err != nil { return err }
-		if err := buffer.Step(int(saltLen)); err != nil { return err }
+		if errStep := buffer.Step(int(saltLen)); errStep != nil { return errStep }
 	case DS:
-		var err error
 		if r.KeyTag, err = buffer.Readu16(); err != nil { return err }
 		if r.Algorithm, err = buffer.Read(); err != nil { return err }
 		if r.DigestType, err = buffer.Read(); err != nil { return err }
 		remaining := int(dataLen) - (buffer.Position() - startPos)
 		if r.Digest, err = buffer.ReadRange(buffer.Position(), remaining); err != nil { return err }
-		if err := buffer.Step(remaining); err != nil { return err }
+		if errStep := buffer.Step(remaining); errStep != nil { return errStep }
 	case TSIG:
-		var err error
 		if r.AlgorithmName, err = buffer.ReadName(); err != nil { return err }
-		timeHigh, err := buffer.Readu16()
-		if err != nil { return err }
-		timeLow, err := buffer.Readu32()
-		if err != nil { return err }
+		timeHigh, errReadHigh := buffer.Readu16()
+		if errReadHigh != nil { return errReadHigh }
+		timeLow, errReadLow := buffer.Readu32()
+		if errReadLow != nil { return errReadLow }
 		r.TimeSigned = uint64(timeHigh)<<32 | uint64(timeLow)
 		if r.Fudge, err = buffer.Readu16(); err != nil { return err }
-		macLen, err := buffer.Readu16()
-		if err != nil { return err }
+		macLen, errReadMAC := buffer.Readu16()
+		if errReadMAC != nil { return errReadMAC }
 		if r.MAC, err = buffer.ReadRange(buffer.Position(), int(macLen)); err != nil { return err }
-		if err := buffer.Step(int(macLen)); err != nil { return err }
+		if errStep := buffer.Step(int(macLen)); errStep != nil { return errStep }
 		if r.OriginalID, err = buffer.Readu16(); err != nil { return err }
 		if r.Error, err = buffer.Readu16(); err != nil { return err }
-		otherLen, err := buffer.Readu16()
-		if err != nil { return err }
+		otherLen, errReadOther := buffer.Readu16()
+		if errReadOther != nil { return errReadOther }
 		if r.Other, err = buffer.ReadRange(buffer.Position(), int(otherLen)); err != nil { return err }
-		if err := buffer.Step(int(otherLen)); err != nil { return err }
+		if errStep2 := buffer.Step(int(otherLen)); errStep2 != nil { return errStep2 }
 	case OPT:
 		r.UDPPayloadSize = r.Class
 		r.ExtendedRcode = uint8(r.TTL >> 24) // #nosec G115
@@ -486,23 +548,24 @@ func (r *DNSRecord) Read(buffer *BytePacketBuffer) error {
 		r.Z = uint16(r.TTL & 0xFFFF) // #nosec G115
 		remaining := int(dataLen)
 		for remaining >= 4 {
-			optCode, err := buffer.Readu16()
-			if err != nil { return err }
-			optLen, err := buffer.Readu16()
-			if err != nil { return err }
+			optCode, errReadCode := buffer.Readu16()
+			if errReadCode != nil { return errReadCode }
+			optLen, errReadLen2 := buffer.Readu16()
+			if errReadLen2 != nil { return errReadLen2 }
 			if int(optLen) > remaining-4 { break }
-			optData, err := buffer.ReadRange(buffer.Position(), int(optLen))
-			if err != nil { return err }
-			if err := buffer.Step(int(optLen)); err != nil { return err }
+			optData, errReadData := buffer.ReadRange(buffer.Position(), int(optLen))
+			if errReadData != nil { return errReadData }
+			if errStep := buffer.Step(int(optLen)); errStep != nil { return errStep }
 			r.Options = append(r.Options, EdnsOption{Code: optCode, Data: optData})
 			remaining -= (4 + int(optLen))
 		}
 	default:
-		if err := buffer.Step(int(dataLen)); err != nil { return err }
+		if errStep := buffer.Step(int(dataLen)); errStep != nil { return errStep }
 	}
 	return nil
 }
 
+// Write serializes the DNSRecord into the provided buffer.
 func (r *DNSRecord) Write(buffer *BytePacketBuffer) (int, error) {
 	startPos := buffer.Position()
 	if r.Type == OPT {
@@ -559,6 +622,18 @@ func (r *DNSRecord) Write(buffer *BytePacketBuffer) (int, error) {
 	if err := buffer.Writeu16(uint16(r.Type)); err != nil { return 0, err }
 	if err := buffer.Writeu16(r.Class); err != nil { return 0, err }
 	if err := buffer.Writeu32(r.TTL); err != nil { return 0, err }
+
+	// RFC 2136 (Dynamic Update) special class handling:
+	// Section 2.5.2: Class ANY means "Delete an RRset". 
+	// The RDLENGTH MUST be 0 and RDATA MUST be empty.
+	if r.Class == 255 {
+		if err := buffer.Writeu16(0); err != nil { return 0, err }
+		return buffer.Position() - startPos, nil
+	}
+
+	// Note: Class NONE (254) means "Delete a specific RR".
+	// RFC 2136 Section 2.5.4: Both Type and RDATA MUST be specified.
+	// Therefore, Class NONE falls through to standard RDATA serialization.
 
 	switch r.Type {
 	case A:
@@ -709,15 +784,21 @@ func (r *DNSRecord) Write(buffer *BytePacketBuffer) (int, error) {
 			if err := buffer.Write(b); err != nil { return 0, err }
 		}
 	default:
-		if err := buffer.Writeu16(uint16(len(r.Data))); err != nil { return 0, err } // #nosec G115
-		for _, b := range r.Data {
-			if err := buffer.Write(b); err != nil { return 0, err }
+		// RFC 2136: Delete RRset (ANY/ANY) or record (NONE/type) has RDLENGTH = 0
+		if len(r.Data) == 0 && (r.Class == 255 || r.Class == 254) {
+			if err := buffer.Writeu16(0); err != nil { return 0, err }
+		} else {
+			if err := buffer.Writeu16(uint16(len(r.Data))); err != nil { return 0, err } // #nosec G115
+			for _, b := range r.Data {
+				if err := buffer.Write(b); err != nil { return 0, err }
+			}
 		}
 	}
 
 	return buffer.Position() - startPos, nil
 }
 
+// DNSPacket represents a complete DNS packet.
 type DNSPacket struct {
 	Header      DNSHeader
 	Questions   []DNSQuestion
@@ -727,6 +808,7 @@ type DNSPacket struct {
 	TSIGStart   int // Byte offset where TSIG record starts, -1 if not present
 }
 
+// NewDNSPacket creates and returns a pointer to a new DNSPacket.
 func NewDNSPacket() *DNSPacket {
 	return &DNSPacket{
 		Header: DNSHeader{},
@@ -738,6 +820,7 @@ func NewDNSPacket() *DNSPacket {
 	}
 }
 
+// FromBuffer populates the DNSPacket by reading from the provided buffer.
 func (p *DNSPacket) FromBuffer(buffer *BytePacketBuffer) error {
 	if err := p.Header.Read(buffer); err != nil { return err }
 	for i := 0; i < int(p.Header.Questions); i++ {
@@ -767,6 +850,7 @@ func (p *DNSPacket) FromBuffer(buffer *BytePacketBuffer) error {
 	return nil
 }
 
+// Write serializes the complete DNSPacket into the provided buffer.
 func (p *DNSPacket) Write(buffer *BytePacketBuffer) error {
 	p.Header.Questions = uint16(len(p.Questions)) // #nosec G115
 	p.Header.Answers = uint16(len(p.Answers)) // #nosec G115
