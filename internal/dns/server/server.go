@@ -14,6 +14,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"os"
 	"runtime"
 	"sort"
 	"strings"
@@ -120,29 +121,35 @@ func (s *Server) Run() error {
 	}
 
 	// 1. Parallel UDP
+	started := 0
 	for i := 0; i < runtime.NumCPU(); i++ {
-		go func(id int) {
-			conn, errListen := lc.ListenPacket(context.Background(), "udp", s.Addr)
-			if errListen != nil {
-				s.Logger.Error("failed to start UDP listener", "id", id, "error", errListen)
-				return
-			}
+		conn, errListen := lc.ListenPacket(context.Background(), "udp", s.Addr)
+		if errListen != nil {
+			s.Logger.Error("failed to start UDP listener", "id", i, "error", errListen)
+			continue
+		}
+		started++
+		go func(c net.PacketConn) {
 			defer func() {
-				if errClose := conn.Close(); errClose != nil {
+				if errClose := c.Close(); errClose != nil {
 					s.Logger.Error("failed to close UDP connection", "error", errClose)
 				}
 			}()
 			for {
 				buf := make([]byte, 512)
-				n, addr, errRead := conn.ReadFrom(buf)
+				n, addr, errRead := c.ReadFrom(buf)
 				if errRead != nil {
 					continue
 				}
 				data := make([]byte, n)
 				copy(data, buf[:n])
-				s.udpQueue <- udpTask{addr: addr, data: data, conn: conn}
+				s.udpQueue <- udpTask{addr: addr, data: data, conn: c}
 			}
-		}(i)
+		}(conn)
+	}
+
+	if started == 0 {
+		return fmt.Errorf("failed to start any UDP listeners on %s", s.Addr)
 	}
 
 	// 2. UDP Workers
@@ -192,8 +199,12 @@ func (s *Server) Run() error {
 			}()
 		}
 
-		// 5. DoH Listener (Port 443)
-		dohAddr := net.JoinHostPort(host, "443")
+		// 5. DoH Listener
+		dohPort := os.Getenv("DOH_PORT")
+		if dohPort == "" {
+			dohPort = "443"
+		}
+		dohAddr := net.JoinHostPort(host, dohPort)
 		mux := http.NewServeMux()
 		mux.HandleFunc("/dns-query", s.handleDoH)
 		dohServer := &http.Server{
@@ -1099,29 +1110,44 @@ func (s *Server) checkPrerequisite(ctx context.Context, pr packet.DNSRecord) err
 	return nil
 }
 
+// applyUpdate processes a single record update from an RFC 2136 UPDATE message.
+// It maps the DNS record class to the appropriate repository operation:
+//   - Class ANY (255): Deletes an entire RRset (by name or name+type).
+//   - Class NONE (254): Deletes a specific RR (must match name, type, and RDATA).
+//   - Default Class (IN): Adds or replaces a record.
 func (s *Server) applyUpdate(ctx context.Context, zone *domain.Zone, up packet.DNSRecord) error {
+	// Standardize name for database lookups to ensure consistency.
+	upName := up.Name
+	if !strings.HasSuffix(upName, ".") {
+		upName += "."
+	}
+
 	switch up.Class {
-	case 255: // ANY
-		if up.Type == 255 { // ANY
-			return s.Repo.DeleteRecordsByName(ctx, zone.ID, up.Name)
-		} else {
-			qTypeStr := queryTypeToRecordType(up.Type)
-			return s.Repo.DeleteRecordsByNameAndType(ctx, zone.ID, up.Name, qTypeStr)
+	case 255: // ANY: Delete RRset (RFC 2136 Section 2.5.2)
+		if up.Type == 255 { // Type ANY: Delete all records for this name
+			return s.Repo.DeleteRecordsByName(ctx, zone.ID, upName)
 		}
-	case 254: // NONE
+		// Delete all records of a specific type for this name
+		qTypeStr := queryTypeToRecordType(up.Type)
+		return s.Repo.DeleteRecordsByNameAndType(ctx, zone.ID, upName, qTypeStr)
+
+	case 254: // NONE: Delete specific record (RFC 2136 Section 2.5.4)
 		qTypeStr := queryTypeToRecordType(up.Type)
 		dRec, errConv := repository.ConvertPacketRecordToDomain(up, zone.ID)
 		if errConv != nil {
 			return errConv
 		}
-		return s.Repo.DeleteRecordSpecific(ctx, zone.ID, up.Name, qTypeStr, dRec.Content)
-	default:
+		// Matches name, type, and content (RDATA)
+		return s.Repo.DeleteRecordSpecific(ctx, zone.ID, upName, qTypeStr, dRec.Content)
+
+	default: // Add record (RFC 2136 Section 2.5.1)
 		dRec, errConv := repository.ConvertPacketRecordToDomain(up, zone.ID)
 		if errConv != nil {
 			return errConv
 		}
+		dRec.Name = upName
 		if dRec.ID == "" {
-			// Use crand for secure ID generation (G404)
+			// Generate a cryptographically secure ID for new records.
 			var bid [16]byte
 			_, _ = crand.Read(bid[:])
 			dRec.ID = fmt.Sprintf("%d-%x", time.Now().UnixNano(), bid)

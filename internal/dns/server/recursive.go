@@ -91,7 +91,7 @@ func (s *Server) resolveRecursive(name string) (*packet.DNSPacket, error) {
 	return nil, fmt.Errorf("recursion failed after trying all roots: %w", lastErr)
 }
 
-func (s *Server) sendQuery(server string, name string, qtype packet.QueryType) (*packet.DNSPacket, error) {
+func (s *Server) sendQuery(server string, name string, _ packet.QueryType) (*packet.DNSPacket, error) {
 	conn, err := net.DialTimeout("udp", server, 5*time.Second)
 	if err != nil {
 		return nil, err
@@ -105,8 +105,8 @@ func (s *Server) sendQuery(server string, name string, qtype packet.QueryType) (
 	req.Questions = append(req.Questions, *packet.NewDNSQuestion(name, packet.A))
 
 	buffer := packet.NewBytePacketBuffer()
-	if err := req.Write(buffer); err != nil {
-		return nil, err
+	if errWrite := req.Write(buffer); errWrite != nil {
+		return nil, errWrite
 	}
 
 	_, err = conn.Write(buffer.Buf[:buffer.Position()])
@@ -116,15 +116,15 @@ func (s *Server) sendQuery(server string, name string, qtype packet.QueryType) (
 
 	resBuffer := packet.NewBytePacketBuffer()
 	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-	n, err := conn.Read(resBuffer.Buf)
-	if err != nil {
-		return nil, err
+	n, errRead := conn.Read(resBuffer.Buf)
+	if errRead != nil {
+		return nil, errRead
 	}
 	resBuffer.Buf = resBuffer.Buf[:n]
 
 	resp := packet.NewDNSPacket()
-	if err := resp.FromBuffer(resBuffer); err != nil {
-		return nil, err
+	if errFromBuf := resp.FromBuffer(resBuffer); errFromBuf != nil {
+		return nil, errFromBuf
 	}
 
 	return resp, nil
