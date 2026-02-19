@@ -23,6 +23,9 @@ func TestEndToEnd_Protocols(t *testing.T) {
 	svc := services.NewDNSService(repo)
 	dnsAddr := "127.0.0.1:10058"
 	apiAddr := "127.0.0.1:18083"
+	
+	// Use unprivileged port for DoH tests
+	t.Setenv("DOH_PORT", "10443")
 
 	dnsSrv := NewServer(dnsAddr, repo, nil)
 	// Mock TLS for DoT/DoH testing
@@ -59,7 +62,7 @@ func TestEndToEnd_Protocols(t *testing.T) {
 
 	rec := domain.Record{Name: "www.protocols.test.", Type: domain.TypeA, Content: "1.2.3.4", TTL: 60, ZoneID: createdZone.ID}
 	br, _ := json.Marshal(rec)
-	if resp, err := http.Post(fmt.Sprintf("http://%s/zones/%s/records", apiAddr, createdZone.ID), "application/json", bytes.NewBuffer(br)); err == nil { _ = resp.Body.Close() }
+	if resp2, err2 := http.Post(fmt.Sprintf("http://%s/zones/%s/records", apiAddr, createdZone.ID), "application/json", bytes.NewBuffer(br)); err2 == nil { _ = resp2.Body.Close() }
 
 	// 3. Test UDP
 	conn, err := net.Dial("udp", dnsAddr)
