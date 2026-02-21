@@ -3,6 +3,9 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/base32"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
@@ -349,6 +352,31 @@ func ConvertPacketRecordToDomain(pRec packet.DNSRecord, zoneID string) (domain.R
 		rec.Type = domain.TypeSOA
 		rec.Content = fmt.Sprintf("%s %s %d %d %d %d %d", 
 			pRec.MName, pRec.RName, pRec.Serial, pRec.Refresh, pRec.Retry, pRec.Expire, pRec.Minimum)
+	case packet.DNSKEY:
+		rec.Type = domain.RecordType("DNSKEY")
+		// "flags protocol algorithm public_key_base64"
+		rec.Content = fmt.Sprintf("%d %d %d %s", 
+			pRec.Flags, 3, pRec.Algorithm, base64.StdEncoding.EncodeToString(pRec.PublicKey))
+	case packet.DS:
+		rec.Type = domain.RecordType("DS")
+		// "key_tag algorithm digest_type digest_hex"
+		rec.Content = fmt.Sprintf("%d %d %d %s",
+			pRec.KeyTag, pRec.Algorithm, pRec.DigestType, hex.EncodeToString(pRec.Digest))
+	case packet.RRSIG:
+		rec.Type = domain.RecordType("RRSIG")
+		// "type_covered algorithm labels original_ttl expiration inception key_tag signer_name signature_base64"
+		rec.Content = fmt.Sprintf("%d %d %d %d %d %d %d %s %s",
+			pRec.TypeCovered, pRec.Algorithm, pRec.Labels, pRec.OrigTTL, pRec.Expiration, pRec.Inception, pRec.KeyTag, pRec.SignerName, base64.StdEncoding.EncodeToString(pRec.Signature))
+	case packet.NSEC:
+		rec.Type = domain.RecordType("NSEC")
+		// "next_name type_bitmap_hex"
+		rec.Content = fmt.Sprintf("%s %s", pRec.NextName, hex.EncodeToString(pRec.TypeBitMap))
+	case packet.NSEC3:
+		rec.Type = domain.RecordType("NSEC3")
+		// "hash_alg flags iterations salt_hex next_hash_base32 type_bitmap_hex"
+		// Using Hex for NextHash as per the read function for consistency in this internal format
+		rec.Content = fmt.Sprintf("%d %d %d %s %s %s",
+			pRec.HashAlg, pRec.Flags, pRec.Iterations, hex.EncodeToString(pRec.Salt), hex.EncodeToString(pRec.NextHash), hex.EncodeToString(pRec.TypeBitMap))
 	default:
 		return rec, fmt.Errorf("unsupported record type for conversion: %d", pRec.Type)
 	}
@@ -453,6 +481,144 @@ func ConvertDomainToPacketRecord(rec domain.Record) (packet.DNSRecord, error) {
 			}
 			if _, err := fmt.Sscanf(parts[6], "%d", &pRec.Minimum); err != nil {
 				return pRec, fmt.Errorf("failed to parse SOA minimum: %w", err)
+			}
+		}
+	case "DNSKEY":
+		pRec.Type = packet.DNSKEY
+		// Content: "flags protocol algorithm public_key_base64"
+		parts := strings.Fields(rec.Content)
+		if len(parts) >= 4 {
+			var flags, proto, alg uint16
+			if _, err := fmt.Sscanf(parts[0], "%d", &flags); err != nil {
+				return pRec, fmt.Errorf("failed to parse DNSKEY flags: %w", err)
+			}
+			if _, err := fmt.Sscanf(parts[1], "%d", &proto); err != nil {
+				return pRec, fmt.Errorf("failed to parse DNSKEY protocol: %w", err)
+			}
+			if _, err := fmt.Sscanf(parts[2], "%d", &alg); err != nil {
+				return pRec, fmt.Errorf("failed to parse DNSKEY algorithm: %w", err)
+			}
+			pRec.Flags = flags
+			pRec.Algorithm = uint8(alg) // #nosec G115
+			
+			keyData, err := base64.StdEncoding.DecodeString(parts[3])
+			if err == nil {
+				pRec.PublicKey = keyData
+			}
+		}
+	case "DS":
+		pRec.Type = packet.DS
+		// Content: "key_tag algorithm digest_type digest_hex"
+		parts := strings.Fields(rec.Content)
+		if len(parts) >= 4 {
+			var keyTag, alg, digestType uint16
+			if _, err := fmt.Sscanf(parts[0], "%d", &keyTag); err != nil {
+				return pRec, fmt.Errorf("failed to parse DS key tag: %w", err)
+			}
+			if _, err := fmt.Sscanf(parts[1], "%d", &alg); err != nil {
+				return pRec, fmt.Errorf("failed to parse DS algorithm: %w", err)
+			}
+			if _, err := fmt.Sscanf(parts[2], "%d", &digestType); err != nil {
+				return pRec, fmt.Errorf("failed to parse DS digest type: %w", err)
+			}
+			pRec.KeyTag = keyTag
+			pRec.Algorithm = uint8(alg) // #nosec G115
+			pRec.DigestType = uint8(digestType) // #nosec G115
+			
+			digest, err := hex.DecodeString(parts[3])
+			if err == nil {
+				pRec.Digest = digest
+			}
+		}
+	case "RRSIG":
+		pRec.Type = packet.RRSIG
+		// Content: "type_covered algorithm labels original_ttl expiration inception key_tag signer_name signature_base64"
+		parts := strings.Fields(rec.Content)
+		if len(parts) >= 9 {
+			var typeCovered, alg, labels, keyTag uint16
+			var origTTL, exp, inc uint32
+			
+			if _, err := fmt.Sscanf(parts[0], "%d", &typeCovered); err != nil {
+				return pRec, fmt.Errorf("failed to parse RRSIG type covered: %w", err)
+			}
+			if _, err := fmt.Sscanf(parts[1], "%d", &alg); err != nil {
+				return pRec, fmt.Errorf("failed to parse RRSIG algorithm: %w", err)
+			}
+			if _, err := fmt.Sscanf(parts[2], "%d", &labels); err != nil {
+				return pRec, fmt.Errorf("failed to parse RRSIG labels: %w", err)
+			}
+			if _, err := fmt.Sscanf(parts[3], "%d", &origTTL); err != nil {
+				return pRec, fmt.Errorf("failed to parse RRSIG original TTL: %w", err)
+			}
+			if _, err := fmt.Sscanf(parts[4], "%d", &exp); err != nil {
+				return pRec, fmt.Errorf("failed to parse RRSIG expiration: %w", err)
+			}
+			if _, err := fmt.Sscanf(parts[5], "%d", &inc); err != nil {
+				return pRec, fmt.Errorf("failed to parse RRSIG inception: %w", err)
+			}
+			if _, err := fmt.Sscanf(parts[6], "%d", &keyTag); err != nil {
+				return pRec, fmt.Errorf("failed to parse RRSIG key tag: %w", err)
+			}
+			
+			pRec.TypeCovered = typeCovered
+			pRec.Algorithm = uint8(alg) // #nosec G115
+			pRec.Labels = uint8(labels) // #nosec G115
+			pRec.OrigTTL = origTTL
+			pRec.Expiration = exp
+			pRec.Inception = inc
+			pRec.KeyTag = keyTag
+			pRec.SignerName = parts[7]
+			if !strings.HasSuffix(pRec.SignerName, ".") { pRec.SignerName += "." }
+			
+			sig, err := base64.StdEncoding.DecodeString(parts[8])
+			if err == nil {
+				pRec.Signature = sig
+			}
+		}
+	case "NSEC":
+		pRec.Type = packet.NSEC
+		// Content: "next_name type_bitmap_hex"
+		parts := strings.Fields(rec.Content)
+		if len(parts) >= 1 {
+			pRec.NextName = parts[0]
+			if !strings.HasSuffix(pRec.NextName, ".") { pRec.NextName += "." }
+			if len(parts) > 1 {
+				bitmapHex := strings.Join(parts[1:], "")
+				bitmap, err := hex.DecodeString(bitmapHex)
+				if err == nil {
+					pRec.TypeBitMap = bitmap
+				}
+			}
+		}
+	case "NSEC3":
+		pRec.Type = packet.NSEC3
+		// Content: "hash_alg flags iterations salt_hex next_hash_base32 type_bitmap_hex"
+		parts := strings.Fields(rec.Content)
+		if len(parts) >= 6 {
+			var hashAlg, flags, iterations uint16
+			if _, err := fmt.Sscanf(parts[0], "%d", &hashAlg); err != nil {
+				return pRec, fmt.Errorf("failed to parse NSEC3 hash algorithm: %w", err)
+			}
+			if _, err := fmt.Sscanf(parts[1], "%d", &flags); err != nil {
+				return pRec, fmt.Errorf("failed to parse NSEC3 flags: %w", err)
+			}
+			if _, err := fmt.Sscanf(parts[2], "%d", &iterations); err != nil {
+				return pRec, fmt.Errorf("failed to parse NSEC3 iterations: %w", err)
+			}
+			
+			pRec.HashAlg = uint8(hashAlg) // #nosec G115
+			pRec.Flags = flags
+			pRec.Iterations = iterations
+			
+			if salt, err := hex.DecodeString(parts[3]); err == nil {
+				pRec.Salt = salt
+			}
+			if nextHash, err := base32.HexEncoding.DecodeString(parts[4]); err == nil {
+				pRec.NextHash = nextHash
+			}
+			
+			if bitmap, err := hex.DecodeString(parts[5]); err == nil {
+				pRec.TypeBitMap = bitmap
 			}
 		}
 	default:
