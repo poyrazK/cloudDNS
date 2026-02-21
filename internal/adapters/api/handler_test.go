@@ -77,8 +77,10 @@ func (m *mockDNSService) ListAuditLogs(_ context.Context, tenantID string) ([]do
 	return []domain.AuditLog{{ID: "123", TenantID: tenantID}}, nil
 }
 
-func (m *mockDNSService) HealthCheck(_ context.Context) error {
-	return m.err
+func (m *mockDNSService) HealthCheck(_ context.Context) map[string]error {
+	res := make(map[string]error)
+	res["postgres"] = m.err
+	return res
 }
 
 func TestRegisterRoutes(_ *testing.T) {
