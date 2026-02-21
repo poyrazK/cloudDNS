@@ -91,29 +91,32 @@ func TestRFC1034_Recursion(t *testing.T) {
 	s := NewServer(":0", nil, nil)
 
 	// Mock queryFn to simulate iterative lookups: Root -> TLD -> Authoritative
-	s.queryFn = func(server string, name string, qtype packet.QueryType) (*packet.DNSPacket, error) {
-		resp := packet.NewDNSPacket()
-		resp.Header.ID = 1234
-		resp.Header.Response = true
-
-		if strings.Contains(server, ":53") && !strings.HasPrefix(server, "1.1.1.1") {
-			// Root server returns delegation to .com
-			resp.Authorities = append(resp.Authorities, packet.DNSRecord{
-				Name: "com.", Type: packet.NS, Host: "ns1.tld.",
-			})
-			resp.Resources = append(resp.Resources, packet.DNSRecord{
-				Name: "ns1.tld.", Type: packet.A, IP: net.ParseIP("1.1.1.1"),
-			})
-		} else if strings.HasPrefix(server, "1.1.1.1") {
-			// TLD server returns final answer
-			resp.Answers = append(resp.Answers, packet.DNSRecord{
-				Name: name, Type: qtype, TTL: 300, IP: net.ParseIP("10.20.30.40"),
-			})
+			// Mock queryFn to simulate iterative lookups: Root -> TLD -> Authoritative
+		// The recursiveResolver's `resolveRecursive` method, which uses this mock,
+		// does not inspect the transaction ID of the responses it receives.
+		// Therefore, a fixed ID is sufficient for this test's purpose.
+		s.queryFn = func(server string, name string, qtype packet.QueryType) (*packet.DNSPacket, error) {
+			resp := packet.NewDNSPacket()
+			resp.Header.ID = 1234 // Fixed ID for mock response, not validated by resolveRecursive
+			resp.Header.Response = true
+	
+			if strings.Contains(server, ":53") && !strings.HasPrefix(server, "1.1.1.1") {
+				// Root server returns delegation to .com
+				resp.Authorities = append(resp.Authorities, packet.DNSRecord{
+					Name: "com.", Type: packet.NS, Host: "ns1.tld.",
+				})
+				resp.Resources = append(resp.Resources, packet.DNSRecord{
+					Name: "ns1.tld.", Type: packet.A, IP: net.ParseIP("1.1.1.1"),
+				})
+			} else if strings.HasPrefix(server, "1.1.1.1") {
+				// TLD server returns final answer
+				resp.Answers = append(resp.Answers, packet.DNSRecord{
+					Name: name, Type: qtype, TTL: 300, IP: net.ParseIP("10.20.30.40"),
+				})
+			}
+			return resp, nil
 		}
-		return resp, nil
-	}
-
-	resp, err := s.resolveRecursive("test.com.")
+		resp, err := s.resolveRecursive("test.com.")
 	if err != nil {
 		t.Fatalf("Recursive resolve failed: %v", err)
 	}
