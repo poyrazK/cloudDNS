@@ -1,8 +1,10 @@
 package server
 
 import (
+	"crypto/rand"
+	"encoding/binary"
 	"fmt"
-	"math/rand"
+	mrand "math/rand"
 	"net"
 	"time"
 
@@ -36,7 +38,8 @@ func newRecursiveResolver() *recursiveResolver {
 func (r *recursiveResolver) getShuffledRoots() []string {
 	shuffled := make([]string, len(r.rootHints))
 	copy(shuffled, r.rootHints)
-	rand.Shuffle(len(shuffled), func(i, j int) {
+	// #nosec G404 -- Shuffling root hints for load balancing doesn't require crypto/rand
+	mrand.Shuffle(len(shuffled), func(i, j int) {
 		shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
 	})
 	return shuffled
@@ -91,6 +94,12 @@ func (s *Server) resolveRecursive(name string) (*packet.DNSPacket, error) {
 	return nil, fmt.Errorf("recursion failed after trying all roots: %w", lastErr)
 }
 
+func generateTransactionID() uint16 {
+	var id uint16
+	_ = binary.Read(rand.Reader, binary.BigEndian, &id)
+	return id
+}
+
 func (s *Server) sendQuery(server string, name string, _ packet.QueryType) (*packet.DNSPacket, error) {
 	conn, err := net.DialTimeout("udp", server, 5*time.Second)
 	if err != nil {
@@ -99,7 +108,7 @@ func (s *Server) sendQuery(server string, name string, _ packet.QueryType) (*pac
 	defer func() { _ = conn.Close() }()
 
 	req := packet.NewDNSPacket()
-	req.Header.ID = 1234
+	req.Header.ID = generateTransactionID()
 	req.Header.Questions = 1
 	req.Header.RecursionDesired = false // Iterative
 	req.Questions = append(req.Questions, *packet.NewDNSQuestion(name, packet.A))
@@ -125,6 +134,10 @@ func (s *Server) sendQuery(server string, name string, _ packet.QueryType) (*pac
 	resp := packet.NewDNSPacket()
 	if errFromBuf := resp.FromBuffer(resBuffer); errFromBuf != nil {
 		return nil, errFromBuf
+	}
+
+	if resp.Header.ID != req.Header.ID {
+		return nil, fmt.Errorf("transaction ID mismatch: expected %d, got %d", req.Header.ID, resp.Header.ID)
 	}
 
 	return resp, nil
