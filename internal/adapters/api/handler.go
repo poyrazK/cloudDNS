@@ -134,6 +134,13 @@ func (h *APIHandler) CreateRecord(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if record.Type == domain.TypeSRV {
+		if err := domain.ValidateSRVContent(record.Content); err != nil {
+			http.Error(w, "Invalid SRV content: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+
 	record.ZoneID = zoneID
 
 	if err := h.svc.CreateRecord(r.Context(), &record); err != nil {
