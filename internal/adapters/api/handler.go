@@ -33,15 +33,33 @@ func (h *APIHandler) RegisterRoutes(mux *http.ServeMux) {
 
 // HealthCheck handles health check requests.
 func (h *APIHandler) HealthCheck(w http.ResponseWriter, r *http.Request) {
-	if err := h.svc.HealthCheck(r.Context()); err != nil {
-		http.Error(w, "Degraded: "+err.Error(), http.StatusServiceUnavailable)
-		return
+	status := "UP"
+	details := make(map[string]string)
+	checks := h.svc.HealthCheck(r.Context())
+
+	for name, err := range checks {
+		if err != nil {
+			status = "DEGRADED"
+			details[name] = err.Error()
+		} else {
+			details[name] = "OK"
+		}
+	}
+
+	if status == "DEGRADED" {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	} else {
+		w.WriteHeader(http.StatusOK)
+	}
+
+	resp := map[string]interface{}{
+		"status":  status,
+		"details": details,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	if _, err := w.Write([]byte(`{"status":"UP"}`)); err != nil {
-		log.Printf("failed to write health check response: %v", err)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		log.Printf("failed to encode health check response: %v", err)
 	}
 }
 
