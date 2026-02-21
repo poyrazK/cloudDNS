@@ -1,3 +1,4 @@
+// Package services implements the core business logic for cloudDNS.
 package services
 
 import (
@@ -16,10 +17,12 @@ import (
 	"github.com/poyrazK/cloudDNS/internal/dns/packet"
 )
 
+// DNSSECService provides functionality for managing DNSSEC keys and signing RRsets.
 type DNSSECService struct {
 	repo ports.DNSRepository
 }
 
+// NewDNSSECService creates and returns a new DNSSECService instance.
 func NewDNSSECService(repo ports.DNSRepository) *DNSSECService {
 	return &DNSSECService{repo: repo}
 }

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"net"
+	"strings"
 	"testing"
 
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
@@ -101,7 +102,7 @@ func TestHandleUpdateDeleteRRSet(t *testing.T) {
 	_ = req.Write(buffer)
 	data := buffer.Buf[:buffer.Position()]
 
-	if err := srv.handlePacket(data, "127.0.0.1:12345", func(resp []byte) error { return nil }); err != nil {
+	if err := srv.handlePacket(data, "127.0.0.1:12345", func(_ []byte) error { return nil }); err != nil {
 		t.Errorf("handlePacket failed: %v", err)
 	}
 
@@ -185,7 +186,7 @@ func TestHandleUpdateMorePrereqs(t *testing.T) {
 	
 	buf := packet.NewBytePacketBuffer()
 	_ = req.Write(buf)
-	if err := srv.handlePacket(buf.Buf[:buf.Position()], "127.0.0.1:1", func(resp []byte) error {
+	if err := srv.handlePacket(buf.Buf[:buf.Position()], "127.0.0.1:1", func(_ []byte) error {
 		return nil
 	}); err != nil {
 		t.Errorf("handlePacket failed: %v", err)
@@ -236,14 +237,16 @@ func TestHandleUpdateDeleteSpecific(t *testing.T) {
 
 	buf := packet.NewBytePacketBuffer()
 	_ = req.Write(buf)
-	if err := srv.handlePacket(buf.Buf[:buf.Position()], "127.0.0.1:1", func(resp []byte) error { return nil }); err != nil {
+	if err := srv.handlePacket(buf.Buf[:buf.Position()], "127.0.0.1:1", func(_ []byte) error { return nil }); err != nil {
 		t.Errorf("handlePacket failed: %v", err)
 	}
 
 	// Verify only 2.2.2.2 remains
 	count := 0
 	for _, r := range repo.records {
-		if r.Name == "www.test." && r.Type == domain.TypeA { count++ }
+		if strings.TrimSuffix(r.Name, ".") == "www.test" && r.Type == domain.TypeA {
+			count++
+		}
 	}
 	if count != 1 {
 		t.Errorf("Expected 1 record to remain, got %d", count)

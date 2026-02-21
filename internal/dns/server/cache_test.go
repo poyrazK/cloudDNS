@@ -38,7 +38,7 @@ func TestCacheExpiration(t *testing.T) {
 	}
 }
 
-func TestCacheConcurrency(t *testing.T) {
+func TestCacheConcurrency(_ *testing.T) {
 	cache := NewDNSCache()
 	
 	// Simple smoke test for concurrent access
@@ -47,5 +47,32 @@ func TestCacheConcurrency(t *testing.T) {
 			cache.Set("key", []byte{byte(n)}, 1*time.Hour)
 			cache.Get("key")
 		}(i)
+	}
+}
+
+func TestCacheCleanup(t *testing.T) {
+	cache := NewDNSCache()
+	cache.Set("keep", []byte{1}, 1*time.Hour)
+	cache.Set("drop", []byte{2}, -1*time.Hour) // Already expired
+	
+	cache.Cleanup()
+	
+	_, foundKeep := cache.Get("keep")
+	if !foundKeep {
+		t.Errorf("Expected to keep 'keep' key")
+	}
+	
+	// Get() also checks expiration, but let's check shards directly or trust Get()
+	// Actually Get() returning false means it works.
+}
+
+func TestCacheFlush(t *testing.T) {
+	cache := NewDNSCache()
+	cache.Set("a", []byte{1}, 1*time.Hour)
+	cache.Flush()
+	
+	_, found := cache.Get("a")
+	if found {
+		t.Errorf("Expected cache to be empty after flush")
 	}
 }

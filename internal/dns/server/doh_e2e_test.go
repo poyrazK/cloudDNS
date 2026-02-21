@@ -50,8 +50,8 @@ func TestDoH_E2E(t *testing.T) {
 	resPacket := packet.NewDNSPacket()
 	resBuf := packet.NewBytePacketBuffer()
 	resBuf.Load(resBody)
-	if err := resPacket.FromBuffer(resBuf); err != nil {
-		t.Fatalf("Failed to parse DoH response: %v", err)
+	if errFromBuf := resPacket.FromBuffer(resBuf); errFromBuf != nil {
+		t.Fatalf("Failed to parse DoH response: %v", errFromBuf)
 	}
 
 	if len(resPacket.Answers) != 1 || resPacket.Answers[0].IP.String() != "9.9.9.9" {

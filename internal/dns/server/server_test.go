@@ -5,6 +5,7 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -21,35 +22,41 @@ type mockServerRepo struct {
 	keys    []domain.DNSSECKey
 }
 
-func (m *mockServerRepo) GetRecords(ctx context.Context, name string, qType domain.RecordType, clientIP string) ([]domain.Record, error) {
+func (m *mockServerRepo) GetRecords(_ context.Context, name string, qType domain.RecordType, clientIP string) ([]domain.Record, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	var res []domain.Record
+	qName := strings.TrimSuffix(strings.ToLower(name), ".")
 	for _, r := range m.records {
-		if r.Name == name && (qType == "" || r.Type == qType) {
+		rName := strings.TrimSuffix(strings.ToLower(r.Name), ".")
+		if rName == qName && (qType == "" || r.Type == qType) {
 			res = append(res, r)
 		}
 	}
 	return res, nil
 }
 
-func (m *mockServerRepo) GetIPsForName(ctx context.Context, name string, clientIP string) ([]string, error) {
+func (m *mockServerRepo) GetIPsForName(_ context.Context, name string, clientIP string) ([]string, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	var res []string
+	qName := strings.TrimSuffix(strings.ToLower(name), ".")
 	for _, r := range m.records {
-		if r.Name == name && r.Type == domain.TypeA {
+		rName := strings.TrimSuffix(strings.ToLower(r.Name), ".")
+		if rName == qName && r.Type == domain.TypeA {
 			res = append(res, r.Content)
 		}
 	}
 	return res, nil
 }
 
-func (m *mockServerRepo) GetZone(ctx context.Context, name string) (*domain.Zone, error) {
+func (m *mockServerRepo) GetZone(_ context.Context, name string) (*domain.Zone, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	qName := strings.TrimSuffix(strings.ToLower(name), ".")
 	for _, z := range m.zones {
-		if z.Name == name {
+		zName := strings.TrimSuffix(strings.ToLower(z.Name), ".")
+		if zName == qName {
 			return &z, nil
 		}
 	}
@@ -136,12 +143,32 @@ func (m *mockServerRepo) DeleteRecord(ctx context.Context, recordID string, zone
 	return nil
 }
 
+func (m *mockServerRepo) DeleteRecordSpecific(ctx context.Context, zoneID string, name string, qType domain.RecordType, content string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var next []domain.Record
+	// Standardize input name
+	stdName := strings.TrimSuffix(strings.ToLower(name), ".")
+	for _, r := range m.records {
+		// Standardize record name
+		stdRName := strings.TrimSuffix(strings.ToLower(r.Name), ".")
+		if r.ZoneID == zoneID && stdRName == stdName && r.Type == qType && r.Content == content {
+			continue
+		}
+		next = append(next, r)
+	}
+	m.records = next
+	return nil
+}
+
 func (m *mockServerRepo) DeleteRecordsByNameAndType(ctx context.Context, zoneID string, name string, qType domain.RecordType) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var next []domain.Record
+	qName := strings.TrimSuffix(strings.ToLower(name), ".")
 	for _, r := range m.records {
-		if r.ZoneID == zoneID && r.Name == name && r.Type == qType {
+		rName := strings.TrimSuffix(strings.ToLower(r.Name), ".")
+		if r.ZoneID == zoneID && rName == qName && r.Type == qType {
 			continue
 		}
 		next = append(next, r)
@@ -154,22 +181,10 @@ func (m *mockServerRepo) DeleteRecordsByName(ctx context.Context, zoneID string,
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var next []domain.Record
+	qName := strings.TrimSuffix(strings.ToLower(name), ".")
 	for _, r := range m.records {
-		if r.ZoneID == zoneID && r.Name == name {
-			continue
-		}
-		next = append(next, r)
-	}
-	m.records = next
-	return nil
-}
-
-func (m *mockServerRepo) DeleteRecordSpecific(ctx context.Context, zoneID string, name string, qType domain.RecordType, content string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	var next []domain.Record
-	for _, r := range m.records {
-		if r.ZoneID == zoneID && r.Name == name && r.Type == qType && r.Content == content {
+		rName := strings.TrimSuffix(strings.ToLower(r.Name), ".")
+		if r.ZoneID == zoneID && rName == qName {
 			continue
 		}
 		next = append(next, r)
@@ -519,6 +534,15 @@ func TestSendTCPError(t *testing.T) {
 
 	if p.Header.ResCode != 4 || p.Header.ID != 1234 {
 		t.Errorf("Invalid TCP error response")
+	}
+}
+
+func TestServer_RunError(t *testing.T) {
+	// Privileged port should fail on non-root
+	srv := NewServer("127.0.0.1:1", nil, nil)
+	err := srv.Run()
+	if err == nil {
+		t.Errorf("Expected error when running on privileged port 1")
 	}
 }
 

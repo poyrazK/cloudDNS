@@ -280,7 +280,11 @@ func runScaleTest(count int, concurrency int) {
 
 	// 2. Heavy Seeding
 	db, _ := sql.Open("pgx", fmt.Sprintf("postgres://postgres:password@%s:%s/clouddns?sslmode=disable", pgHost, pgPort.Port()))
-	schema, _ := os.ReadFile("internal/adapters/repository/schema.sql")
+	schema, err := os.ReadFile("internal/adapters/repository/schema.sql")
+	if err != nil {
+		fmt.Printf("Failed to read schema file: %v\n", err)
+		return
+	}
 	_, _ = db.ExecContext(ctx, string(schema))
 
 	zoneID := uuid.New()

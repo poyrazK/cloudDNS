@@ -289,7 +289,14 @@ func TestReadWriteAllTypes(t *testing.T) {
 		{Name: "ns.test.", Type: NS, TTL: 300, Host: "ns1.test."},
 		{Name: "cname.test.", Type: CNAME, TTL: 300, Host: "real.test."},
 		{Name: "mx.test.", Type: MX, TTL: 300, Priority: 10, Host: "mail.test."},
-		{Name: "", Type: OPT, UDPPayloadSize: 4096, TTL: 0}, // EDNS
+		{Name: "", Type: OPT, Class: 4096, UDPPayloadSize: 4096, TTL: 0}, // EDNS
+		{Name: "hinfo.test.", Type: HINFO, CPU: "ARM64", OS: "LINUX", TTL: 300},
+		{Name: "minfo.test.", Type: MINFO, RMailBX: "a.test.", EMailBX: "b.test.", TTL: 300},
+		{Name: "dnskey.test.", Type: DNSKEY, Flags: 256, Algorithm: 13, PublicKey: []byte{1, 2, 3, 4}, TTL: 300},
+		{Name: "ds.test.", Type: DS, KeyTag: 123, Algorithm: 13, DigestType: 2, Digest: []byte{1, 2, 3, 4}, TTL: 300},
+		{Name: "nsec.test.", Type: NSEC, NextName: "next.test.", TypeBitMap: []byte{0, 1, 2}, TTL: 300},
+		{Name: "nsec3param.test.", Type: NSEC3PARAM, HashAlg: 1, Iterations: 10, Salt: []byte{1, 2}, TTL: 300},
+		{Name: "srv.test.", Type: SRV, Priority: 10, Class: 1, TTL: 300},
 	}
 
 	for _, rec := range records {
@@ -330,6 +337,14 @@ func TestReadWriteAllTypes(t *testing.T) {
 		case OPT:
 			if parsed.UDPPayloadSize != 4096 {
 				t.Errorf("OPT: Expected size 4096, got %d", parsed.UDPPayloadSize)
+			}
+		case HINFO:
+			if parsed.CPU != rec.CPU || parsed.OS != rec.OS {
+				t.Errorf("HINFO mismatch")
+			}
+		case MINFO:
+			if parsed.RMailBX != rec.RMailBX || parsed.EMailBX != rec.EMailBX {
+				t.Errorf("MINFO mismatch")
 			}
 		}
 	}
@@ -840,6 +855,104 @@ func TestBuffer_EdgeCases(t *testing.T) {
 	}
 }
 
+func TestDNSPacket_WriteAllSections(t *testing.T) {
+	p := NewDNSPacket()
+	p.Header.ID = 1
+	p.Questions = append(p.Questions, DNSQuestion{Name: "q.test.", QType: A})
+	p.Answers = append(p.Answers, DNSRecord{Name: "q.test.", Type: A, IP: net.ParseIP("1.1.1.1"), TTL: 60, Class: 1})
+	p.Authorities = append(p.Authorities, DNSRecord{Name: "q.test.", Type: NS, Host: "ns.test.", TTL: 60, Class: 1})
+	p.Resources = append(p.Resources, DNSRecord{Name: "ns.test.", Type: A, IP: net.ParseIP("2.2.2.2"), TTL: 60, Class: 1})
+
+	buf := NewBytePacketBuffer()
+	if err := p.Write(buf); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+
+	if p.Header.Questions != 1 || p.Header.Answers != 1 || p.Header.AuthoritativeEntries != 1 || p.Header.ResourceEntries != 1 {
+		t.Errorf("Header counts not updated correctly: %+v", p.Header)
+	}
+
+	if err := buf.Seek(0); err != nil {
+		t.Fatalf("Seek failed: %v", err)
+	}
+	parsed := NewDNSPacket()
+	if err := parsed.FromBuffer(buf); err != nil {
+		t.Fatalf("FromBuffer failed: %v", err)
+	}
+
+	if len(parsed.Questions) != 1 || len(parsed.Answers) != 1 || len(parsed.Authorities) != 1 || len(parsed.Resources) != 1 {
+		t.Errorf("Parsed sections length mismatch: Q:%d A:%d Auth:%d Add:%d",
+			len(parsed.Questions), len(parsed.Answers), len(parsed.Authorities), len(parsed.Resources))
+	}
+}
+
+func TestDNSRecord_ExtraTypes(t *testing.T) {
+	records := []DNSRecord{
+		{Name: "null.test.", Type: NULL, Data: []byte{1, 2, 3, 4}, TTL: 60, Class: 1},
+		{Name: "unknown.test.", Type: QueryType(999), Data: []byte{5, 6}, TTL: 60, Class: 1},
+		{Name: "nsec3.test.", Type: NSEC3, HashAlg: 1, Iterations: 5, Salt: []byte{0xAB}, NextHash: []byte{1, 2, 3}, TypeBitMap: []byte{0, 1, 2}, TTL: 60, Class: 1},
+		{Name: "ds.test.", Type: DS, KeyTag: 1234, Algorithm: 13, DigestType: 2, Digest: []byte{0xDE, 0xAD}, TTL: 60, Class: 1},
+		{Name: "nsec.test.", Type: NSEC, NextName: "z.test.", TypeBitMap: []byte{0, 1}, TTL: 60, Class: 1},
+		{Name: "dnskey.test.", Type: DNSKEY, Flags: 256, Algorithm: 13, PublicKey: []byte{1, 2, 3}, TTL: 60, Class: 1},
+		{Name: "rrsig.test.", Type: RRSIG, TypeCovered: uint16(A), Algorithm: 13, Labels: 2, OrigTTL: 3600, Expiration: 1000, Inception: 500, KeyTag: 1, SignerName: "test.", Signature: []byte{1, 2}, TTL: 60, Class: 1},
+	}
+
+	for _, rec := range records {
+		buf := NewBytePacketBuffer()
+		_, err := rec.Write(buf)
+		if err != nil {
+			t.Errorf("Write failed for %v: %v", rec.Type, err)
+			continue
+		}
+
+		if err := buf.Seek(0); err != nil {
+			t.Errorf("Seek failed: %v", err)
+			continue
+		}
+		parsed := DNSRecord{}
+		if err := parsed.Read(buf); err != nil {
+			t.Errorf("Read failed for %v: %v", rec.Type, err)
+			continue
+		}
+
+		if parsed.Type != rec.Type {
+			t.Errorf("Type mismatch for %v: got %v", rec.Type, parsed.Type)
+		}
+		
+		switch rec.Type {
+		case DS:
+			if parsed.KeyTag != rec.KeyTag || string(parsed.Digest) != string(rec.Digest) {
+				t.Errorf("DS mismatch")
+			}
+		case NSEC:
+			if parsed.NextName != rec.NextName {
+				t.Errorf("NSEC mismatch")
+			}
+		case DNSKEY:
+			if parsed.Flags != rec.Flags || string(parsed.PublicKey) != string(rec.PublicKey) {
+				t.Errorf("DNSKEY mismatch")
+			}
+		}
+	}
+}
+
+func TestDNSRecord_ReadTruncated(t *testing.T) {
+	// Create a valid A record buffer then truncate it
+	rec := DNSRecord{Name: "a.", Type: A, Class: 1, TTL: 60, IP: net.ParseIP("1.1.1.1")}
+	buf := NewBytePacketBuffer()
+	_, _ = rec.Write(buf)
+	data := buf.Buf[:buf.Position()-1] // Truncate last byte of IP
+	
+	truncatedBuf := NewBytePacketBuffer()
+	truncatedBuf.Load(data)
+	
+	parsed := DNSRecord{}
+	err := parsed.Read(truncatedBuf)
+	if err == nil {
+		t.Errorf("Expected error when reading truncated record")
+	}
+}
+
 func TestTSIG_SignVerify(t *testing.T) {
 	// 1. Create a standard DNS query
 	p := NewDNSPacket()
@@ -850,7 +963,6 @@ func TestTSIG_SignVerify(t *testing.T) {
 	secret := []byte("secret")
 	
 	// 2. Proactively write the packet to the buffer (WITHOUT TSIG yet)
-	// RFC 2845: MAC is computed over the wire-format DNS message.
 	if err := p.Write(buf); err != nil {
 		t.Fatalf("Failed to write packet: %v", err)
 	}
@@ -869,13 +981,22 @@ func TestTSIG_SignVerify(t *testing.T) {
 		t.Fatalf("FromBuffer failed: %v", err)
 	}
 	
-	// 5. Verify the TSIG starting position was correctly tracked during parsing
-	if parsed.TSIGStart == -1 {
-		t.Fatalf("TSIG record not found or incorrectly tracked in parsed packet")
-	}
-	
-	// 6. Perform HMAC verification
+	// 5. Verify successful verification
 	if err := parsed.VerifyTSIG(data, parsed.TSIGStart, secret); err != nil {
 		t.Errorf("VerifyTSIG validation failed: %v", err)
 	}
+
+	// 6. Test MAC mismatch
+	if err := parsed.VerifyTSIG(data, parsed.TSIGStart, []byte("wrong")); err == nil {
+		t.Errorf("VerifyTSIG should have failed with wrong secret")
+	}
+
+	// 7. Test time drift
+	tsigRec := &parsed.Resources[len(parsed.Resources)-1]
+	originalTime := tsigRec.TimeSigned
+	tsigRec.TimeSigned -= 1000 // 1000 seconds drift (Fudge is 300)
+	if err := parsed.VerifyTSIG(data, parsed.TSIGStart, secret); err == nil || !strings.Contains(err.Error(), "drift") {
+		t.Errorf("Expected time drift error, got %v", err)
+	}
+	tsigRec.TimeSigned = originalTime
 }

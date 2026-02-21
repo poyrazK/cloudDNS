@@ -1,22 +1,33 @@
+// Package domain contains the core business logic and entities for cloudDNS.
 package domain
 
 import (
 	"time"
 )
 
+// RecordType represents the type of a DNS record (e.g., A, AAAA, MX).
 type RecordType string
 
 const (
+	// TypeA represents an IPv4 address record.
 	TypeA     RecordType = "A"
+	// TypeAAAA represents an IPv6 address record.
 	TypeAAAA  RecordType = "AAAA"
+	// TypeCNAME represents a canonical name record.
 	TypeCNAME RecordType = "CNAME"
+	// TypeMX represents a mail exchange record.
 	TypeMX    RecordType = "MX"
+	// TypeTXT represents a text record.
 	TypeTXT   RecordType = "TXT"
+	// TypeNS represents a name server record.
 	TypeNS    RecordType = "NS"
+	// TypeSOA represents a start of authority record.
 	TypeSOA   RecordType = "SOA"
+	// TypePTR represents a pointer record.
 	TypePTR   RecordType = "PTR"
 )
 
+// Zone represents a DNS zone.
 type Zone struct {
 	ID          string    `json:"id"`
 	TenantID    string    `json:"tenant_id"`
@@ -27,6 +38,7 @@ type Zone struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
+// Record represents a DNS resource record within a zone.
 type Record struct {
 	ID        string     `json:"id"`
 	ZoneID    string     `json:"zone_id"`
@@ -40,6 +52,7 @@ type Record struct {
 	UpdatedAt time.Time  `json:"updated_at"`
 }
 
+// ZoneChange represents a historical change to a DNS zone, used for IXFR and auditing.
 type ZoneChange struct {
 	ID        string     `json:"id"`
 	ZoneID    string     `json:"zone_id"`
@@ -53,6 +66,7 @@ type ZoneChange struct {
 	CreatedAt time.Time  `json:"created_at"`
 }
 
+// AuditLog records administrative actions performed on the DNS system.
 type AuditLog struct {
 	ID         string    `json:"id"`
 	TenantID   string    `json:"tenant_id"`
@@ -63,6 +77,7 @@ type AuditLog struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
+// DNSSECKey represents a cryptographic key used for DNSSEC signing.
 type DNSSECKey struct {
 	ID         string    `json:"id"`
 	ZoneID     string    `json:"zone_id"`

@@ -1,3 +1,4 @@
+// Package packet provides functionality for parsing and serializing DNS packets.
 package packet
 
 import (
@@ -7,7 +8,8 @@ import (
 	"time"
 )
 
-// VerifyTSIG checks if the TSIG record in the packet matches the provided key
+// VerifyTSIG checks if the TSIG record in the packet matches the provided key and secret (RFC 2845).
+// It validates the signature and ensures the time drift is within acceptable limits.
 func (p *DNSPacket) VerifyTSIG(rawBuffer []byte, tsigStart int, secret []byte) error {
 	// 1. Find TSIG record (must be the last record in additional)
 	if len(p.Resources) == 0 {
@@ -72,6 +74,8 @@ func (p *DNSPacket) VerifyTSIG(rawBuffer []byte, tsigStart int, secret []byte) e
 	return nil
 }
 
+// SignTSIG signs the DNS packet with a TSIG record using the provided key and secret.
+// It appends the TSIG record to the additional section and updates the packet header.
 func (p *DNSPacket) SignTSIG(buffer *BytePacketBuffer, keyName string, secret []byte) error {
 	// 1. Prepare TSIG Record (without MAC yet)
 	tsig := DNSRecord{

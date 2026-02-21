@@ -85,6 +85,9 @@ func TestRFC1034_WildcardMatching(t *testing.T) {
 
 // RFC 1034: Recursion Logic (Simulated)
 func TestRFC1034_Recursion(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping slow recursive lookup test in short mode")
+	}
 	s := NewServer(":0", nil, nil)
 
 	// Mock queryFn to simulate iterative lookups: Root -> TLD -> Authoritative

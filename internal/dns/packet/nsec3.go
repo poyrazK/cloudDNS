@@ -1,3 +1,4 @@
+// Package packet provides functionality for parsing and serializing DNS packets.
 package packet
 
 import (
@@ -5,7 +6,8 @@ import (
 	"strings"
 )
 
-// RFC 5155: NSEC3 Hashing
+// HashName performs NSEC3 name hashing according to RFC 5155.
+// It implements the iterative hashing process with salt.
 func HashName(name string, _ uint8, iterations uint16, salt []byte) []byte {
 	// 1. Canonicalize name (lowercase and wire format)
 	name = strings.ToLower(name)
@@ -44,6 +46,7 @@ func HashName(name string, _ uint8, iterations uint16, salt []byte) []byte {
 // Note: This is NOT standard RFC 4648 Base32. It uses a specific character set.
 const nsec3Base32Map = "0123456789abcdefghijklmnopqrstuv"
 
+// Base32Encode encodes binary data into the NSEC3-specific Base32 representation.
 func Base32Encode(data []byte) string {
 	var res strings.Builder
 	// Process bits in 5-bit chunks

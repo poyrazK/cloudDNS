@@ -14,10 +14,12 @@ import (
 	"github.com/poyrazK/cloudDNS/internal/dns/packet"
 )
 
+// PostgresRepository implements ports.DNSRepository using PostgreSQL.
 type PostgresRepository struct {
 	db *sql.DB
 }
 
+// NewPostgresRepository creates and returns a new PostgresRepository instance.
 func NewPostgresRepository(db *sql.DB) *PostgresRepository {
 	return &PostgresRepository{db: db}
 }
