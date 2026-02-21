@@ -78,6 +78,14 @@ func (c *DNSCache) Set(key string, data []byte, ttl time.Duration) {
 	}
 }
 
+// Invalidate removes a specific key from the cache.
+func (c *DNSCache) Invalidate(key string) {
+	shard := c.getShard(key)
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+	delete(shard.items, key)
+}
+
 // Flush removes all items from all shards in the cache.
 func (c *DNSCache) Flush() {
 	for i := 0; i < shardCount; i++ {
