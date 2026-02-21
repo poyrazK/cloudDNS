@@ -7,8 +7,8 @@ import (
 
 func TestRun_EarlyExit(t *testing.T) {
 	// Set environment variables to trigger the test-only early exit path
-	_ = os.Setenv("DATABASE_URL", "none")
-	defer func() { _ = os.Unsetenv("DATABASE_URL") }() 
+	t.Setenv("DATABASE_URL", "none")
+	t.Setenv("API_ADDR", "test-exit")
 
 	if err := run(); err != nil {
 		t.Errorf("run() failed: %v", err)
@@ -16,33 +16,35 @@ func TestRun_EarlyExit(t *testing.T) {
 }
 
 func TestRun_FullInit(t *testing.T) {
-	_ = os.Setenv("DATABASE_URL", "postgres://user:pass@localhost:5432/db?sslmode=disable")
-	_ = os.Setenv("API_ADDR", "test-exit")
-	defer func() { _ = os.Unsetenv("DATABASE_URL") }() 
-	defer func() { _ = os.Unsetenv("API_ADDR") }() 
+	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost:5432/db?sslmode=disable")
+	t.Setenv("API_ADDR", "test-exit")
 
 	if err := run(); err != nil {
 		t.Errorf("run() failed: %v", err)
 	}
 }
 
-func TestMainCall(_ *testing.T) {
-	_ = os.Setenv("DATABASE_URL", "none")
-	defer func() { _ = os.Unsetenv("DATABASE_URL") }()
+func TestMainCall(t *testing.T) {
+	t.Setenv("DATABASE_URL", "none")
+	t.Setenv("API_ADDR", "test-exit")
 	main()
 }
 
-func TestRun_ConfigErrors(_ *testing.T) {
-	// 1. Missing DB URL
-	_ = os.Unsetenv("DATABASE_URL")
-	// run() might have a default or just fail to connect.
+func TestRun_ConfigErrors(t *testing.T) {
+	t.Setenv("API_ADDR", "test-exit")
+
+	// 1. Missing DB URL (unset explicitly for this test logic if needed, 
+	// though t.Setenv isolated to test)
+	err := os.Unsetenv("DATABASE_URL")
+	if err != nil {
+		t.Fatalf("failed to unset env: %v", err)
+	}
+	
 	// We just want to hit the path.
 	_ = run()
 
 	// 2. Invalid port
-	_ = os.Setenv("DATABASE_URL", "none")
-	_ = os.Setenv("DNS_ADDR", "127.0.0.1:invalid")
-	defer func() { _ = os.Unsetenv("DNS_ADDR") }()
+	t.Setenv("DATABASE_URL", "none")
+	t.Setenv("DNS_ADDR", "127.0.0.1:invalid")
 	_ = run()
 }
-// dummy change to trigger CI
