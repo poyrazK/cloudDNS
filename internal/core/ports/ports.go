@@ -44,5 +44,6 @@ type DNSService interface {
 	DeleteZone(ctx context.Context, zoneID string, tenantID string) error
 	DeleteRecord(ctx context.Context, recordID string, zoneID string) error
 	ImportZone(ctx context.Context, tenantID string, r io.Reader) (*domain.Zone, error)
+	ListAuditLogs(ctx context.Context, tenantID string) ([]domain.AuditLog, error)
 	HealthCheck(ctx context.Context) error
 }

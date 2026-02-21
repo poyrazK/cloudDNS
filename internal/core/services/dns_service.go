@@ -183,6 +183,11 @@ func (s *dnsService) ImportZone(ctx context.Context, tenantID string, r io.Reade
 	return zone, nil
 }
 
+// ListAuditLogs retrieves audit trail entries for a specific tenant.
+func (s *dnsService) ListAuditLogs(ctx context.Context, tenantID string) ([]domain.AuditLog, error) {
+	return s.repo.GetAuditLogs(ctx, tenantID)
+}
+
 func (s *dnsService) HealthCheck(ctx context.Context) error {
 	return s.repo.Ping(ctx)
 }
