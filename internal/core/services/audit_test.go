@@ -48,7 +48,7 @@ func (m *auditMockRepo) UpdateKey(ctx context.Context, key *domain.DNSSECKey) er
 
 func TestAuditLogCreation(t *testing.T) {
 	repo := &auditMockRepo{}
-	svc := NewDNSService(repo)
+	svc := NewDNSService(repo, nil)
 
 	// 1. Create Zone
 	zone := &domain.Zone{Name: "audit.test.", TenantID: "t1"}

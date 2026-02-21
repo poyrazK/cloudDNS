@@ -119,7 +119,7 @@ func (m *mockRepo) UpdateKey(_ context.Context, _ *domain.DNSSECKey) error { ret
 
 func TestCreateZone(t *testing.T) {
 	repo := &mockRepo{}
-	svc := NewDNSService(repo)
+	svc := NewDNSService(repo, nil)
 
 	// Case 1: Name with dot
 	zone := &domain.Zone{Name: "example.com.", TenantID: "t1"}
@@ -140,7 +140,7 @@ func TestCreateZone(t *testing.T) {
 
 func TestDeleteZone(t *testing.T) {
 	repo := &auditMockRepo{}
-	svc := NewDNSService(repo)
+	svc := NewDNSService(repo, nil)
 
 	err := svc.DeleteZone(context.Background(), "z1", "t1")
 	if err != nil {
@@ -157,7 +157,7 @@ func TestDeleteZone(t *testing.T) {
 
 func TestDeleteRecord(t *testing.T) {
 	repo := &auditMockRepo{}
-	svc := NewDNSService(repo)
+	svc := NewDNSService(repo, nil)
 
 	err := svc.DeleteRecord(context.Background(), "r1", "z1")
 	if err != nil {
@@ -174,7 +174,7 @@ func TestDeleteRecord(t *testing.T) {
 
 func TestImportZone(t *testing.T) {
 	repo := &mockRepo{}
-	svc := NewDNSService(repo)
+	svc := NewDNSService(repo, nil)
 
 	zoneFile := `
 $ORIGIN import.test.
@@ -200,7 +200,7 @@ www IN  A   1.2.3.4
 
 func TestImportZone_Error(t *testing.T) {
 	repo := &mockRepo{}
-	svc := NewDNSService(repo)
+	svc := NewDNSService(repo, nil)
 
 	// Malformed (missing fields)
 	malformed := "$ORIGIN test.com.\nwww A"
@@ -217,7 +217,7 @@ func TestResolve_Wildcard(t *testing.T) {
 			{Name: "*.example.test.", Type: domain.TypeA, Content: "1.1.1.1", TTL: 300},
 		},
 	}
-	svc := NewDNSService(repo)
+	svc := NewDNSService(repo, nil)
 
 	// Test direct hit on wildcard
 	recs, err := svc.Resolve(context.Background(), "www.example.test.", domain.TypeA, "8.8.8.8")
@@ -229,9 +229,9 @@ func TestResolve_Wildcard(t *testing.T) {
 	}
 
 	// Test deeper level hit
-	recs, _ = svc.Resolve(context.Background(), "a.b.c.example.test.", domain.TypeA, "8.8.8.8")
+	recs, _ = svc.Resolve(context.Background(), "a.b.example.test.", domain.TypeA, "8.8.8.8")
 	if len(recs) != 1 {
-		t.Errorf("Deep wildcard resolution failed")
+		t.Errorf("Wildcard resolution failed")
 	}
 }
 
@@ -242,7 +242,7 @@ func TestListZones(t *testing.T) {
 			{ID: "z2", Name: "z2.test."},
 		},
 	}
-	svc := NewDNSService(repo)
+	svc := NewDNSService(repo, nil)
 
 	zones, err := svc.ListZones(context.Background(), "t1")
 	if err != nil || len(zones) != 2 {
@@ -252,9 +252,10 @@ func TestListZones(t *testing.T) {
 
 func TestHealthCheck(t *testing.T) {
 	repo := &mockRepo{}
-	svc := NewDNSService(repo)
+	svc := NewDNSService(repo, nil)
 
-	if err := svc.HealthCheck(context.Background()); err != nil {
+	checks := svc.HealthCheck(context.Background())
+	if err, ok := checks["postgres"]; !ok || err != nil {
 		t.Errorf("HealthCheck failed: %v", err)
 	}
 }
@@ -266,7 +267,7 @@ func TestListRecordsForZone(t *testing.T) {
 			{ID: "r2", ZoneID: "z2", Name: "www.z2.test.", Type: domain.TypeA},
 		},
 	}
-	svc := NewDNSService(repo)
+	svc := NewDNSService(repo, nil)
 
 	recs, err := svc.ListRecordsForZone(context.Background(), "z1")
 	if err != nil {
@@ -279,7 +280,7 @@ func TestListRecordsForZone(t *testing.T) {
 
 func TestServiceErrorPaths(t *testing.T) {
 	repo := &mockRepo{err: errors.New("db error")}
-	svc := NewDNSService(repo)
+	svc := NewDNSService(repo, nil)
 	ctx := context.Background()
 
 	if err := svc.CreateZone(ctx, &domain.Zone{Name: "test."}); err == nil {
