@@ -52,3 +52,17 @@ type DNSService interface {
 type CacheInvalidator interface {
 	Invalidate(ctx context.Context, name string, qType domain.RecordType) error
 }
+
+// RoutingEngine defines the interface for BGP route advertisement.
+type RoutingEngine interface {
+	Start(ctx context.Context, localASN, peerASN uint32, peerIP string) error
+	Announce(ctx context.Context, vip string) error
+	Withdraw(ctx context.Context, vip string) error
+	Stop() error
+}
+
+// VIPManager defines the interface for managing the Anycast VIP on the local system.
+type VIPManager interface {
+	Bind(ctx context.Context, vip, iface string) error
+	Unbind(ctx context.Context, vip, iface string) error
+}
