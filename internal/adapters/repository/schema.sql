@@ -16,6 +16,8 @@ CREATE TABLE IF NOT EXISTS dns_records (
     content TEXT NOT NULL,
     ttl INTEGER NOT NULL,
     priority INTEGER,
+    weight INTEGER,
+    port INTEGER,
     network CIDR,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -41,6 +43,8 @@ CREATE TABLE IF NOT EXISTS dns_zone_changes (
     content TEXT NOT NULL,
     ttl INTEGER NOT NULL,
     priority INTEGER,
+    weight INTEGER,
+    port INTEGER,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 

@@ -22,8 +22,8 @@ func TestPostgresRepository_Unit(t *testing.T) {
 
 	// 1. Test GetRecords
 	t.Run("GetRecords", func(t *testing.T) {
-		rows := sqlmock.NewRows([]string{"id", "zone_id", "name", "type", "content", "ttl", "priority", "network"}).
-			AddRow("r1", "z1", "www.test.", "A", "1.2.3.4", 300, nil, nil)
+		rows := sqlmock.NewRows([]string{"id", "zone_id", "name", "type", "content", "ttl", "priority", "weight", "port", "network"}).
+			AddRow("r1", "z1", "www.test.", "A", "1.2.3.4", 300, nil, nil, nil, nil)
 
 		mock.ExpectQuery(`SELECT (.+) FROM dns_records WHERE LOWER\(name\) = LOWER\(\$1\) AND \(network IS NULL OR \$2::inet <<= network\) AND type = \$3`).
 			WithArgs("www.test.", "8.8.8.8", "A").
@@ -103,7 +103,7 @@ func TestPostgresRepository_Unit(t *testing.T) {
 	t.Run("CreateRecord", func(t *testing.T) {
 		rec := &domain.Record{ID: "r2", ZoneID: "z1", Name: "new.test.", Type: domain.TypeA, Content: "1.1.1.1", TTL: 60}
 		mock.ExpectExec(`INSERT INTO dns_records`).
-			WithArgs(rec.ID, rec.ZoneID, rec.Name, rec.Type, rec.Content, rec.TTL, rec.Priority, rec.Network, sqlmock.AnyArg(), sqlmock.AnyArg()).
+			WithArgs(rec.ID, rec.ZoneID, rec.Name, rec.Type, rec.Content, rec.TTL, rec.Priority, rec.Weight, rec.Port, rec.Network, sqlmock.AnyArg(), sqlmock.AnyArg()).
 			WillReturnResult(sqlmock.NewResult(1, 1))
 
 		err := repo.CreateRecord(ctx, rec)
@@ -140,7 +140,7 @@ func TestPostgresRepository_Unit(t *testing.T) {
 	t.Run("RecordZoneChange", func(t *testing.T) {
 		change := &domain.ZoneChange{ID: "c1", ZoneID: "z1", Serial: 1, Action: "ADD", Name: "test.", Type: domain.TypeA, Content: "1.1.1.1", TTL: 60, CreatedAt: time.Now()}
 		mock.ExpectExec(`INSERT INTO dns_zone_changes`).
-			WithArgs(change.ID, change.ZoneID, change.Serial, change.Action, change.Name, string(change.Type), change.Content, change.TTL, change.Priority, sqlmock.AnyArg()).
+			WithArgs(change.ID, change.ZoneID, change.Serial, change.Action, change.Name, string(change.Type), change.Content, change.TTL, change.Priority, change.Weight, change.Port, sqlmock.AnyArg()).
 			WillReturnResult(sqlmock.NewResult(1, 1))
 
 		err := repo.RecordZoneChange(ctx, change)
@@ -307,8 +307,8 @@ func TestPostgresRepository_Unit(t *testing.T) {
 		_, _ = repo.ListZones(ctx,  "")
 
 		// rows.Scan failure in GetRecords
-		mock.ExpectQuery(`SELECT`).WillReturnRows(sqlmock.NewRows([]string{"id", "zone_id", "name", "type", "content", "ttl", "priority", "network"}).
-			AddRow(1, 2, 3, 4, 5, 6, 7, 8))
+		mock.ExpectQuery(`SELECT`).WillReturnRows(sqlmock.NewRows([]string{"id", "zone_id", "name", "type", "content", "ttl", "priority", "weight", "port", "network"}).
+			AddRow(1, 2, 3, 4, 5, 6, 7, 8, 9, 10))
 		_, _ = repo.GetRecords(ctx,  "test", "A", "")
 
 		// rows.Scan failure in ListRecordsForZone

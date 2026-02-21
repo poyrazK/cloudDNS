@@ -33,7 +33,7 @@ func (r *PostgresRepository) GetRecords(ctx context.Context, name string, qType 
 	// 2. The clientIP is within the record's network CIDR OR the network is NULL (global).
 	// In Postgres, '$2::inet <<= network' checks if the network CIDR contains the client IP.
 	// RFC 1034: Domain name comparisons must be case-insensitive.
-	query := `SELECT id, zone_id, name, type, content, ttl, priority, network FROM dns_records 
+	query := `SELECT id, zone_id, name, type, content, ttl, priority, weight, port, network FROM dns_records 
 	          WHERE LOWER(name) = LOWER($1) AND (network IS NULL OR $2::inet <<= network)`
 	
 	var rows *sql.Rows
@@ -54,13 +54,21 @@ func (r *PostgresRepository) GetRecords(ctx context.Context, name string, qType 
 	var records []domain.Record
 	for rows.Next() {
 		var rec domain.Record
-		var priority sql.NullInt32
-		if errScan := rows.Scan(&rec.ID, &rec.ZoneID, &rec.Name, &rec.Type, &rec.Content, &rec.TTL, &priority, &rec.Network); errScan != nil {
+		var priority, weight, port sql.NullInt32
+		if errScan := rows.Scan(&rec.ID, &rec.ZoneID, &rec.Name, &rec.Type, &rec.Content, &rec.TTL, &priority, &weight, &port, &rec.Network); errScan != nil {
 			return nil, errScan
 		}
 		if priority.Valid {
 			p := int(priority.Int32)
 			rec.Priority = &p
+		}
+		if weight.Valid {
+			w := int(weight.Int32)
+			rec.Weight = &w
+		}
+		if port.Valid {
+			p := int(port.Int32)
+			rec.Port = &p
 		}
 		records = append(records, rec)
 	}
@@ -154,10 +162,10 @@ func (r *PostgresRepository) CreateZoneWithRecords(ctx context.Context, zone *do
 	}
 
 	// 2. Insert Records
-	recordQuery := `INSERT INTO dns_records (id, zone_id, name, type, content, ttl, priority, created_at, updated_at) 
-			        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
+	recordQuery := `INSERT INTO dns_records (id, zone_id, name, type, content, ttl, priority, weight, port, created_at, updated_at) 
+			        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
 	for _, rec := range records {
-		_, errExecRecord := tx.ExecContext(ctx, recordQuery, rec.ID, rec.ZoneID, rec.Name, rec.Type, rec.Content, rec.TTL, rec.Priority, rec.CreatedAt, rec.UpdatedAt)
+		_, errExecRecord := tx.ExecContext(ctx, recordQuery, rec.ID, rec.ZoneID, rec.Name, rec.Type, rec.Content, rec.TTL, rec.Priority, rec.Weight, rec.Port, rec.CreatedAt, rec.UpdatedAt)
 		if errExecRecord != nil {
 			return errExecRecord
 		}
@@ -167,9 +175,9 @@ func (r *PostgresRepository) CreateZoneWithRecords(ctx context.Context, zone *do
 }
 
 func (r *PostgresRepository) CreateRecord(ctx context.Context, record *domain.Record) error {
-	query := `INSERT INTO dns_records (id, zone_id, name, type, content, ttl, priority, network, created_at, updated_at) 
-			  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
-	_, err := r.db.ExecContext(ctx, query, record.ID, record.ZoneID, record.Name, record.Type, record.Content, record.TTL, record.Priority, record.Network, record.CreatedAt, record.UpdatedAt)
+	query := `INSERT INTO dns_records (id, zone_id, name, type, content, ttl, priority, weight, port, network, created_at, updated_at) 
+			  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
+	_, err := r.db.ExecContext(ctx, query, record.ID, record.ZoneID, record.Name, record.Type, record.Content, record.TTL, record.Priority, record.Weight, record.Port, record.Network, record.CreatedAt, record.UpdatedAt)
 	return err
 }
 
@@ -232,9 +240,9 @@ func (r *PostgresRepository) DeleteRecordSpecific(ctx context.Context, zoneID st
 }
 
 func (r *PostgresRepository) RecordZoneChange(ctx context.Context, change *domain.ZoneChange) error {
-	query := `INSERT INTO dns_zone_changes (id, zone_id, serial, action, name, type, content, ttl, priority, created_at) 
-			  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
-	_, err := r.db.ExecContext(ctx, query, change.ID, change.ZoneID, change.Serial, change.Action, change.Name, string(change.Type), change.Content, change.TTL, change.Priority, change.CreatedAt)
+	query := `INSERT INTO dns_zone_changes (id, zone_id, serial, action, name, type, content, ttl, priority, weight, port, created_at) 
+			  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
+	_, err := r.db.ExecContext(ctx, query, change.ID, change.ZoneID, change.Serial, change.Action, change.Name, string(change.Type), change.Content, change.TTL, change.Priority, change.Weight, change.Port, change.CreatedAt)
 	return err
 }
 
@@ -345,6 +353,15 @@ func ConvertPacketRecordToDomain(pRec packet.DNSRecord, zoneID string) (domain.R
 		p := int(pRec.Priority)
 		rec.Priority = &p
 		rec.Content = pRec.Host
+	case packet.SRV:
+		rec.Type = domain.TypeSRV
+		p := int(pRec.Priority)
+		w := int(pRec.Weight)
+		port := int(pRec.Port)
+		rec.Priority = &p
+		rec.Weight = &w
+		rec.Port = &port
+		rec.Content = pRec.Host
 	case packet.TXT:
 		rec.Type = domain.TypeTXT
 		rec.Content = pRec.Txt
@@ -454,6 +471,21 @@ func ConvertDomainToPacketRecord(rec domain.Record) (packet.DNSRecord, error) {
 		pRec.Txt = rec.Content
 	case domain.TypePTR:
 		pRec.Type = packet.PTR
+		pRec.Host = rec.Content
+		if !strings.HasSuffix(pRec.Host, ".") {
+			pRec.Host += "."
+		}
+	case domain.TypeSRV:
+		pRec.Type = packet.SRV
+		if rec.Priority != nil {
+			pRec.Priority = uint16(*rec.Priority) // #nosec G115
+		}
+		if rec.Weight != nil {
+			pRec.Weight = uint16(*rec.Weight) // #nosec G115
+		}
+		if rec.Port != nil {
+			pRec.Port = uint16(*rec.Port) // #nosec G115
+		}
 		pRec.Host = rec.Content
 		if !strings.HasSuffix(pRec.Host, ".") {
 			pRec.Host += "."
