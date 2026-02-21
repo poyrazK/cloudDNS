@@ -14,10 +14,13 @@ func TestResolveRecursive(t *testing.T) {
 	}
 	s := NewServer(":0", nil, nil)
 
-	// Mock queryFn to simulate iterative lookups
+	// Mock queryFn to simulate iterative lookups.
+	// The recursiveResolver's `resolveRecursive` method, which uses this mock,
+	// does not inspect the transaction ID of the responses it receives.
+	// Therefore, a fixed ID is sufficient for this test's purpose.
 	s.queryFn = func(server string, name string, qtype packet.QueryType) (*packet.DNSPacket, error) {
 		resp := packet.NewDNSPacket()
-		resp.Header.ID = 1234
+		resp.Header.ID = 1234 // Fixed ID for mock response, not validated by resolveRecursive
 		resp.Header.Response = true
 
 		// Handle ANY root server by delegation to .com

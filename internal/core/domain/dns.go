@@ -25,6 +25,8 @@ const (
 	TypeSOA   RecordType = "SOA"
 	// TypePTR represents a pointer record.
 	TypePTR   RecordType = "PTR"
+	// TypeSRV represents a service locator record (RFC 2782).
+	TypeSRV   RecordType = "SRV"
 )
 
 // Zone represents a DNS zone.
@@ -46,7 +48,9 @@ type Record struct {
 	Type      RecordType `json:"type"`
 	Content   string     `json:"content"`
 	TTL       int        `json:"ttl"`
-	Priority  *int       `json:"priority,omitempty"`
+	Priority  *int       `json:"priority,omitempty"` // For MX, SRV records
+	Weight    *int       `json:"weight,omitempty"`   // For SRV records
+	Port      *int       `json:"port,omitempty"`     // For SRV records
 	Network   *string    `json:"network,omitempty"` // CIDR or Scope (e.g., "10.0.0.0/8" or "public")
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
@@ -63,6 +67,8 @@ type ZoneChange struct {
 	Content   string     `json:"content"`
 	TTL       int        `json:"ttl"`
 	Priority  *int       `json:"priority,omitempty"`
+	Weight    *int       `json:"weight,omitempty"`
+	Port      *int       `json:"port,omitempty"`
 	CreatedAt time.Time  `json:"created_at"`
 }
 

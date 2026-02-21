@@ -120,6 +120,7 @@ func RecordTypeToQueryType(t domain.RecordType) QueryType {
 	case domain.TypeTXT: return TXT
 	case domain.TypeAAAA: return AAAA
 	case domain.TypePTR: return PTR
+	case domain.TypeSRV: return SRV
 	default: return UNKNOWN
 	}
 }
@@ -332,8 +333,10 @@ type DNSRecord struct {
 	TTL      uint32
 	Data     []byte
 	IP       net.IP   // A/AAAA
-	Host     string   // NS/CNAME/PTR/MD/MF/MB/MG/MR
-	Priority uint16   // MX
+	Host     string   // NS/CNAME/PTR/MD/MF/MB/MG/MR/SRV
+	Priority uint16   // MX, SRV
+	Weight   uint16   // SRV
+	Port     uint16   // SRV
 	Txt      string   // TXT
 	MName    string   // SOA
 	RName    string   // SOA
@@ -437,6 +440,11 @@ func (r *DNSRecord) Read(buffer *BytePacketBuffer) error {
 		if err != nil { return err }
 	case MX:
 		if r.Priority, err = buffer.Readu16(); err != nil { return err }
+		if r.Host, err = buffer.ReadName(); err != nil { return err }
+	case SRV:
+		if r.Priority, err = buffer.Readu16(); err != nil { return err }
+		if r.Weight, err = buffer.Readu16(); err != nil { return err }
+		if r.Port, err = buffer.Readu16(); err != nil { return err }
 		if r.Host, err = buffer.ReadName(); err != nil { return err }
 	case TXT:
 		txtLen, errReadTxt := buffer.Read()
@@ -659,6 +667,17 @@ func (r *DNSRecord) Write(buffer *BytePacketBuffer) (int, error) {
 		lenPos := buffer.Position()
 		if err := buffer.Writeu16(0); err != nil { return 0, err }
 		if err := buffer.Writeu16(r.Priority); err != nil { return 0, err }
+		if err := buffer.WriteName(r.Host); err != nil { return 0, err }
+		currPos := buffer.Position()
+		if err := buffer.Seek(lenPos); err != nil { return 0, err }
+		if err := buffer.Writeu16(uint16(currPos - (lenPos + 2))); err != nil { return 0, err } // #nosec G115
+		if err := buffer.Seek(currPos); err != nil { return 0, err }
+	case SRV:
+		lenPos := buffer.Position()
+		if err := buffer.Writeu16(0); err != nil { return 0, err } // Placeholder for RDLENGTH
+		if err := buffer.Writeu16(r.Priority); err != nil { return 0, err }
+		if err := buffer.Writeu16(r.Weight); err != nil { return 0, err }
+		if err := buffer.Writeu16(r.Port); err != nil { return 0, err }
 		if err := buffer.WriteName(r.Host); err != nil { return 0, err }
 		currPos := buffer.Position()
 		if err := buffer.Seek(lenPos); err != nil { return 0, err }
