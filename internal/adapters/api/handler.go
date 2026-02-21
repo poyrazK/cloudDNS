@@ -28,6 +28,7 @@ func (h *APIHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /zones/{id}", h.DeleteZone)
 	mux.HandleFunc("POST /zones/{id}/records", h.CreateRecord)
 	mux.HandleFunc("DELETE /zones/{zone_id}/records/{id}", h.DeleteRecord)
+	mux.HandleFunc("GET /audit-logs", h.ListAuditLogs)
 }
 
 // HealthCheck handles health check requests.
@@ -41,6 +42,25 @@ func (h *APIHandler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	if _, err := w.Write([]byte(`{"status":"UP"}`)); err != nil {
 		log.Printf("failed to write health check response: %v", err)
+	}
+}
+
+// ListAuditLogs retrieves audit entries for a specific tenant via the management API.
+func (h *APIHandler) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
+	tenantID := r.URL.Query().Get("tenant_id")
+	if tenantID == "" {
+		tenantID = "default-tenant"
+	}
+
+	logs, err := h.svc.ListAuditLogs(r.Context(), tenantID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(logs); err != nil {
+		log.Printf("failed to encode audit logs response: %v", err)
 	}
 }
 

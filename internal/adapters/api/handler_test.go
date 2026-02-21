@@ -70,6 +70,13 @@ func (m *mockDNSService) ImportZone(_ context.Context, tenantID string, _ io.Rea
 	return &domain.Zone{ID: "zone-imported", TenantID: tenantID}, nil
 }
 
+func (m *mockDNSService) ListAuditLogs(_ context.Context, tenantID string) ([]domain.AuditLog, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return []domain.AuditLog{{ID: "123", TenantID: tenantID}}, nil
+}
+
 func (m *mockDNSService) HealthCheck(_ context.Context) error {
 	return m.err
 }
