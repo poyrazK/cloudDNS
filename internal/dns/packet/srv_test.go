@@ -51,4 +51,10 @@ func TestSRVRecord_ReadWrite(t *testing.T) {
 	if decoded.Host != original.Host {
 		t.Errorf("Host mismatch: got %s, want %s", decoded.Host, original.Host)
 	}
+	if decoded.Class != original.Class {
+		t.Errorf("Class mismatch: got %v, want %v", decoded.Class, original.Class)
+	}
+	if decoded.TTL != original.TTL {
+		t.Errorf("TTL mismatch: got %d, want %d", decoded.TTL, original.TTL)
+	}
 }

@@ -41,6 +41,7 @@ func ValidateZoneName(name string) error {
 }
 
 // ValidateSRVContent ensures SRV content follows "priority weight port target" format.
+// Used for non-API inputs like zone-file imports.
 func ValidateSRVContent(content string) error {
 	parts := strings.Fields(content)
 	if len(parts) != 4 {
@@ -59,5 +60,25 @@ func ValidateSRVContent(content string) error {
 		return fmt.Errorf("target must be a FQDN (end with a dot)")
 	}
 
+	return nil
+}
+
+// ValidateSRVFields validates SRV fields individually. Used for API inputs.
+func ValidateSRVFields(priority, weight, port *int, target string) error {
+	if priority == nil || weight == nil || port == nil {
+		return fmt.Errorf("SRV record requires priority, weight, and port fields")
+	}
+	if *priority < 0 || *priority > 65535 {
+		return fmt.Errorf("invalid priority: %d (must be 0-65535)", *priority)
+	}
+	if *weight < 0 || *weight > 65535 {
+		return fmt.Errorf("invalid weight: %d (must be 0-65535)", *weight)
+	}
+	if *port < 0 || *port > 65535 {
+		return fmt.Errorf("invalid port: %d (must be 0-65535)", *port)
+	}
+	if !strings.HasSuffix(target, ".") {
+		return fmt.Errorf("SRV target must be a FQDN (end with a dot)")
+	}
 	return nil
 }

@@ -23,6 +23,10 @@ CREATE TABLE IF NOT EXISTS dns_records (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Migration for existing tables
+ALTER TABLE dns_records ADD COLUMN IF NOT EXISTS weight INTEGER;
+ALTER TABLE dns_records ADD COLUMN IF NOT EXISTS port INTEGER;
+
 CREATE TABLE IF NOT EXISTS audit_logs (
     id UUID PRIMARY KEY,
     tenant_id TEXT NOT NULL,
@@ -47,6 +51,10 @@ CREATE TABLE IF NOT EXISTS dns_zone_changes (
     port INTEGER,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Migration for existing tables
+ALTER TABLE dns_zone_changes ADD COLUMN IF NOT EXISTS weight INTEGER;
+ALTER TABLE dns_zone_changes ADD COLUMN IF NOT EXISTS port INTEGER;
 
 CREATE TABLE IF NOT EXISTS dnssec_keys (
     id UUID PRIMARY KEY,

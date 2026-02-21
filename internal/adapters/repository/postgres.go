@@ -112,7 +112,7 @@ func (r *PostgresRepository) GetZone(ctx context.Context, name string) (*domain.
 }
 
 func (r *PostgresRepository) ListRecordsForZone(ctx context.Context, zoneID string) ([]domain.Record, error) {
-	query := `SELECT id, zone_id, name, type, content, ttl, priority, network FROM dns_records WHERE zone_id = $1`
+	query := `SELECT id, zone_id, name, type, content, ttl, priority, weight, port, network FROM dns_records WHERE zone_id = $1`
 	rows, errQuery := r.db.QueryContext(ctx, query, zoneID)
 	if errQuery != nil {
 		return nil, errQuery
@@ -122,13 +122,21 @@ func (r *PostgresRepository) ListRecordsForZone(ctx context.Context, zoneID stri
 	var records []domain.Record
 	for rows.Next() {
 		var rec domain.Record
-		var priority sql.NullInt32
-		if errScan := rows.Scan(&rec.ID, &rec.ZoneID, &rec.Name, &rec.Type, &rec.Content, &rec.TTL, &priority, &rec.Network); errScan != nil {
+		var priority, weight, port sql.NullInt32
+		if errScan := rows.Scan(&rec.ID, &rec.ZoneID, &rec.Name, &rec.Type, &rec.Content, &rec.TTL, &priority, &weight, &port, &rec.Network); errScan != nil {
 			return nil, errScan
 		}
 		if priority.Valid {
 			p := int(priority.Int32)
 			rec.Priority = &p
+		}
+		if weight.Valid {
+			w := int(weight.Int32)
+			rec.Weight = &w
+		}
+		if port.Valid {
+			p := int(port.Int32)
+			rec.Port = &p
 		}
 		records = append(records, rec)
 	}
@@ -247,7 +255,7 @@ func (r *PostgresRepository) RecordZoneChange(ctx context.Context, change *domai
 }
 
 func (r *PostgresRepository) ListZoneChanges(ctx context.Context, zoneID string, fromSerial uint32) ([]domain.ZoneChange, error) {
-	query := `SELECT id, zone_id, serial, action, name, type, content, ttl, priority, created_at 
+	query := `SELECT id, zone_id, serial, action, name, type, content, ttl, priority, weight, port, created_at 
 	          FROM dns_zone_changes WHERE zone_id = $1 AND serial > $2 ORDER BY serial ASC, created_at ASC`
 	rows, errQuery := r.db.QueryContext(ctx, query, zoneID, fromSerial)
 	if errQuery != nil {
@@ -258,13 +266,21 @@ func (r *PostgresRepository) ListZoneChanges(ctx context.Context, zoneID string,
 	var changes []domain.ZoneChange
 	for rows.Next() {
 		var c domain.ZoneChange
-		var priority sql.NullInt32
-		if errScan := rows.Scan(&c.ID, &c.ZoneID, &c.Serial, &c.Action, &c.Name, &c.Type, &c.Content, &c.TTL, &priority, &c.CreatedAt); errScan != nil {
+		var priority, weight, port sql.NullInt32
+		if errScan := rows.Scan(&c.ID, &c.ZoneID, &c.Serial, &c.Action, &c.Name, &c.Type, &c.Content, &c.TTL, &priority, &weight, &port, &c.CreatedAt); errScan != nil {
 			return nil, errScan
 		}
 		if priority.Valid {
 			p := int(priority.Int32)
 			c.Priority = &p
+		}
+		if weight.Valid {
+			w := int(weight.Int32)
+			c.Weight = &w
+		}
+		if port.Valid {
+			p := int(port.Int32)
+			c.Port = &p
 		}
 		changes = append(changes, c)
 	}
@@ -478,13 +494,22 @@ func ConvertDomainToPacketRecord(rec domain.Record) (packet.DNSRecord, error) {
 	case domain.TypeSRV:
 		pRec.Type = packet.SRV
 		if rec.Priority != nil {
-			pRec.Priority = uint16(*rec.Priority) // #nosec G115
+			prio := *rec.Priority
+			if prio < 0 { prio = 0 }
+			if prio > 65535 { prio = 65535 }
+			pRec.Priority = uint16(prio) // #nosec G115
 		}
 		if rec.Weight != nil {
-			pRec.Weight = uint16(*rec.Weight) // #nosec G115
+			w := *rec.Weight
+			if w < 0 { w = 0 }
+			if w > 65535 { w = 65535 }
+			pRec.Weight = uint16(w) // #nosec G115
 		}
 		if rec.Port != nil {
-			pRec.Port = uint16(*rec.Port) // #nosec G115
+			p := *rec.Port
+			if p < 0 { p = 0 }
+			if p > 65535 { p = 65535 }
+			pRec.Port = uint16(p) // #nosec G115
 		}
 		pRec.Host = rec.Content
 		if !strings.HasSuffix(pRec.Host, ".") {

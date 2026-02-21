@@ -135,8 +135,8 @@ func (h *APIHandler) CreateRecord(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if record.Type == domain.TypeSRV {
-		if err := domain.ValidateSRVContent(record.Content); err != nil {
-			http.Error(w, "Invalid SRV content: "+err.Error(), http.StatusBadRequest)
+		if err := domain.ValidateSRVFields(record.Priority, record.Weight, record.Port, record.Content); err != nil {
+			http.Error(w, "Invalid SRV record: "+err.Error(), http.StatusBadRequest)
 			return
 		}
 	}

@@ -31,8 +31,17 @@ func TestSRVConverters(t *testing.T) {
 	if pRec.Type != packet.SRV {
 		t.Errorf("Packet type mismatch: got %v, want %v", pRec.Type, packet.SRV)
 	}
-	if pRec.Priority != 10 || pRec.Weight != 20 || pRec.Port != 5060 || pRec.Host != "sipserver.example.com." {
-		t.Errorf("Packet fields mismatch: %+v", pRec)
+	if pRec.Priority != 10 {
+		t.Errorf("Packet priority mismatch: got %d, want %d", pRec.Priority, 10)
+	}
+	if pRec.Weight != 20 {
+		t.Errorf("Packet weight mismatch: got %d, want %d", pRec.Weight, 20)
+	}
+	if pRec.Port != 5060 {
+		t.Errorf("Packet port mismatch: got %d, want %d", pRec.Port, 5060)
+	}
+	if pRec.Host != "sipserver.example.com." {
+		t.Errorf("Packet host mismatch: got %s, want %s", pRec.Host, "sipserver.example.com.")
 	}
 
 	// 2. Packet to Domain
@@ -44,7 +53,16 @@ func TestSRVConverters(t *testing.T) {
 	if decodedDomain.Type != domain.TypeSRV {
 		t.Errorf("Domain type mismatch: got %v, want %v", decodedDomain.Type, domain.TypeSRV)
 	}
-	if *decodedDomain.Priority != 10 || *decodedDomain.Weight != 20 || *decodedDomain.Port != 5060 || decodedDomain.Content != "sipserver.example.com." {
-		t.Errorf("Domain fields mismatch: %+v", decodedDomain)
+	if decodedDomain.Priority == nil || *decodedDomain.Priority != 10 {
+		t.Errorf("Domain priority mismatch: got %v, want %d", decodedDomain.Priority, 10)
+	}
+	if decodedDomain.Weight == nil || *decodedDomain.Weight != 20 {
+		t.Errorf("Domain weight mismatch: got %v, want %d", decodedDomain.Weight, 20)
+	}
+	if decodedDomain.Port == nil || *decodedDomain.Port != 5060 {
+		t.Errorf("Domain port mismatch: got %v, want %d", decodedDomain.Port, 5060)
+	}
+	if decodedDomain.Content != "sipserver.example.com." {
+		t.Errorf("Domain content mismatch: got %s, want %s", decodedDomain.Content, "sipserver.example.com.")
 	}
 }

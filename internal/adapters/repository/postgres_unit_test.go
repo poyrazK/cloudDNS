@@ -71,8 +71,8 @@ func TestPostgresRepository_Unit(t *testing.T) {
 
 	// 4. Test ListRecordsForZone
 	t.Run("ListRecordsForZone", func(t *testing.T) {
-		rows := sqlmock.NewRows([]string{"id", "zone_id", "name", "type", "content", "ttl", "priority", "network"}).
-			AddRow("r1", "z1", "www.test.", "A", "1.2.3.4", 300, 10, nil)
+		rows := sqlmock.NewRows([]string{"id", "zone_id", "name", "type", "content", "ttl", "priority", "weight", "port", "network"}).
+			AddRow("r1", "z1", "www.test.", "A", "1.2.3.4", 300, 10, 5, 80, nil)
 
 		mock.ExpectQuery(`SELECT (.+) FROM dns_records WHERE zone_id = \$1`).
 			WithArgs("z1").
@@ -82,7 +82,7 @@ func TestPostgresRepository_Unit(t *testing.T) {
 		if err != nil {
 			t.Errorf("ListRecordsForZone failed: %v", err)
 		}
-		if len(recs) != 1 || *recs[0].Priority != 10 {
+		if len(recs) != 1 || *recs[0].Priority != 10 || *recs[0].Weight != 5 || *recs[0].Port != 80 {
 			t.Errorf("Unexpected records: %+v", recs)
 		}
 	})
@@ -151,8 +151,8 @@ func TestPostgresRepository_Unit(t *testing.T) {
 
 	// 9. Test ListZoneChanges
 	t.Run("ListZoneChanges", func(t *testing.T) {
-		rows := sqlmock.NewRows([]string{"id", "zone_id", "serial", "action", "name", "type", "content", "ttl", "priority", "created_at"}).
-			AddRow("c1", "z1", 1, "ADD", "test.", "A", "1.1.1.1", 60, nil, time.Now())
+		rows := sqlmock.NewRows([]string{"id", "zone_id", "serial", "action", "name", "type", "content", "ttl", "priority", "weight", "port", "created_at"}).
+			AddRow("c1", "z1", 1, "ADD", "test.", "A", "1.1.1.1", 60, nil, nil, nil, time.Now())
 
 		mock.ExpectQuery(`SELECT (.+) FROM dns_zone_changes WHERE zone_id = \$1 AND serial > \$2`).
 			WithArgs("z1", 0).
@@ -321,8 +321,8 @@ func TestPostgresRepository_Unit(t *testing.T) {
 		_, _ = repo.GetIPsForName(ctx,  "test", "")
 
 		// rows.Scan failure in ListZoneChanges
-		mock.ExpectQuery(`SELECT`).WillReturnRows(sqlmock.NewRows([]string{"id", "zone_id", "serial", "action", "name", "type", "content", "ttl", "priority", "created_at"}).
-			AddRow(1, 2, 3, 4, 5, 6, 7, 8, 9, 10))
+		mock.ExpectQuery(`SELECT`).WillReturnRows(sqlmock.NewRows([]string{"id", "zone_id", "serial", "action", "name", "type", "content", "ttl", "priority", "weight", "port", "created_at"}).
+			AddRow(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12))
 		_, _ = repo.ListZoneChanges(ctx,  "z1", 0)
 
 		// rows.Scan failure in GetAuditLogs
