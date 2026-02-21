@@ -45,5 +45,10 @@ type DNSService interface {
 	DeleteRecord(ctx context.Context, recordID string, zoneID string) error
 	ImportZone(ctx context.Context, tenantID string, r io.Reader) (*domain.Zone, error)
 	ListAuditLogs(ctx context.Context, tenantID string) ([]domain.AuditLog, error)
-	HealthCheck(ctx context.Context) error
+	HealthCheck(ctx context.Context) map[string]error
+}
+
+// CacheInvalidator defines the interface for triggering cross-node cache invalidation.
+type CacheInvalidator interface {
+	Invalidate(ctx context.Context, name string, qType domain.RecordType) error
 }
