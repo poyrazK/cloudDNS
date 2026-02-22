@@ -82,7 +82,7 @@ func (b *BytePacketBuffer) Position() int {
 
 // Step moves the cursor forward by steps
 func (b *BytePacketBuffer) Step(steps int) error {
-	if b.Pos+steps > MaxPacketSize || (b.Len > 0 && b.Pos+steps > b.Len) {
+	if b.Pos+steps > MaxPacketSize || b.Pos+steps > b.Len {
 		return errors.New("step out of bounds")
 	}
 	b.Pos += steps
@@ -216,7 +216,7 @@ func (b *BytePacketBuffer) ReadName() (string, error) {
 
 // Get reads a byte at a specific position without moving cursor
 func (b *BytePacketBuffer) Get(pos int) (byte, error) {
-	if pos >= MaxPacketSize || (b.Len > 0 && pos >= b.Len) {
+	if pos >= MaxPacketSize || pos >= b.Len {
 		return 0, errors.New("end of buffer")
 	}
 	return b.Buf[pos], nil
@@ -224,7 +224,7 @@ func (b *BytePacketBuffer) Get(pos int) (byte, error) {
 
 // GetRange reads a range without moving cursor
 func (b *BytePacketBuffer) GetRange(start int, length int) ([]byte, error) {
-	if start+length > MaxPacketSize || (b.Len > 0 && start+length > b.Len) {
+	if start+length > MaxPacketSize || start+length > b.Len {
 		return nil, errors.New("out of bounds")
 	}
 	return b.Buf[start : start+length], nil
