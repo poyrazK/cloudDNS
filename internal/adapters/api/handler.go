@@ -46,18 +46,18 @@ func (h *APIHandler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if status == "DEGRADED" {
-		w.WriteHeader(http.StatusServiceUnavailable)
-	} else {
-		w.WriteHeader(http.StatusOK)
-	}
-
 	resp := map[string]interface{}{
 		"status":  status,
 		"details": details,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	if status == "DEGRADED" {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	} else {
+		w.WriteHeader(http.StatusOK)
+	}
+
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		log.Printf("failed to encode health check response: %v", err)
 	}

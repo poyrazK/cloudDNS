@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
@@ -106,11 +105,10 @@ func TestHealthCheck(t *testing.T) {
 		t.Errorf("Expected status 200, got %d", w.Code)
 	}
 	
-	expected := `{"details":{"postgres":"OK"},"status":"UP"}`
-	// The Encode method adds a newline
-	actual := strings.TrimSpace(w.Body.String())
+	expected := `{"details":{"postgres":"OK"},"status":"UP"}` + "\n"
+	actual := w.Body.String()
 	if actual != expected {
-		t.Errorf("Expected body %s, got %s", expected, actual)
+		t.Errorf("Expected body %q, got %q", expected, actual)
 	}
 }
 
