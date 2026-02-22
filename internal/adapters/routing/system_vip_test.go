@@ -3,9 +3,25 @@ package routing
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
 	"runtime"
 	"testing"
 )
+
+func skipIfNotPrivileged(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("Skipping test: root privileges required for VIP management")
+	}
+	
+	cmd := "ip"
+	if runtime.GOOS == "darwin" {
+		cmd = "ifconfig"
+	}
+	if _, err := exec.LookPath(cmd); err != nil {
+		t.Skipf("Skipping test: %s command not found", cmd)
+	}
+}
 
 func TestNewSystemVIPAdapter(t *testing.T) {
 	adapter := NewSystemVIPAdapter(nil)
@@ -15,10 +31,12 @@ func TestNewSystemVIPAdapter(t *testing.T) {
 }
 
 func TestSystemVIPAdapter_Bind(t *testing.T) {
+	skipIfNotPrivileged(t)
 	adapter := NewSystemVIPAdapter(nil)
-	// This will fail in CI/local as it needs root and 'ip' or 'ifconfig' command to succeed
-	// but it executes the code paths.
-	_ = adapter.Bind(context.Background(), "1.1.1.1", "lo")
+	err := adapter.Bind(context.Background(), "127.0.0.2", "lo0")
+	if err != nil {
+		t.Errorf("Bind failed: %v", err)
+	}
 }
 
 func TestSystemVIPAdapter_UnsupportedOS(t *testing.T) {
@@ -30,16 +48,26 @@ func TestSystemVIPAdapter_UnsupportedOS(t *testing.T) {
 }
 
 func TestSystemVIPAdapter_Unbind(t *testing.T) {
+	skipIfNotPrivileged(t)
 	adapter := NewSystemVIPAdapter(nil)
-	_ = adapter.Unbind(context.Background(), "1.1.1.1", "lo")
+	_ = adapter.Unbind(context.Background(), "127.0.0.2", "lo0")
+}
+
+func TestSystemVIPAdapter_Validation(t *testing.T) {
+	adapter := NewSystemVIPAdapter(nil)
+	ctx := context.Background()
+
+	if err := adapter.Bind(ctx, "invalid-ip", "lo"); err == nil {
+		t.Error("expected error for invalid IP")
+	}
+	if err := adapter.Bind(ctx, "1.1.1.1", ""); err == nil {
+		t.Error("expected error for empty interface")
+	}
 }
 
 func TestSystemVIPAdapter_OSLogic(t *testing.T) {
 	adapter := NewSystemVIPAdapter(nil)
 	ctx := context.Background()
-	
-	// Test unbind on non-existent VIP/interface to trigger warning paths
-	_ = adapter.Unbind(ctx, "255.255.255.255", "nonexistent0")
 	
 	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
 		err := adapter.Bind(ctx, "1.1.1.1", "lo")

@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"os/exec"
 	"runtime"
+	"strings"
 
 	"github.com/poyrazK/cloudDNS/internal/core/ports"
 )
@@ -26,6 +28,13 @@ func NewSystemVIPAdapter(logger *slog.Logger) *SystemVIPAdapter {
 
 // Bind attaches a VIP to the specified interface.
 func (a *SystemVIPAdapter) Bind(ctx context.Context, vip, iface string) error {
+	if net.ParseIP(vip) == nil {
+		return fmt.Errorf("invalid VIP address: %s", vip)
+	}
+	if iface == "" {
+		return fmt.Errorf("interface name cannot be empty")
+	}
+
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "linux":
@@ -40,17 +49,31 @@ func (a *SystemVIPAdapter) Bind(ctx context.Context, vip, iface string) error {
 		return fmt.Errorf("unsupported OS for VIP management: %s", runtime.GOOS)
 	}
 
-	if err := cmd.Run(); err != nil {
-		// Ignore error if already bound
-		a.logger.Warn("VIP bind command finished with error (may already be bound)", "error", err, "vip", vip)
-	} else {
-		a.logger.Info("bound VIP to interface", "vip", vip, "iface", iface)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		outStr := string(output)
+		// Check for common "already exists" errors to make it idempotent
+		if strings.Contains(outStr, "File exists") || strings.Contains(outStr, "already bound") {
+			a.logger.Info("VIP already bound", "vip", vip, "iface", iface)
+			return nil
+		}
+		a.logger.Warn("VIP bind command failed", "error", err, "vip", vip, "output", outStr)
+		return fmt.Errorf("failed to bind VIP: %w (output: %s)", err, outStr)
 	}
+
+	a.logger.Info("bound VIP to interface", "vip", vip, "iface", iface)
 	return nil
 }
 
 // Unbind removes a VIP from the specified interface.
 func (a *SystemVIPAdapter) Unbind(ctx context.Context, vip, iface string) error {
+	if net.ParseIP(vip) == nil {
+		return fmt.Errorf("invalid VIP address: %s", vip)
+	}
+	if iface == "" {
+		return fmt.Errorf("interface name cannot be empty")
+	}
+
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "linux":
@@ -63,11 +86,16 @@ func (a *SystemVIPAdapter) Unbind(ctx context.Context, vip, iface string) error 
 		return a.handleUnsupportedOS()
 	}
 
-	if err := cmd.Run(); err != nil {
-		a.logger.Warn("VIP unbind command finished with error", "error", err, "vip", vip)
-	} else {
-		a.logger.Info("unbound VIP from interface", "vip", vip, "iface", iface)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		outStr := string(output)
+		// Ignore if it's already gone? No, usually Unbind should be explicit.
+		// But for robustness we can log and return error.
+		a.logger.Warn("VIP unbind command finished with error", "error", err, "vip", vip, "output", outStr)
+		return fmt.Errorf("failed to unbind VIP: %w (output: %s)", err, outStr)
 	}
+
+	a.logger.Info("unbound VIP from interface", "vip", vip, "iface", iface)
 	return nil
 }
 

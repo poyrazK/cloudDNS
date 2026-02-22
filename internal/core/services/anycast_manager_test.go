@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
+	"github.com/poyrazK/cloudDNS/internal/testutil"
 )
 
 type mockAnycastDNSService struct {
@@ -34,46 +35,10 @@ func (m *mockAnycastDNSService) DeleteRecord(_ context.Context, _, _ string) err
 func (m *mockAnycastDNSService) ImportZone(_ context.Context, _ string, _ io.Reader) (*domain.Zone, error) { return nil, nil }
 func (m *mockAnycastDNSService) ListAuditLogs(_ context.Context, _ string) ([]domain.AuditLog, error) { return nil, nil }
 
-type mockRoutingEngine struct {
-	announced    bool
-	failAnnounce bool
-}
-
-func (m *mockRoutingEngine) Start(_ context.Context, _, _ uint32, _ string) error { return nil }
-func (m *mockRoutingEngine) Announce(_ context.Context, _ string) error {
-	if m.failAnnounce {
-		return errors.New("announce failed")
-	}
-	m.announced = true
-	return nil
-}
-func (m *mockRoutingEngine) Withdraw(_ context.Context, _ string) error {
-	m.announced = false
-	return nil
-}
-func (m *mockRoutingEngine) Stop() error { return nil }
-
-type mockVIPManager struct {
-	bound    bool
-	failBind bool
-}
-
-func (m *mockVIPManager) Bind(_ context.Context, _, _ string) error {
-	if m.failBind {
-		return errors.New("bind failed")
-	}
-	m.bound = true
-	return nil
-}
-func (m *mockVIPManager) Unbind(_ context.Context, _, _ string) error {
-	m.bound = false
-	return nil
-}
-
 func TestAnycastManager_Lifecycle(t *testing.T) {
 	dnsSvc := &mockAnycastDNSService{healthy: true}
-	routing := &mockRoutingEngine{}
-	vipMgr := &mockVIPManager{}
+	routing := &testutil.MockRoutingEngine{}
+	vipMgr := &testutil.MockVIPManager{}
 	vip := "1.1.1.1"
 	iface := "lo"
 
@@ -84,50 +49,50 @@ func TestAnycastManager_Lifecycle(t *testing.T) {
 
 	// Initial check (healthy)
 	mgr.TriggerCheck(ctx)
-	if !routing.announced {
+	if !routing.Announced {
 		t.Errorf("Expected BGP announcement when healthy")
 	}
-	if !vipMgr.bound {
+	if !vipMgr.Bound {
 		t.Errorf("Expected VIP to be bound when healthy")
 	}
 
 	// Become unhealthy
 	dnsSvc.healthy = false
 	mgr.TriggerCheck(ctx)
-	if routing.announced {
+	if routing.Announced {
 		t.Errorf("Expected BGP withdrawal when unhealthy")
 	}
-	if !vipMgr.bound {
+	if !vipMgr.Bound {
 		t.Errorf("Expected VIP to stay bound even if unhealthy")
 	}
 
 	// Become healthy again
 	dnsSvc.healthy = true
 	mgr.TriggerCheck(ctx)
-	if !routing.announced {
+	if !routing.Announced {
 		t.Errorf("Expected BGP re-announcement when healthy again")
 	}
 }
 
 func TestAnycastManager_Errors(t *testing.T) {
 	dnsSvc := &mockAnycastDNSService{healthy: true}
-	routing := &mockRoutingEngine{}
-	vipMgr := &mockVIPManager{}
+	routing := &testutil.MockRoutingEngine{}
+	vipMgr := &testutil.MockVIPManager{}
 	mgr := NewAnycastManager(dnsSvc, routing, vipMgr, "1.1.1.1", "lo", nil)
 	ctx := context.Background()
 
 	// 1. Fail Bind
-	vipMgr.failBind = true
+	vipMgr.FailBind = true
 	mgr.announce(ctx)
-	if mgr.isAnnounced {
+	if mgr.isAnnounced.Load() {
 		t.Errorf("isAnnounced should be false if bind fails")
 	}
 
 	// 2. Fail Announce
-	vipMgr.failBind = false
-	routing.failAnnounce = true
+	vipMgr.FailBind = false
+	routing.FailAnnounce = true
 	mgr.announce(ctx)
-	if mgr.isAnnounced {
+	if mgr.isAnnounced.Load() {
 		t.Errorf("isAnnounced should be false if routing announce fails")
 	}
 
@@ -143,12 +108,12 @@ func TestAnycastManager_MultiBackend(t *testing.T) {
 			"redis": errors.New("timeout"),
 		},
 	}
-	routing := &mockRoutingEngine{}
-	vipMgr := &mockVIPManager{}
+	routing := &testutil.MockRoutingEngine{}
+	vipMgr := &testutil.MockVIPManager{}
 	mgr := NewAnycastManager(dnsSvc, routing, vipMgr, "1.1.1.1", "lo", nil)
 	
 	mgr.TriggerCheck(context.Background())
-	if routing.announced {
+	if routing.Announced {
 		t.Errorf("Should not announce if one backend is failing")
 	}
 }
@@ -164,8 +129,8 @@ func (m *mockMultiBackendService) HealthCheck(_ context.Context) map[string]erro
 
 func TestAnycastManager_StartStop(t *testing.T) {
 	dnsSvc := &mockAnycastDNSService{healthy: true}
-	routing := &mockRoutingEngine{}
-	vipMgr := &mockVIPManager{}
+	routing := &testutil.MockRoutingEngine{}
+	vipMgr := &testutil.MockVIPManager{}
 	
 	mgr := NewAnycastManager(dnsSvc, routing, vipMgr, "1.1.1.1", "lo", nil)
 
@@ -178,21 +143,21 @@ func TestAnycastManager_StartStop(t *testing.T) {
 
 func TestAnycastManager_CoverageBoost(t *testing.T) {
 	dnsSvc := &mockAnycastDNSService{healthy: true}
-	routing := &mockRoutingEngine{}
-	vipMgr := &mockVIPManager{}
+	routing := &testutil.MockRoutingEngine{}
+	vipMgr := &testutil.MockVIPManager{}
 	mgr := NewAnycastManager(dnsSvc, routing, vipMgr, "1.1.1.1", "lo", nil)
 	ctx := context.Background()
 
 	// 1. Withdraw when NOT announced
 	mgr.withdraw(ctx) 
-	if mgr.isAnnounced {
+	if mgr.isAnnounced.Load() {
 		t.Errorf("Should not be announced")
 	}
 
 	// 2. Announce when already healthy and announced
-	mgr.isAnnounced = true
+	mgr.isAnnounced.Store(true)
 	mgr.TriggerCheck(ctx) // Should do nothing
-	if !mgr.isAnnounced {
+	if !mgr.isAnnounced.Load() {
 		t.Errorf("Should stay announced")
 	}
 
@@ -200,7 +165,7 @@ func TestAnycastManager_CoverageBoost(t *testing.T) {
 	dnsSvc2 := &mockMultiBackendService{status: map[string]error{}}
 	mgr2 := NewAnycastManager(dnsSvc2, routing, vipMgr, "1.1.1.1", "lo", nil)
 	mgr2.TriggerCheck(ctx)
-	if !mgr2.isAnnounced {
+	if !mgr2.isAnnounced.Load() {
 		t.Errorf("Empty health map should be considered healthy")
 	}
 }

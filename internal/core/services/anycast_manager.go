@@ -3,19 +3,21 @@ package services
 import (
 	"context"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"github.com/poyrazK/cloudDNS/internal/core/ports"
 )
 
 type AnycastManager struct {
-	dnsSvc     ports.DNSService
-	routing    ports.RoutingEngine
-	vipManager ports.VIPManager
-	vip        string
-	iface      string
-	logger     *slog.Logger
-	isAnnounced bool
+	dnsSvc      ports.DNSService
+	routing     ports.RoutingEngine
+	vipManager  ports.VIPManager
+	vip         string
+	iface       string
+	logger      *slog.Logger
+	isAnnounced atomic.Bool
+	vipBound    atomic.Bool
 }
 
 func NewAnycastManager(
@@ -42,13 +44,19 @@ func NewAnycastManager(
 func (m *AnycastManager) Start(ctx context.Context) {
 	m.logger.Info("starting anycast manager", "vip", m.vip, "iface", m.iface)
 	
+	// Perform immediate check
+	m.TriggerCheck(ctx)
+
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
-			_ = m.routing.Withdraw(context.Background(), m.vip)
+			m.logger.Info("shutting down anycast manager, withdrawing route")
+			if err := m.routing.Withdraw(context.Background(), m.vip); err != nil {
+				m.logger.Error("failed to withdraw BGP on shutdown", "error", err, "vip", m.vip)
+			}
 			return
 		case <-ticker.C:
 			m.TriggerCheck(ctx)
@@ -68,9 +76,10 @@ func (m *AnycastManager) TriggerCheck(ctx context.Context) {
 		}
 	}
 
-	if healthy && !m.isAnnounced {
+	announced := m.isAnnounced.Load()
+	if healthy && !announced {
 		m.announce(ctx)
-	} else if !healthy && m.isAnnounced {
+	} else if !healthy && announced {
 		m.withdraw(ctx)
 	}
 }
@@ -78,10 +87,13 @@ func (m *AnycastManager) TriggerCheck(ctx context.Context) {
 func (m *AnycastManager) announce(ctx context.Context) {
 	m.logger.Info("node healthy, initiating anycast announcement")
 	
-	// 1. Bind VIP
-	if err := m.vipManager.Bind(ctx, m.vip, m.iface); err != nil {
-		m.logger.Error("failed to bind VIP", "error", err)
-		return
+	// 1. Bind VIP if not already bound
+	if !m.vipBound.Load() {
+		if err := m.vipManager.Bind(ctx, m.vip, m.iface); err != nil {
+			m.logger.Error("failed to bind VIP", "error", err)
+			return
+		}
+		m.vipBound.Store(true)
 	}
 
 	// 2. Announce BGP
@@ -90,7 +102,7 @@ func (m *AnycastManager) announce(ctx context.Context) {
 		return
 	}
 
-	m.isAnnounced = true
+	m.isAnnounced.Store(true)
 }
 
 func (m *AnycastManager) withdraw(ctx context.Context) {
@@ -98,8 +110,9 @@ func (m *AnycastManager) withdraw(ctx context.Context) {
 	
 	if err := m.routing.Withdraw(ctx, m.vip); err != nil {
 		m.logger.Error("failed to withdraw BGP", "error", err)
+		return // Do not clear isAnnounced flag if withdrawal failed
 	}
 
-	m.isAnnounced = false
+	m.isAnnounced.Store(false)
 	// We keep the VIP bound to the interface for local connectivity/checks
 }
