@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
@@ -77,8 +78,10 @@ func (m *mockDNSService) ListAuditLogs(_ context.Context, tenantID string) ([]do
 	return []domain.AuditLog{{ID: "123", TenantID: tenantID}}, nil
 }
 
-func (m *mockDNSService) HealthCheck(_ context.Context) error {
-	return m.err
+func (m *mockDNSService) HealthCheck(_ context.Context) map[string]error {
+	res := make(map[string]error)
+	res["postgres"] = m.err
+	return res
 }
 
 func TestRegisterRoutes(_ *testing.T) {
@@ -102,9 +105,11 @@ func TestHealthCheck(t *testing.T) {
 		t.Errorf("Expected status 200, got %d", w.Code)
 	}
 	
-	expected := `{"status":"UP"}`
-	if w.Body.String() != expected {
-		t.Errorf("Expected body %s, got %s", expected, w.Body.String())
+	expected := `{"details":{"postgres":"OK"},"status":"UP"}`
+	// The Encode method adds a newline
+	actual := strings.TrimSpace(w.Body.String())
+	if actual != expected {
+		t.Errorf("Expected body %s, got %s", expected, actual)
 	}
 }
 
