@@ -20,7 +20,7 @@ import (
 func TestEndToEnd_Protocols(t *testing.T) {
 	// 1. Setup Stack
 	repo := &mockServerRepo{}
-	svc := services.NewDNSService(repo)
+	svc := services.NewDNSService(repo, nil)
 	dnsAddr := "127.0.0.1:10058"
 	apiAddr := "127.0.0.1:18083"
 	

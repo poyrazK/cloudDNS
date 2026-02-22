@@ -41,6 +41,7 @@ type Server struct {
 	queryFn     func(server string, name string, qtype packet.QueryType) (*packet.DNSPacket, error)
 	limiter     *rateLimiter
 	TsigKeys    map[string][]byte
+	NodeID      string
 
 	// Testing/Chaos flags
 	SimulateDBLatency  time.Duration
@@ -60,6 +61,17 @@ func NewServer(addr string, repo ports.DNSRepository, logger *slog.Logger) *Serv
 	if logger == nil {
 		logger = slog.Default()
 	}
+
+	nodeID := os.Getenv("NODE_ID")
+	if nodeID == "" {
+		hostname, _ := os.Hostname()
+		if hostname != "" {
+			nodeID = hostname
+		} else {
+			nodeID = "unknown-node"
+		}
+	}
+
 	s := &Server{
 		Addr:        addr,
 		Repo:        repo,
@@ -70,6 +82,7 @@ func NewServer(addr string, repo ports.DNSRepository, logger *slog.Logger) *Serv
 		Logger:      logger,
 		limiter:     newRateLimiter(200000, 100000),
 		TsigKeys:    make(map[string][]byte),
+		NodeID:      nodeID,
 	}
 	s.queryFn = s.sendQuery
 
@@ -107,8 +120,34 @@ func (s *Server) automateDNSSEC() {
 	}
 }
 
+func (s *Server) startInvalidationListener() {
+	ctx := context.Background()
+	ch := s.Redis.Subscribe(ctx)
+	s.Logger.Info("started global cache invalidation listener")
+
+	for msg := range ch {
+		// msg.Payload format is "name:type"
+		s.Logger.Debug("received cache invalidation event", "key", msg.Payload)
+		
+		// Standardize key for L1 cache lookup (lowercase name)
+		parts := strings.Split(msg.Payload, ":")
+		if len(parts) == 2 {
+			l1Key := strings.ToLower(parts[0]) + ":" + parts[1]
+			s.Cache.Invalidate(l1Key)
+		} else {
+			// Fallback: flush everything if format is unexpected
+			s.Cache.Flush()
+		}
+	}
+}
+
 func (s *Server) Run() error {
 	s.Logger.Info("starting parallel server", "addr", s.Addr, "listeners", runtime.NumCPU())
+
+	// Start cache invalidation listener if Redis is enabled
+	if s.Redis != nil {
+		go s.startInvalidationListener()
+	}
 
 	lc := net.ListenConfig{
 		Control: func(network, address string, c syscall.RawConn) error {
@@ -472,6 +511,31 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 	}
 
 	q := request.Questions[0]
+	// 1. Handle CHAOS class queries for node identity (NSID readiness)
+	if q.QClass == 3 { // CHAOS
+		if strings.ToLower(q.Name) == "id.server." || strings.ToLower(q.Name) == "hostname.bind." {
+			response := packet.NewDNSPacket()
+			response.Header.ID = request.Header.ID
+			response.Header.Response = true
+			response.Header.AuthoritativeAnswer = true
+			response.Questions = append(response.Questions, q)
+			
+			txtRec := packet.DNSRecord{
+				Name:  q.Name,
+				Type:  packet.TXT,
+				Class: 3, // CHAOS
+				TTL:   0,
+				Txt:   s.NodeID,
+			}
+			response.Answers = append(response.Answers, txtRec)
+			
+			resBuffer := packet.GetBuffer()
+			defer packet.PutBuffer(resBuffer)
+			_ = response.Write(resBuffer)
+			return sendFn(resBuffer.Buf[:resBuffer.Position()])
+		}
+	}
+
 	// Standardize name for lookup
 	if !strings.HasSuffix(q.Name, ".") {
 		q.Name += "."
@@ -511,6 +575,7 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 	// EDNS(0) Support (RFC 6891)
 	maxSize := 512
 	dnssecOK := false
+	nsidRequested := false
 	var clientOPT *packet.DNSRecord
 	for _, res := range request.Resources {
 		if res.Type == packet.OPT {
@@ -521,6 +586,14 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 			}
 			// DO bit is the first bit of the Z field (TTL bits 15-0)
 			dnssecOK = (res.Z & 0x8000) != 0
+			
+			// Check for NSID option (RFC 5001)
+			for _, opt := range res.Options {
+				if opt.Code == 3 { // NSID
+					nsidRequested = true
+					break
+				}
+			}
 			break
 		}
 	}
@@ -542,11 +615,26 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 		if dnssecOK {
 			opt.Z = 0x8000 // Set DO bit if client set it
 		}
+		if nsidRequested {
+			opt.Options = append(opt.Options, packet.EdnsOption{
+				Code: 3, // NSID
+				Data: []byte(s.NodeID),
+			})
+		}
 		response.Resources = append(response.Resources, opt)
 	}
 
 	ctx := context.Background()
 	source := "local"
+
+	// Guard against nil repository (useful for identity-only nodes or tests)
+	if s.Repo == nil {
+		response.Header.ResCode = packet.RcodeServFail
+		resBuffer := packet.GetBuffer()
+		defer packet.PutBuffer(resBuffer)
+		_ = response.Write(resBuffer)
+		return sendFn(resBuffer.Buf[:resBuffer.Position()])
+	}
 
 	// 1. Find the zone for this query to include Authority/Additional records
 	zoneName := q.Name
