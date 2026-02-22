@@ -5,7 +5,7 @@ import "testing"
 func TestBufferGetters(t *testing.T) {
 	buf := NewBytePacketBuffer()
 	data := []byte{1, 2, 3, 4, 5}
-	copy(buf.Buf, data)
+	buf.Load(data)
 
 	// Test Get
 	val, err := buf.Get(2)
@@ -33,7 +33,7 @@ func TestBufferGetters(t *testing.T) {
 
 func TestBufferMutators(t *testing.T) {
 	buf := NewBytePacketBuffer()
-	
+
 	// Test WriteRange
 	_ = buf.WriteRange(20, []byte{0xAA, 0xBB})
 	got, _ := buf.GetRange(20, 2)

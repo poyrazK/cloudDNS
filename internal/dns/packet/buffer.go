@@ -198,7 +198,7 @@ func (b *BytePacketBuffer) ReadName() (string, error) {
 		pos++
 		lenInt := int(lenByte)
 
-		if pos+lenInt > MaxPacketSize {
+		if pos+lenInt > MaxPacketSize || pos+lenInt > b.Len {
 			return "", errors.New("out of bounds")
 		}
 		label := b.Buf[pos : pos+lenInt]

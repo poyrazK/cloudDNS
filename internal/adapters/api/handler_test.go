@@ -84,6 +84,7 @@ func (m *mockDNSService) HealthCheck(_ context.Context) map[string]error {
 	return res
 }
 
+// TestRegisterRoutes verifies that API routes are correctly registered.
 func TestRegisterRoutes(_ *testing.T) {
 	svc := &mockDNSService{}
 	handler := NewAPIHandler(svc)

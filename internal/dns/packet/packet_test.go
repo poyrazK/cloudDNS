@@ -709,6 +709,7 @@ func TestReadName_MaxJumps(t *testing.T) {
 	buf.Buf[1] = 0x02
 	buf.Buf[2] = 0xC0
 	buf.Buf[3] = 0x00
+	buf.Len = 4
 	
 	_ = buf.Seek(0)
 	_, err := buf.ReadName()

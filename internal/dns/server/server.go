@@ -1531,6 +1531,8 @@ func queryTypeToRecordType(qType packet.QueryType) domain.RecordType {
 		return domain.TypeSOA
 	case packet.TXT:
 		return domain.TypeTXT
+	case packet.SRV:
+		return domain.TypeSRV
 	case packet.PTR:
 		return domain.TypePTR
 	case packet.ANY:
