@@ -30,7 +30,7 @@ func TestRFC8914_EDE(t *testing.T) {
 
 	res := packet.NewDNSPacket()
 	resBuf := packet.NewBytePacketBuffer()
-	copy(resBuf.Buf, capturedResp)
+	resBuf.Load(capturedResp)
 	_ = res.FromBuffer(resBuf)
 
 	// Check for EDE in OPT

@@ -42,7 +42,7 @@ func TestRFC6891_EDNS0(t *testing.T) {
 
 	resPacket := packet.NewDNSPacket()
 	resBuf := packet.NewBytePacketBuffer()
-	copy(resBuf.Buf, capturedResp)
+	resBuf.Load(capturedResp)
 	_ = resPacket.FromBuffer(resBuf)
 
 	// RFC 6891: Response MUST contain an OPT record if the query had one
@@ -97,7 +97,7 @@ func TestRFC6891_LargePayload(t *testing.T) {
 
 	resPacket := packet.NewDNSPacket()
 	resBuf := packet.NewBytePacketBuffer()
-	copy(resBuf.Buf, capturedResp)
+	resBuf.Load(capturedResp)
 	_ = resPacket.FromBuffer(resBuf)
 
 	if resPacket.Header.TruncatedMessage {

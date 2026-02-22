@@ -283,7 +283,7 @@ func TestHandlePacketLocalHit(t *testing.T) {
 	}
 
 	resBuf := packet.NewBytePacketBuffer()
-	copy(resBuf.Buf, capturedResp)
+	resBuf.Load(capturedResp)
 	resp := packet.NewDNSPacket()
 	_ = resp.FromBuffer(resBuf)
 
@@ -327,7 +327,7 @@ func TestHandlePacketCacheHit(t *testing.T) {
 	}
 
 	resBuf := packet.NewBytePacketBuffer()
-	copy(resBuf.Buf, capturedResp)
+	resBuf.Load(capturedResp)
 	resp := packet.NewDNSPacket()
 	_ = resp.FromBuffer(resBuf)
 
@@ -401,7 +401,7 @@ func TestHandlePacketNXDOMAIN(t *testing.T) {
 
 	resPacket := packet.NewDNSPacket()
 	pBuf := packet.NewBytePacketBuffer()
-	copy(pBuf.Buf, capturedResp)
+	pBuf.Load(capturedResp)
 	_ = resPacket.FromBuffer(pBuf)
 
 	if resPacket.Header.ResCode != 3 {
@@ -427,7 +427,7 @@ func TestHandlePacketNoQuestions(t *testing.T) {
 
 	resPacket := packet.NewDNSPacket()
 	pBuf := packet.NewBytePacketBuffer()
-	copy(pBuf.Buf, capturedResp)
+	pBuf.Load(capturedResp)
 	_ = resPacket.FromBuffer(pBuf)
 
 	if resPacket.Header.ResCode != 4 {
@@ -480,7 +480,7 @@ func TestHandlePacketTruncation(t *testing.T) {
 	if err := srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
 		resPacket := packet.NewDNSPacket()
 		resBuffer := packet.NewBytePacketBuffer()
-		copy(resBuffer.Buf, resp)
+		resBuffer.Load(resp)
 		_ = resPacket.FromBuffer(resBuffer)
 
 		if !resPacket.Header.TruncatedMessage {

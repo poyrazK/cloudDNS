@@ -78,7 +78,7 @@ func TestEndToEndDNS_Advanced(t *testing.T) {
 	
 	res := packet.NewDNSPacket()
 	pBuf := packet.NewBytePacketBuffer()
-	copy(pBuf.Buf, resBuf[:n])
+	pBuf.Load(resBuf[:n])
 	_ = res.FromBuffer(pBuf)
 
 	if len(res.Answers) == 0 || res.Answers[0].Txt != "wildcard" {
@@ -110,7 +110,7 @@ func TestEndToEndDNS_Advanced(t *testing.T) {
 	
 	axfrRes := packet.NewDNSPacket()
 	arb := packet.NewBytePacketBuffer()
-	copy(arb.Buf, axfrRData)
+	arb.Load(axfrRData)
 	_ = axfrRes.FromBuffer(arb)
 	
 	if len(axfrRes.Answers) == 0 || axfrRes.Answers[0].Type != packet.SOA {
@@ -132,7 +132,7 @@ func TestEndToEndDNS_Advanced(t *testing.T) {
 	n2, _ := conn2.Read(resBuf)
 	res2 := packet.NewDNSPacket()
 	pBuf2 := packet.NewBytePacketBuffer()
-	copy(pBuf2.Buf, resBuf[:n2])
+	pBuf2.Load(resBuf[:n2])
 	_ = res2.FromBuffer(pBuf2)
 
 	foundNSEC := false

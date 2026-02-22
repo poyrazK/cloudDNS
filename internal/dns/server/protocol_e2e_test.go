@@ -79,7 +79,7 @@ func TestEndToEnd_Protocols(t *testing.T) {
 	n, _ := conn.Read(rb)
 	res := packet.NewDNSPacket()
 	pb := packet.NewBytePacketBuffer()
-	copy(pb.Buf, rb[:n])
+	pb.Load(rb[:n])
 	_ = res.FromBuffer(pb)
 	if len(res.Answers) == 0 || res.Answers[0].IP.String() != "1.2.3.4" {
 		t.Errorf("UDP E2E failed")
@@ -105,7 +105,7 @@ func TestEndToEnd_Protocols(t *testing.T) {
 	
 	res2 := packet.NewDNSPacket()
 	pb2 := packet.NewBytePacketBuffer()
-	copy(pb2.Buf, rdata)
+	pb2.Load(rdata)
 	_ = res2.FromBuffer(pb2)
 	if len(res2.Answers) == 0 || res2.Answers[0].IP.String() != "1.2.3.4" {
 		t.Errorf("TCP E2E failed")
