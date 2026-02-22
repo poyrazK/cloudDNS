@@ -3,15 +3,20 @@ package main
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
+	"strconv"
+	"syscall"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/poyrazK/cloudDNS/internal/adapters/api"
 	"github.com/poyrazK/cloudDNS/internal/adapters/repository"
 	"github.com/poyrazK/cloudDNS/internal/adapters/routing"
+	"github.com/poyrazK/cloudDNS/internal/core/ports"
 	"github.com/poyrazK/cloudDNS/internal/core/services"
 	"github.com/poyrazK/cloudDNS/internal/dns/server"
 )
@@ -30,6 +35,9 @@ func run() error {
 	}))
 	slog.SetDefault(logger)
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		dbURL = "postgres://postgres:postgres@localhost:5432/clouddns?sslmode=disable"
@@ -44,38 +52,59 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	defer db.Close()
 
 	repo := repository.NewPostgresRepository(db)
 
-	var redisCache *server.RedisCache
+	var cacheInvalidator ports.CacheInvalidator
 	redisURL := os.Getenv("REDIS_URL")
+	var redisCache *server.RedisCache
 	if redisURL != "" {
-		// NewRedisCache(addr, password, db)
 		redisCache = server.NewRedisCache(redisURL, "", 0)
+		// Verify connectivity
+		pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		if err := redisCache.Ping(pingCtx); err != nil {
+			cancel()
+			return fmt.Errorf("failed to connect to redis at %s: %w", redisURL, err)
+		}
+		cancel()
+		cacheInvalidator = redisCache
 		logger.Info("connected to redis cache", "url", redisURL)
 	}
 
-	dnsSvc := services.NewDNSService(repo, redisCache)
+	dnsSvc := services.NewDNSService(repo, cacheInvalidator)
+
+	var routingAdapter *routing.GoBGPAdapter
+	var anycastMgr *services.AnycastManager
 
 	// 2. Initialize Anycast BGP (Phase 3)
 	if os.Getenv("ANYCAST_ENABLED") == "true" {
-		routingAdapter := routing.NewGoBGPAdapter(logger)
+		vip := os.Getenv("ANYCAST_VIP")
+		peerIP := os.Getenv("BGP_PEER_IP")
+		
+		if vip == "" || peerIP == "" {
+			return fmt.Errorf("ANYCAST_VIP and BGP_PEER_IP must be set when ANYCAST_ENABLED=true")
+		}
+
+		routingAdapter = routing.NewGoBGPAdapter(logger)
 		vipAdapter := routing.NewSystemVIPAdapter(logger)
 		
-		vip := os.Getenv("ANYCAST_VIP")
 		iface := os.Getenv("ANYCAST_INTERFACE")
 		if iface == "" {
 			iface = "lo"
 		}
 		
-		localASN := uint32(65001) // Default
-		peerASN := uint32(65000)  // Default
-		peerIP := os.Getenv("BGP_PEER_IP")
+		localASN := getEnvUint32("ANYCAST_LOCAL_ASN", 65001)
+		peerASN := getEnvUint32("BGP_PEER_ASN", 65000)
 		
-		anycastMgr := services.NewAnycastManager(dnsSvc, routingAdapter, vipAdapter, vip, iface, logger)
+		// Configure RouterID and NextHop if provided
+		routerID := os.Getenv("BGP_ROUTER_ID")
+		nextHop := os.Getenv("BGP_NEXT_HOP")
+		routingAdapter.SetConfig(routerID, 179, nextHop)
+
+		anycastMgr = services.NewAnycastManager(dnsSvc, routingAdapter, vipAdapter, vip, iface, logger)
 		
 		go func() {
-			ctx := context.Background()
 			if err := routingAdapter.Start(ctx, localASN, peerASN, peerIP); err != nil {
 				logger.Error("failed to start BGP speaker", "error", err)
 				return
@@ -98,7 +127,7 @@ func run() error {
 		}
 	}()
 
-	// 3. Start Management API
+	// 4. Start Management API
 	apiAddr := os.Getenv("API_ADDR")
 	if apiAddr == "" {
 		apiAddr = ":8080"
@@ -127,5 +156,39 @@ func run() error {
 		IdleTimeout:       120 * time.Second,
 	}
 
-	return s.ListenAndServe()
+	go func() {
+		if err := s.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Error("API server failed", "error", err)
+		}
+	}()
+
+	<-ctx.Done()
+	logger.Info("shutting down services...")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := s.Shutdown(shutdownCtx); err != nil {
+		logger.Error("API server shutdown failed", "error", err)
+	}
+
+	if routingAdapter != nil {
+		if err := routingAdapter.Stop(); err != nil {
+			logger.Error("BGP speaker stop failed", "error", err)
+		}
+	}
+
+	return nil
+}
+
+func getEnvUint32(key string, def uint32) uint32 {
+	val := os.Getenv(key)
+	if val == "" {
+		return def
+	}
+	u, err := strconv.ParseUint(val, 10, 32)
+	if err != nil {
+		return def
+	}
+	return uint32(u)
 }
