@@ -20,6 +20,7 @@ type mockServerRepo struct {
 	zones   []domain.Zone
 	changes []domain.ZoneChange
 	keys    []domain.DNSSECKey
+	pingErr error
 }
 
 func (m *mockServerRepo) GetRecords(_ context.Context, name string, qType domain.RecordType, clientIP string) ([]domain.Record, error) {
@@ -251,7 +252,11 @@ func (m *mockServerRepo) UpdateKey(ctx context.Context, key *domain.DNSSECKey) e
 	return nil
 }
 
-func (m *mockServerRepo) Ping(ctx context.Context) error { return nil }
+func (m *mockServerRepo) Ping(ctx context.Context) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.pingErr
+}
 
 func TestHandlePacketLocalHit(t *testing.T) {
 	repo := &mockServerRepo{
