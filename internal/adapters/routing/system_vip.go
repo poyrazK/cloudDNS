@@ -60,7 +60,7 @@ func (a *SystemVIPAdapter) Unbind(ctx context.Context, vip, iface string) error 
 		// #nosec G204
 		cmd = exec.CommandContext(ctx, "ifconfig", iface, "-alias", vip)
 	default:
-		return fmt.Errorf("unsupported OS for VIP management: %s", runtime.GOOS)
+		return a.handleUnsupportedOS()
 	}
 
 	if err := cmd.Run(); err != nil {
@@ -69,6 +69,10 @@ func (a *SystemVIPAdapter) Unbind(ctx context.Context, vip, iface string) error 
 		a.logger.Info("unbound VIP from interface", "vip", vip, "iface", iface)
 	}
 	return nil
+}
+
+func (a *SystemVIPAdapter) handleUnsupportedOS() error {
+	return fmt.Errorf("unsupported OS for VIP management: %s", runtime.GOOS)
 }
 
 var _ ports.VIPManager = (*SystemVIPAdapter)(nil)
