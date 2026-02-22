@@ -7,7 +7,7 @@ Unlike standard implementations that use libraries, cloudDNS implements the bina
 *   **Manual Binary Parsing**: Custom bit-masking and byte-buffer management for DNS headers, questions, and records.
 *   **Multi-Transport Support**: Parallel listeners for high-speed **UDP** and framed **TCP** transport.
 *   **Label Compression**: Full support for domain name pointers (offsets) during packet deserialization.
-*   **Supported Record Types**: `A`, `AAAA`, `CNAME`, `NS`, `MX`, `SOA`, `TXT`, `OPT` (EDNS), and `TSIG`.
+*   **Supported Record Types**: `A`, `AAAA`, `CNAME`, `NS`, `MX`, `SOA`, `TXT`, `SRV`, `DS`, `DNSKEY`, `RRSIG`, `NSEC`, `NSEC3`, `OPT` (EDNS), and `TSIG`.
 
 ## 2. Advanced Resolution Logic
 *   **Recursive Resolver**: A "serious" iterative resolver that walks the global internet hierarchy starting from root hints (`a.root-servers.net`) when a local record is missing.
@@ -17,26 +17,36 @@ Unlike standard implementations that use libraries, cloudDNS implements the bina
     *   Negotiates UDP payload sizes up to 65,535 bytes.
     *   Automatically enforces truncation (`TC` bit) if a response exceeds the negotiated limit, forcing safe TCP fallback.
     *   **Extended DNS Errors (RFC 8914)**: Support for granular error codes in OPT records.
+*   **Node Identity (CHAOS Class)**: Support for `id.server.` and `hostname.bind.` queries to identify specific nodes in a cluster.
 
-## 3. Security & Protection
-*   **Rate Limiting**: Built-in **Token Bucket** limiter. Protects the server from UDP floods and DDoS by enforcing per-IP query limits (Default: 100 qps/20 burst).
-*   **TSIG (Transaction Signatures)**: Support for HMAC-MD5 authenticated DNS transactions, ensuring requests and responses are signed and verified against shared secrets.
-*   **Atomic Transactions**: Zone creation is atomic; default `SOA` and `NS` records are generated and committed in a single PostgreSQL transaction.
+## 3. High Availability & Anycast
+*   **Anycast BGP Orchestration**: Native integration with **GoBGP v4**. The server automatically announces its Virtual IP (VIP) to the network core when healthy and withdraws it upon failure.
+*   **Automated VIP Management**: Built-in management of local interface IP aliases, ensuring the VIP is bound only when the local node is operational.
+*   **Health-Aware Routing**: Intelligent monitoring of Database, Cache, and DNS ports to drive BGP state.
 
-## 4. High-Performance Architecture
-*   **UDP Worker Pool**: Fixed pool of background workers and a task queue to handle traffic bursts without resource exhaustion.
-*   **In-Memory Packet Cache**: Thread-safe, TTL-aware cache that stores serialized binary responses. Includes Transaction ID rewriting to allow sub-millisecond cache hits.
-*   **Hexagonal Architecture**: Strict separation between Domain logic, Ports (Interfaces), and Adapters (PostgreSQL, DNS, API).
+## 4. DNSSEC (RFC 4034/4035/5155)
+*   **Automated Key Management**: Background orchestration of KSK (Key Signing Key) and ZSK (Zone Signing Key) generation using ECDSA P-256.
+*   **Double-Signature Rollover**: Fully automated, zero-downtime key rotation mechanism.
+*   **Dynamic Signing**: Real-time RRSIG generation for authoritative responses.
+*   **Authenticated Denial of Existence**: Support for both `NSEC` and `NSEC3` (with salt and iterations) to prevent zone walking.
 
-## 5. Management & Observability
+## 5. Caching & Global Consistency
+*   **Distributed Caching**: Shared L2 cache via Redis to reduce backend load across nodes.
+*   **Real-Time Invalidation**: Global cache invalidation using Redis Pub/Sub. Administrative changes (API/Dynamic Updates) are broadcast instantly to clear stale L1 entries on all nodes.
+*   **Sharded L1 Cache**: High-concurrency sharded memory cache with Transaction ID rewriting for sub-millisecond response times.
+
+## 6. Security & Protection
+*   **Rate Limiting**: Built-in **Token Bucket** limiter. Protects the server from UDP floods and DDoS by enforcing per-IP query limits (Default: 200,000 burst / 100,000 sustain).
+*   **TSIG (Transaction Signatures)**: HMAC-authenticated DNS transactions for secure Dynamic Updates and Zone Transfers.
+*   **DNS over HTTPS (DoH)**: RFC 8484 compliant transport for secure, encrypted resolution over HTTP/2.
+
+## 7. Architecture & Management
+*   **Hexagonal Architecture**: Strict separation between Domain logic, Ports (Interfaces), and Adapters (PostgreSQL, Redis, BGP, API).
 *   **RESTful Management API**: Multi-tenant CRUD endpoints for Zone and Record management.
-*   **Health Monitoring**: Dedicated `/health` endpoint verifying end-to-end connectivity including database status.
-*   **Audit Trails**: Persistent change logging for every administrative action, tracking "who changed what and when."
-*   **Structured JSON Logging**: Powered by `log/slog`. Every query is logged with client IP, latency (ms), cache status, and resolution source.
+*   **Incremental Zone Transfer (IXFR)**: Efficient replication that transfers only serialized changes between masters and slaves.
+*   **Audit Trails**: Persistent change logging for every administrative action.
 
-## 6. Stability & Verification
-*   **Integration Testing**: Verified against real PostgreSQL instances using `testcontainers-go`.
-*   **High Test Coverage**: 
-    *   API: **91.7%**
-    *   Core Services: **79.4%**
-    *   DNS Protocol: **72.4%**
+## 8. Stability & Verification
+*   **Integration Testing**: Verified against real PostgreSQL and Redis instances.
+*   **High Test Coverage**: Maintains **84%+** statement coverage across the entire codebase.
+*   **RFC Compliance**: Rigorous verification against RFC 1034, 1035, 1995, 1996, 2136, 4034, 4035, and 5155.

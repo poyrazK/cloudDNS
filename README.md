@@ -5,17 +5,23 @@ cloudDNS is a high-performance, authoritative, and recursive DNS server built fr
 ![License](https://img.shields.io/github/license/poyrazK/cloudDNS)
 ![Go Version](https://img.shields.io/github/go-mod/go-version/poyrazK/cloudDNS)
 ![Tests](https://img.shields.io/badge/tests-passing-brightgreen)
-![Coverage](https://img.shields.io/badge/coverage-86%25-brightgreen)
+![Coverage](https://img.shields.io/badge/coverage-84%2B%25-brightgreen)
 
 ## Key Features
 
 ### Core Protocol & Performance
 *   **Manual Wire Format (RFC 1035)**: Custom binary parser and serializer for maximum control over DNS packets.
 *   **Dual-Stack Transport**: Parallel high-performance UDP listener pool and framed TCP handlers.
-*   **Caching Strategy**: Two-layer caching architecture:
-    *   **L1**: In-memory, thread-safe packet cache with Transaction ID rewriting.
-    *   **L2**: Distributed Redis cache for scalable deployments.
+*   **Caching Strategy**: Sharded, two-layer caching architecture:
+    *   **L1**: In-memory, thread-safe sharded cache with Transaction ID rewriting.
+    *   **L2**: Distributed Redis cache for shared state.
+    *   **Global Invalidation**: Real-time cross-node cache invalidation via Redis Pub/Sub.
 *   **Worker Pool**: Configurable worker pool pattern to handle high-concurrency traffic bursts.
+
+### High Availability & Anycast
+*   **Anycast BGP Integration**: Native BGP support (GoBGP v4) for sub-second failover orchestration.
+*   **Automated VIP Management**: Built-in management of local interface IP aliases for Anycast VIPs.
+*   **Health-Aware Routing**: Real-time route announcement and withdrawal based on service health.
 
 ### Advanced DNS Standards
 *   **Dynamic Updates (RFC 2136)**: Secure, atomic updates to zone records at runtime.
@@ -28,6 +34,7 @@ cloudDNS is a high-performance, authoritative, and recursive DNS server built fr
 *   **DNS over HTTPS (DoH - RFC 8484)**: Secure DNS queries via HTTP/2, supporting both `GET` (base64url) and `POST` (binary).
 *   **EDNS(0) & Truncation (RFC 6891)**: Extended payload support with automatic TCP fallback.
 *   **TSIG (RFC 2845)**: HMAC-authenticated transactions for secure updates and transfers.
+*   **CHAOS Class Support**: Node identity resolution (`id.server.`, `hostname.bind.`) for NSID-ready deployments.
 
 ### Architecture & Management
 *   **Hexagonal Architecture**: Clean separation of concerns (Domain -> Ports -> Adapters).
@@ -41,17 +48,17 @@ cloudDNS is a high-performance, authoritative, and recursive DNS server built fr
 cloudDNS follows a strict Hexagonal (Ports & Adapters) architecture:
 
 *   **Core (Domain)**: Pure business logic (DNS packet rules, Zone logic). No external dependencies.
-*   **Ports**: Interfaces defining how the core interacts with the outside world (`DNSRepository`, `DNSService`).
+*   **Ports**: Interfaces defining how the core interacts with the outside world (`DNSRepository`, `DNSService`, `RoutingEngine`).
 *   **Adapters**:
     *   **Primary (Driving)**: DNS Server (UDP/TCP/DoH), REST API (HTTP).
-    *   **Secondary (Driven)**: PostgreSQL Repository, Redis Cache.
+    *   **Secondary (Driven)**: PostgreSQL Repository, Redis Cache, BGP Engine.
 
 ## Getting Started
 
 ### Prerequisites
-*   Go 1.21+
-*   PostgreSQL
-*   Redis (Optional)
+*   Go 1.24+
+*   PostgreSQL 15+
+*   Redis 7+ (Optional, for distributed caching)
 
 ### Installation
 
@@ -70,7 +77,11 @@ The server is configured via environment variables:
 | `DNS_ADDR` | Address for DNS listener | `:53` |
 | `API_ADDR` | Address for REST API | `:8080` |
 | `DATABASE_URL` | PostgreSQL connection string | - |
-| `REDIS_ADDR` | Redis address (host:port) | - |
+| `REDIS_URL` | Redis connection string | - |
+| `ANYCAST_ENABLED` | Enable BGP Anycast support | `false` |
+| `ANYCAST_VIP` | Virtual IP to announce via BGP | - |
+| `BGP_PEER_IP` | Upstream BGP peer IP | - |
+| `NODE_ID` | Unique identity for this node | (hostname) |
 
 ### Running the Server
 
@@ -84,7 +95,7 @@ go run cmd/clouddns/main.go
 
 ## Testing
 
-cloudDNS maintains a high standard of code quality with **86%+ test coverage**.
+cloudDNS maintains a high standard of code quality with **84%+ test coverage**.
 
 ```bash
 # Run all tests
@@ -92,38 +103,6 @@ go test ./...
 
 # Run benchmark suite
 go test -bench=. ./cmd/bench/...
-```
-
-The test suite includes:
-*   **Unit Tests**: Core logic verification.
-*   **Integration Tests**: Database interactions using `pgx`.
-*   **E2E Tests**: Full server protocol verification (DNSSEC, DoH, AXFR/IXFR) using mock network connections.
-
-## API Usage
-
-### Create a Zone
-```bash
-curl -X POST http://localhost:8080/zones 
-  -H "Content-Type: application/json" 
-  -d '{"name": "example.com.", "tenant_id": "admin"}'
-```
-
-### Add a Record
-```bash
-curl -X POST http://localhost:8080/zones/{zone_id}/records 
-  -H "Content-Type: application/json" 
-  -d '{
-    "name": "www.example.com.",
-    "type": "A",
-    "content": "1.2.3.4",
-    "ttl": 300
-  }'
-```
-
-### DoH Query
-```bash
-# Base64url encoded query for www.example.com (A)
-curl "http://localhost:443/dns-query?dns=q80BAAABAAAAAAAAA3d3dwdleGFtcGxlA2NvbQAAAQAB"
 ```
 
 ## License
