@@ -6,30 +6,38 @@ import (
 	"log/slog"
 	"testing"
 
-	pb "github.com/osrg/gobgp/v3/api"
+	pb "github.com/osrg/gobgp/v4/api"
+	"github.com/osrg/gobgp/v4/pkg/apiutil"
 )
 
 type mockBGPBackend struct {
 	failAddPath    bool
 	failDeletePath bool
 	failAddPeer    bool
+	failStartBgp   bool
 }
 
 func (m *mockBGPBackend) Serve() {}
 func (m *mockBGPBackend) Stop()  {}
-func (m *mockBGPBackend) AddPeer(ctx context.Context, r *pb.AddPeerRequest) error {
+func (m *mockBGPBackend) StartBgp(_ context.Context, _ *pb.StartBgpRequest) error {
+	if m.failStartBgp {
+		return errors.New("start bgp failed")
+	}
+	return nil
+}
+func (m *mockBGPBackend) AddPeer(_ context.Context, _ *pb.AddPeerRequest) error {
 	if m.failAddPeer {
 		return errors.New("add peer failed")
 	}
 	return nil
 }
-func (m *mockBGPBackend) AddPath(ctx context.Context, r *pb.AddPathRequest) (*pb.AddPathResponse, error) {
+func (m *mockBGPBackend) AddPath(_ apiutil.AddPathRequest) ([]apiutil.AddPathResponse, error) {
 	if m.failAddPath {
 		return nil, errors.New("add path failed")
 	}
-	return &pb.AddPathResponse{}, nil
+	return []apiutil.AddPathResponse{{}}, nil
 }
-func (m *mockBGPBackend) DeletePath(ctx context.Context, r *pb.DeletePathRequest) error {
+func (m *mockBGPBackend) DeletePath(_ apiutil.DeletePathRequest) error {
 	if m.failDeletePath {
 		return errors.New("delete path failed")
 	}
