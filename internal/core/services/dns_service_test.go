@@ -47,6 +47,16 @@ func (m *mockRepo) GetZone(_ context.Context, name string) (*domain.Zone, error)
 	return nil, nil
 }
 
+func (m *mockRepo) GetRecord(_ context.Context, id string, zoneID string) (*domain.Record, error) {
+	if m.err != nil { return nil, m.err }
+	for _, r := range m.records {
+		if r.ID == id && r.ZoneID == zoneID {
+			return &r, nil
+		}
+	}
+	return nil, nil
+}
+
 func (m *mockRepo) ListRecordsForZone(_ context.Context, zoneID string) ([]domain.Record, error) {
 	if m.err != nil { return nil, m.err }
 	var res []domain.Record

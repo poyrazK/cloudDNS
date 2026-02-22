@@ -19,6 +19,7 @@ type mockDNSSECRepo struct {
 func (m *mockDNSSECRepo) GetRecords(_ context.Context, _ string, _ domain.RecordType, _ string) ([]domain.Record, error) { return nil, nil }
 func (m *mockDNSSECRepo) GetIPsForName(_ context.Context, _ string, _ string) ([]string, error) { return nil, nil }
 func (m *mockDNSSECRepo) GetZone(_ context.Context, _ string) (*domain.Zone, error) { return nil, nil }
+func (m *mockDNSSECRepo) GetRecord(_ context.Context, _ string, _ string) (*domain.Record, error) { return nil, nil }
 func (m *mockDNSSECRepo) ListRecordsForZone(_ context.Context, _ string) ([]domain.Record, error) { return nil, nil }
 func (m *mockDNSSECRepo) CreateZone(_ context.Context, _ *domain.Zone) error { return nil }
 func (m *mockDNSSECRepo) CreateZoneWithRecords(_ context.Context, _ *domain.Zone, _ []domain.Record) error { return nil }
