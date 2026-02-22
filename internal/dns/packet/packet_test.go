@@ -1033,3 +1033,29 @@ func TestTSIG_SignVerify(t *testing.T) {
 	}
 	tsigRec.TimeSigned = originalTime
 }
+
+func TestBuffer_ReadRange_Error(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	_, err := buf.ReadRange(MaxPacketSize - 1, 10)
+	if err == nil {
+		t.Error("expected error when reading out of bounds range")
+	}
+}
+
+func TestDNSHeader_Read_Error(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	h := DNSHeader{}
+	err := h.Read(buf) // Buffer empty
+	if err == nil {
+		t.Error("expected error when reading header from empty buffer")
+	}
+}
+
+func TestDNSPacket_FromBuffer_Error(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	p := NewDNSPacket()
+	err := p.FromBuffer(buf)
+	if err == nil {
+		t.Error("expected error when parsing packet from empty buffer")
+	}
+}
