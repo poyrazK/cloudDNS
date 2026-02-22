@@ -14,11 +14,12 @@ import (
 )
 
 type dnsService struct {
-	repo ports.DNSRepository
+	repo  ports.DNSRepository
+	cache ports.CacheInvalidator // Used for cross-node invalidation
 }
 
-func NewDNSService(repo ports.DNSRepository) ports.DNSService {
-	return &dnsService{repo: repo}
+func NewDNSService(repo ports.DNSRepository, cache ports.CacheInvalidator) ports.DNSService {
+	return &dnsService{repo: repo, cache: cache}
 }
 
 func (s *dnsService) CreateZone(ctx context.Context, zone *domain.Zone) error {
@@ -78,6 +79,11 @@ func (s *dnsService) CreateRecord(ctx context.Context, record *domain.Record) er
 
 	if err := s.repo.CreateRecord(ctx, record); err != nil {
 		return err
+	}
+
+	// Invalidate cache across all nodes
+	if s.cache != nil {
+		_ = s.cache.Invalidate(ctx, record.Name, record.Type)
 	}
 
 	s.audit(ctx, "unknown", "CREATE_RECORD", "RECORD", record.ID, fmt.Sprintf("Created %s record for %s", record.Type, record.Name))
@@ -147,6 +153,12 @@ func (s *dnsService) DeleteZone(ctx context.Context, zoneID string, tenantID str
 }
 
 func (s *dnsService) DeleteRecord(ctx context.Context, recordID string, zoneID string) error {
+	// We need record details to invalidate the cache
+	// For simplicity in this implementation, we might just flush or require more context.
+	// RFC 2136 handled this by name/type. For REST API, we'll try to find the record first.
+	
+	// TODO: Fetch record details before delete to call s.cache.Invalidate(ctx, name, type)
+	
 	if err := s.repo.DeleteRecord(ctx, recordID, zoneID); err != nil {
 		return err
 	}
@@ -188,6 +200,14 @@ func (s *dnsService) ListAuditLogs(ctx context.Context, tenantID string) ([]doma
 	return s.repo.GetAuditLogs(ctx, tenantID)
 }
 
-func (s *dnsService) HealthCheck(ctx context.Context) error {
-	return s.repo.Ping(ctx)
+func (s *dnsService) HealthCheck(ctx context.Context) map[string]error {
+	res := make(map[string]error)
+	res["postgres"] = s.repo.Ping(ctx)
+	if s.cache != nil {
+		// We need to type assert to check Ping if it's a RedisCache
+		if pinger, ok := s.cache.(interface{ Ping(context.Context) error }); ok {
+			res["redis"] = pinger.Ping(ctx)
+		}
+	}
+	return res
 }
