@@ -100,7 +100,7 @@ func (b *BytePacketBuffer) Seek(pos int) error {
 
 // Read reads a single byte
 func (b *BytePacketBuffer) Read() (byte, error) {
-	if b.Pos >= MaxPacketSize || (b.Len > 0 && b.Pos >= b.Len) {
+	if b.Pos >= MaxPacketSize || b.Pos >= b.Len {
 		return 0, errors.New("end of buffer")
 	}
 	res := b.Buf[b.Pos]
@@ -110,7 +110,7 @@ func (b *BytePacketBuffer) Read() (byte, error) {
 
 // ReadRange reads a slice of bytes
 func (b *BytePacketBuffer) ReadRange(start int, length int) ([]byte, error) {
-	if start+length > MaxPacketSize || (b.Len > 0 && start+length > b.Len) {
+	if start+length > MaxPacketSize || start+length > b.Len {
 		return nil, errors.New("out of bounds")
 	}
 	res := make([]byte, length)
@@ -120,7 +120,7 @@ func (b *BytePacketBuffer) ReadRange(start int, length int) ([]byte, error) {
 
 // Readu16 reads 2 bytes as uint16 (Big Endian)
 func (b *BytePacketBuffer) Readu16() (uint16, error) {
-	if b.Pos+2 > MaxPacketSize || (b.Len > 0 && b.Pos+2 > b.Len) {
+	if b.Pos+2 > MaxPacketSize || b.Pos+2 > b.Len {
 		return 0, errors.New("end of buffer")
 	}
 	b1 := b.Buf[b.Pos]
@@ -131,7 +131,7 @@ func (b *BytePacketBuffer) Readu16() (uint16, error) {
 
 // Readu32 reads 4 bytes as uint32 (Big Endian)
 func (b *BytePacketBuffer) Readu32() (uint32, error) {
-	if b.Pos+4 > MaxPacketSize || (b.Len > 0 && b.Pos+4 > b.Len) {
+	if b.Pos+4 > MaxPacketSize || b.Pos+4 > b.Len {
 		return 0, errors.New("end of buffer")
 	}
 	b1 := b.Buf[b.Pos]
