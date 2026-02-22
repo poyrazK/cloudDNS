@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"bytes"
 	"context"
 	"net"
@@ -59,6 +60,17 @@ func (m *mockServerRepo) GetZone(_ context.Context, name string) (*domain.Zone, 
 		zName := strings.TrimSuffix(strings.ToLower(z.Name), ".")
 		if zName == qName {
 			return &z, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *mockServerRepo) GetRecord(ctx context.Context, id string, zoneID string) (*domain.Record, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, r := range m.records {
+		if r.ID == id && r.ZoneID == zoneID {
+			return &r, nil
 		}
 	}
 	return nil, nil
@@ -567,3 +579,14 @@ func (m *mockResponseWriter) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 func (m *mockResponseWriter) WriteHeader(statusCode int) { m.code = statusCode }
+
+func TestHealthCheck_PingError(t *testing.T) {
+	repo := &mockServerRepo{pingErr: errors.New("db down")}
+	srv := NewServer("127.0.0.1:0", repo, nil)
+	
+	ctx := context.Background()
+	checks := srv.Repo.Ping(ctx)
+	if checks == nil || checks.Error() != "db down" {
+		t.Errorf("Expected 'db down' error, got %v", checks)
+	}
+}

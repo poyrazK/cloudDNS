@@ -46,8 +46,7 @@ func (r *RedisCache) Invalidate(ctx context.Context, name string, qType domain.R
 	return r.client.Publish(ctx, InvalidationChannel, msg).Err()
 }
 
-// Subscribe returns a channel that receives invalidation keys.
-func (r *RedisCache) Subscribe(ctx context.Context) <-chan *redis.Message {
-	pubsub := r.client.Subscribe(ctx, InvalidationChannel)
-	return pubsub.Channel()
+// Subscribe returns a PubSub instance that receives invalidation keys.
+func (r *RedisCache) Subscribe(ctx context.Context) *redis.PubSub {
+	return r.client.Subscribe(ctx, InvalidationChannel)
 }

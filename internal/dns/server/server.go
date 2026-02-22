@@ -29,6 +29,9 @@ import (
 	"github.com/poyrazK/cloudDNS/internal/dns/packet"
 )
 
+// ClassCHAOS is the DNS class for server identity and metadata.
+const ClassCHAOS = 3
+
 type Server struct {
 	Addr        string
 	Repo        ports.DNSRepository
@@ -120,33 +123,43 @@ func (s *Server) automateDNSSEC() {
 	}
 }
 
-func (s *Server) startInvalidationListener() {
-	ctx := context.Background()
-	ch := s.Redis.Subscribe(ctx)
+func (s *Server) startInvalidationListener(ctx context.Context) {
+	pubsub := s.Redis.Subscribe(ctx)
+	defer pubsub.Close()
+	
+	ch := pubsub.Channel()
 	s.Logger.Info("started global cache invalidation listener")
 
-	for msg := range ch {
-		// msg.Payload format is "name:type"
-		s.Logger.Debug("received cache invalidation event", "key", msg.Payload)
-		
-		// Standardize key for L1 cache lookup (lowercase name)
-		parts := strings.Split(msg.Payload, ":")
-		if len(parts) == 2 {
-			l1Key := strings.ToLower(parts[0]) + ":" + parts[1]
-			s.Cache.Invalidate(l1Key)
-		} else {
-			// Fallback: flush everything if format is unexpected
-			s.Cache.Flush()
+	for {
+		select {
+		case <-ctx.Done():
+			s.Logger.Info("stopping global cache invalidation listener")
+			return
+		case msg := <-ch:
+			// msg.Payload format is "name:type"
+			s.Logger.Debug("received cache invalidation event", "key", msg.Payload)
+			
+			// Standardize key for L1 cache lookup (lowercase name)
+			parts := strings.SplitN(msg.Payload, ":", 2)
+			if len(parts) == 2 {
+				l1Key := strings.ToLower(parts[0]) + ":" + parts[1]
+				s.Cache.Invalidate(l1Key)
+			} else {
+				s.Logger.Warn("received malformed cache invalidation payload", "payload", msg.Payload)
+			}
 		}
 	}
 }
 
 func (s *Server) Run() error {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	s.Logger.Info("starting parallel server", "addr", s.Addr, "listeners", runtime.NumCPU())
 
 	// Start cache invalidation listener if Redis is enabled
 	if s.Redis != nil {
-		go s.startInvalidationListener()
+		go s.startInvalidationListener(ctx)
 	}
 
 	lc := net.ListenConfig{
@@ -162,7 +175,7 @@ func (s *Server) Run() error {
 	// 1. Parallel UDP
 	started := 0
 	for i := 0; i < runtime.NumCPU(); i++ {
-		conn, errListen := lc.ListenPacket(context.Background(), "udp", s.Addr)
+		conn, errListen := lc.ListenPacket(ctx, "udp", s.Addr)
 		if errListen != nil {
 			s.Logger.Error("failed to start UDP listener", "id", i, "error", errListen)
 			continue
@@ -197,7 +210,7 @@ func (s *Server) Run() error {
 	}
 
 	// 3. TCP Listener
-	tcpListener, errTCP := lc.Listen(context.Background(), "tcp", s.Addr)
+	tcpListener, errTCP := lc.Listen(ctx, "tcp", s.Addr)
 	if errTCP == nil {
 		go func() {
 			defer func() {
@@ -512,7 +525,7 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 
 	q := request.Questions[0]
 	// 1. Handle CHAOS class queries for node identity (NSID readiness)
-	if q.QClass == 3 { // CHAOS
+	if q.QClass == ClassCHAOS {
 		if strings.ToLower(q.Name) == "id.server." || strings.ToLower(q.Name) == "hostname.bind." {
 			response := packet.NewDNSPacket()
 			response.Header.ID = request.Header.ID
@@ -523,7 +536,7 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 			txtRec := packet.DNSRecord{
 				Name:  q.Name,
 				Type:  packet.TXT,
-				Class: 3, // CHAOS
+				Class: ClassCHAOS,
 				TTL:   0,
 				Txt:   s.NodeID,
 			}
@@ -1110,8 +1123,9 @@ func (s *Server) sendSingleRecordResponse(conn net.Conn, id uint16, q packet.DNS
 	resBuffer := packet.GetBuffer()
 	_ = resp.Write(resBuffer)
 	resData := resBuffer.Buf[:resBuffer.Position()]
-	resLen := uint16(len(resData)) // #nosec G115
-	fullResp := append([]byte{byte(resLen >> 8), byte(resLen & 0xFF)}, resData...)
+	// TCP requires 2-byte length prefix
+	fullLen := uint16(len(resData)) // #nosec G115
+	fullResp := append([]byte{byte(fullLen >> 8), byte(fullLen & 0xFF)}, resData...)
 	_, _ = conn.Write(fullResp)
 	packet.PutBuffer(resBuffer)
 }
@@ -1127,8 +1141,8 @@ func (s *Server) sendIXFRDiff(conn net.Conn, id uint16, soa packet.DNSRecord, de
 	resBuffer := packet.GetBuffer()
 	_ = resp.Write(resBuffer)
 	resData := resBuffer.Buf[:resBuffer.Position()]
-	resLen := uint16(len(resData)) // #nosec G115
-	_, _ = conn.Write(append([]byte{byte(resLen >> 8), byte(resLen & 0xFF)}, resData...))
+	fullLen1 := uint16(len(resData)) // #nosec G115
+	_, _ = conn.Write(append([]byte{byte(fullLen1 >> 8), byte(fullLen1 & 0xFF)}, resData...))
 	packet.PutBuffer(resBuffer)
 
 	// 2. Send New SOA + Additions
@@ -1142,8 +1156,8 @@ func (s *Server) sendIXFRDiff(conn net.Conn, id uint16, soa packet.DNSRecord, de
 	resBuffer = packet.GetBuffer()
 	_ = resp.Write(resBuffer)
 	resData = resBuffer.Buf[:resBuffer.Position()]
-	resLen = uint16(len(resData)) // #nosec G115
-	_, _ = conn.Write(append([]byte{byte(resLen >> 8), byte(resLen & 0xFF)}, resData...))
+	fullLen2 := uint16(len(resData)) // #nosec G115
+	_, _ = conn.Write(append([]byte{byte(fullLen2 >> 8), byte(fullLen2 & 0xFF)}, resData...))
 	packet.PutBuffer(resBuffer)
 }
 

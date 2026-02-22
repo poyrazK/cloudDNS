@@ -1,5 +1,7 @@
 package server
 
+import "context"
+
 import (
 	"hash/fnv"
 	"sync"
@@ -87,6 +89,8 @@ func (c *DNSCache) Invalidate(key string) {
 }
 
 // Flush removes all items from all shards in the cache.
+func (c *DNSCache) Ping(_ context.Context) error { return nil }
+
 func (c *DNSCache) Flush() {
 	for i := 0; i < shardCount; i++ {
 		shard := c.shards[i]
