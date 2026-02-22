@@ -953,6 +953,39 @@ func TestDNSRecord_ReadTruncated(t *testing.T) {
 	}
 }
 
+func TestDNSQuestion_QClass(t *testing.T) {
+	tests := []struct {
+		name   string
+		qclass uint16
+		want   uint16
+	}{
+		{"Default Class", 0, 1}, // Should default to IN (1)
+		{"CH Class", 3, 3},
+		{"IN Class", 1, 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			q := NewDNSQuestion("test.com.", A)
+			q.QClass = tt.qclass
+			buf := NewBytePacketBuffer()
+			if err := q.Write(buf); err != nil {
+				t.Fatalf("Write failed: %v", err)
+			}
+
+			_ = buf.Seek(0)
+			parsed := DNSQuestion{}
+			if err := parsed.Read(buf); err != nil {
+				t.Fatalf("Read failed: %v", err)
+			}
+
+			if parsed.QClass != tt.want {
+				t.Errorf("QClass = %d, want %d", parsed.QClass, tt.want)
+			}
+		})
+	}
+}
+
 func TestTSIG_SignVerify(t *testing.T) {
 	// 1. Create a standard DNS query
 	p := NewDNSPacket()
