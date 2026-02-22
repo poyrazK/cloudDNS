@@ -195,4 +195,12 @@ func TestAnycastManager_CoverageBoost(t *testing.T) {
 	if !mgr.isAnnounced {
 		t.Errorf("Should stay announced")
 	}
+
+	// 3. Trigger check with no backends (edge case)
+	dnsSvc2 := &mockMultiBackendService{status: map[string]error{}}
+	mgr2 := NewAnycastManager(dnsSvc2, routing, vipMgr, "1.1.1.1", "lo", nil)
+	mgr2.TriggerCheck(ctx)
+	if !mgr2.isAnnounced {
+		t.Errorf("Empty health map should be considered healthy")
+	}
 }
