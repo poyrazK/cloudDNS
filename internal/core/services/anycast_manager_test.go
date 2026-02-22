@@ -175,3 +175,24 @@ func TestAnycastManager_StartStop(t *testing.T) {
 	// This just verifies it doesn't crash and respects context
 	mgr.Start(ctx)
 }
+
+func TestAnycastManager_CoverageBoost(t *testing.T) {
+	dnsSvc := &mockAnycastDNSService{healthy: true}
+	routing := &mockRoutingEngine{}
+	vipMgr := &mockVIPManager{}
+	mgr := NewAnycastManager(dnsSvc, routing, vipMgr, "1.1.1.1", "lo", nil)
+	ctx := context.Background()
+
+	// 1. Withdraw when NOT announced
+	mgr.withdraw(ctx) 
+	if mgr.isAnnounced {
+		t.Errorf("Should not be announced")
+	}
+
+	// 2. Announce when already healthy and announced
+	mgr.isAnnounced = true
+	mgr.TriggerCheck(ctx) // Should do nothing
+	if !mgr.isAnnounced {
+		t.Errorf("Should stay announced")
+	}
+}
