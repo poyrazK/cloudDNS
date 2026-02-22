@@ -316,12 +316,19 @@ func (q *DNSQuestion) Read(buffer *BytePacketBuffer) error {
 
 // Write serializes the DNSQuestion into the provided buffer.
 func (q *DNSQuestion) Write(buffer *BytePacketBuffer) error {
-	if err := buffer.WriteName(q.Name); err != nil { return err }
-	if err := buffer.Writeu16(uint16(q.QType)); err != nil { return err }
-	if q.QClass == 0 {
-		q.QClass = 1 // Default to IN if not set
+	if err := buffer.WriteName(q.Name); err != nil {
+		return err
 	}
-	if err := buffer.Writeu16(q.QClass); err != nil { return err }
+	if err := buffer.Writeu16(uint16(q.QType)); err != nil {
+		return err
+	}
+	class := q.QClass
+	if class == 0 {
+		class = 1 // Default to IN if not set
+	}
+	if err := buffer.Writeu16(class); err != nil {
+		return err
+	}
 	return nil
 }
 
