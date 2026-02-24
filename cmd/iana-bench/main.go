@@ -31,14 +31,22 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to connect to database: %v", err)
 	}
-	defer db.Close()
+	defer func() {
+		if errClose := db.Close(); errClose != nil {
+			log.Printf("failed to close database: %v", errClose)
+		}
+	}()
 
 	fmt.Println("Fetching domain names from database...")
 	rows, err := db.Query("SELECT DISTINCT name FROM dns_records WHERE name != '.'")
 	if err != nil {
 		log.Fatalf("failed to fetch names: %v", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if errClose := rows.Close(); errClose != nil {
+			log.Printf("failed to close rows: %v", errClose)
+		}
+	}()
 
 	var names []string
 	for rows.Next() {
@@ -69,7 +77,11 @@ func main() {
 			if err != nil {
 				return
 			}
-			defer conn.Close()
+			defer func() {
+				if errClose := conn.Close(); errClose != nil {
+					log.Printf("failed to close connection: %v", errClose)
+				}
+			}()
 
 			r := rand.New(rand.NewSource(time.Now().UnixNano() + int64(workerID)))
 			

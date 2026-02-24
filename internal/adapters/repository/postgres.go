@@ -240,7 +240,11 @@ func (r *PostgresRepository) BatchCreateRecords(ctx context.Context, records []d
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
+	defer func() {
+		if errClose := stmt.Close(); errClose != nil {
+			log.Printf("failed to close statement: %v", errClose)
+		}
+	}()
 
 	for _, record := range records {
 		_, err := stmt.ExecContext(ctx, record.ID, record.ZoneID, record.Name, record.Type, record.Content, record.TTL, record.Priority, record.Weight, record.Port, record.Network, record.CreatedAt, record.UpdatedAt)

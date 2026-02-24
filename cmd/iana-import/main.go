@@ -38,7 +38,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to download root zone: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if errClose := resp.Body.Close(); errClose != nil {
+			log.Printf("failed to close response body: %v", errClose)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		log.Fatalf("bad status: %s", resp.Status)
