@@ -1549,6 +1549,16 @@ func queryTypeToRecordType(qType packet.QueryType) domain.RecordType {
 		return domain.TypeSRV
 	case packet.PTR:
 		return domain.TypePTR
+	case packet.DS:
+		return domain.RecordType("DS")
+	case packet.DNSKEY:
+		return domain.RecordType("DNSKEY")
+	case packet.RRSIG:
+		return domain.RecordType("RRSIG")
+	case packet.NSEC:
+		return domain.RecordType("NSEC")
+	case packet.NSEC3:
+		return domain.RecordType("NSEC3")
 	case packet.ANY:
 		return ""
 	default:
