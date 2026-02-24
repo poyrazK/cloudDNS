@@ -38,7 +38,7 @@ func TestRFC4034_NSEC(t *testing.T) {
 
 	resPacket := packet.NewDNSPacket()
 	resBuf := packet.NewBytePacketBuffer()
-	copy(resBuf.Buf, capturedResp)
+	resBuf.Load(capturedResp)
 	_ = resPacket.FromBuffer(resBuf)
 
 	if resPacket.Header.ResCode != 3 {

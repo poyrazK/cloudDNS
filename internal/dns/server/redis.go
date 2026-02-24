@@ -2,10 +2,14 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"time"
 
+	"github.com/poyrazK/cloudDNS/internal/core/domain"
 	"github.com/redis/go-redis/v9"
 )
+
+const InvalidationChannel = "dns:invalidation"
 
 type RedisCache struct {
 	client *redis.Client
@@ -30,4 +34,19 @@ func (r *RedisCache) Get(ctx context.Context, key string) ([]byte, bool) {
 
 func (r *RedisCache) Set(ctx context.Context, key string, data []byte, ttl time.Duration) {
 	r.client.Set(ctx, "dns:"+key, data, ttl)
+}
+
+func (r *RedisCache) Ping(ctx context.Context) error {
+	return r.client.Ping(ctx).Err()
+}
+
+// Invalidate publishes an invalidation event to all nodes.
+func (r *RedisCache) Invalidate(ctx context.Context, name string, qType domain.RecordType) error {
+	msg := fmt.Sprintf("%s:%s", name, string(qType))
+	return r.client.Publish(ctx, InvalidationChannel, msg).Err()
+}
+
+// Subscribe returns a PubSub instance that receives invalidation keys.
+func (r *RedisCache) Subscribe(ctx context.Context) *redis.PubSub {
+	return r.client.Subscribe(ctx, InvalidationChannel)
 }

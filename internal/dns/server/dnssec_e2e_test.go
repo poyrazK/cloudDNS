@@ -23,7 +23,7 @@ import (
 func TestEndToEndDNSSEC_Lifecycle(t *testing.T) {
 	// 1. Setup Stack
 	repo := &mockServerRepo{}
-	dnsSvc := services.NewDNSService(repo)
+	dnsSvc := services.NewDNSService(repo, nil)
 	dnsAddr := "127.0.0.1:10057"
 	apiAddr := "127.0.0.1:18082"
 

@@ -19,7 +19,7 @@ import (
 func TestEndToEndDNS_Advanced(t *testing.T) {
 	// 1. Setup Stack with Mock Repo (or real PG if we wanted even more integration)
 	repo := &mockServerRepo{}
-	svc := services.NewDNSService(repo)
+	svc := services.NewDNSService(repo, nil)
 	dnsAddr := "127.0.0.1:10056"
 	apiAddr := "127.0.0.1:18081"
 
@@ -78,7 +78,7 @@ func TestEndToEndDNS_Advanced(t *testing.T) {
 	
 	res := packet.NewDNSPacket()
 	pBuf := packet.NewBytePacketBuffer()
-	copy(pBuf.Buf, resBuf[:n])
+	pBuf.Load(resBuf[:n])
 	_ = res.FromBuffer(pBuf)
 
 	if len(res.Answers) == 0 || res.Answers[0].Txt != "wildcard" {
@@ -110,7 +110,7 @@ func TestEndToEndDNS_Advanced(t *testing.T) {
 	
 	axfrRes := packet.NewDNSPacket()
 	arb := packet.NewBytePacketBuffer()
-	copy(arb.Buf, axfrRData)
+	arb.Load(axfrRData)
 	_ = axfrRes.FromBuffer(arb)
 	
 	if len(axfrRes.Answers) == 0 || axfrRes.Answers[0].Type != packet.SOA {
@@ -132,7 +132,7 @@ func TestEndToEndDNS_Advanced(t *testing.T) {
 	n2, _ := conn2.Read(resBuf)
 	res2 := packet.NewDNSPacket()
 	pBuf2 := packet.NewBytePacketBuffer()
-	copy(pBuf2.Buf, resBuf[:n2])
+	pBuf2.Load(resBuf[:n2])
 	_ = res2.FromBuffer(pBuf2)
 
 	foundNSEC := false

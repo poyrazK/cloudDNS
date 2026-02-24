@@ -33,7 +33,7 @@ func TestRFC4035_ADBit(t *testing.T) {
 
 	resPacket := packet.NewDNSPacket()
 	resBuf := packet.NewBytePacketBuffer()
-	copy(resBuf.Buf, capturedResp)
+	resBuf.Load(capturedResp)
 	_ = resPacket.FromBuffer(resBuf)
 
 	// ensure field exists
@@ -70,7 +70,7 @@ func TestRFC4035_NSEC(t *testing.T) {
 
 	res := packet.NewDNSPacket()
 	resBuf := packet.NewBytePacketBuffer()
-	copy(resBuf.Buf, capturedResp)
+	resBuf.Load(capturedResp)
 	_ = res.FromBuffer(resBuf)
 
 	if res.Header.ResCode != 3 {
@@ -121,7 +121,7 @@ func TestRFC4035_NSEC3(t *testing.T) {
 
 	res := packet.NewDNSPacket()
 	resBuf := packet.NewBytePacketBuffer()
-	copy(resBuf.Buf, capturedResp)
+	resBuf.Load(capturedResp)
 	_ = res.FromBuffer(resBuf)
 
 	foundNSEC3 := false

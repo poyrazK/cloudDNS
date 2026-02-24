@@ -12,6 +12,7 @@ type DNSRepository interface {
 	GetRecords(ctx context.Context, name string, qType domain.RecordType, clientIP string) ([]domain.Record, error)
 	GetIPsForName(ctx context.Context, name string, clientIP string) ([]string, error)
 	GetZone(ctx context.Context, name string) (*domain.Zone, error)
+	GetRecord(ctx context.Context, id string, zoneID string) (*domain.Record, error)
 	ListRecordsForZone(ctx context.Context, zoneID string) ([]domain.Record, error)
 	CreateZone(ctx context.Context, zone *domain.Zone) error
 	CreateZoneWithRecords(ctx context.Context, zone *domain.Zone, records []domain.Record) error
@@ -45,5 +46,25 @@ type DNSService interface {
 	DeleteRecord(ctx context.Context, recordID string, zoneID string) error
 	ImportZone(ctx context.Context, tenantID string, r io.Reader) (*domain.Zone, error)
 	ListAuditLogs(ctx context.Context, tenantID string) ([]domain.AuditLog, error)
-	HealthCheck(ctx context.Context) error
+	HealthCheck(ctx context.Context) map[string]error
+}
+
+// CacheInvalidator defines the interface for triggering cross-node cache invalidation.
+type CacheInvalidator interface {
+	Invalidate(ctx context.Context, name string, qType domain.RecordType) error
+	Ping(ctx context.Context) error
+}
+
+// RoutingEngine defines the interface for BGP route advertisement.
+type RoutingEngine interface {
+	Start(ctx context.Context, localASN, peerASN uint32, peerIP string) error
+	Announce(ctx context.Context, vip string) error
+	Withdraw(ctx context.Context, vip string) error
+	Stop() error
+}
+
+// VIPManager defines the interface for managing the Anycast VIP on the local system.
+type VIPManager interface {
+	Bind(ctx context.Context, vip, iface string) error
+	Unbind(ctx context.Context, vip, iface string) error
 }

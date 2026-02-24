@@ -283,15 +283,17 @@ func (h *DNSHeader) Write(buffer *BytePacketBuffer) error {
 
 // DNSQuestion represents a single question in the DNS question section.
 type DNSQuestion struct {
-	Name  string
-	QType QueryType
+	Name   string
+	QType  QueryType
+	QClass uint16
 }
 
 // NewDNSQuestion creates and returns a pointer to a new DNSQuestion.
 func NewDNSQuestion(name string, qtype QueryType) *DNSQuestion {
 	return &DNSQuestion{
-		Name:  name,
-		QType: qtype,
+		Name:   name,
+		QType:  qtype,
+		QClass: 1, // Default to IN
 	}
 }
 
@@ -305,17 +307,28 @@ func (q *DNSQuestion) Read(buffer *BytePacketBuffer) error {
 	if err != nil { return err }
 	q.QType = QueryType(qtype)
 
-	_, err = buffer.Readu16() // QCLASS
+	qclass, err := buffer.Readu16() // QCLASS
 	if err != nil { return err }
+	q.QClass = qclass
 
 	return nil
 }
 
 // Write serializes the DNSQuestion into the provided buffer.
 func (q *DNSQuestion) Write(buffer *BytePacketBuffer) error {
-	if err := buffer.WriteName(q.Name); err != nil { return err }
-	if err := buffer.Writeu16(uint16(q.QType)); err != nil { return err }
-	if err := buffer.Writeu16(1); err != nil { return err } // CLASS IN
+	if err := buffer.WriteName(q.Name); err != nil {
+		return err
+	}
+	if err := buffer.Writeu16(uint16(q.QType)); err != nil {
+		return err
+	}
+	class := q.QClass
+	if class == 0 {
+		class = 1 // Default to IN if not set
+	}
+	if err := buffer.Writeu16(class); err != nil {
+		return err
+	}
 	return nil
 }
 

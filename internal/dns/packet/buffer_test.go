@@ -5,7 +5,12 @@ import "testing"
 func TestBufferGetters(t *testing.T) {
 	buf := NewBytePacketBuffer()
 	data := []byte{1, 2, 3, 4, 5}
-	copy(buf.Buf, data)
+	buf.Load(data)
+
+	// Test Position
+	if buf.Position() != 0 {
+		t.Errorf("expected position 0, got %d", buf.Position())
+	}
 
 	// Test Get
 	val, err := buf.Get(2)
@@ -33,7 +38,7 @@ func TestBufferGetters(t *testing.T) {
 
 func TestBufferMutators(t *testing.T) {
 	buf := NewBytePacketBuffer()
-	
+
 	// Test WriteRange
 	_ = buf.WriteRange(20, []byte{0xAA, 0xBB})
 	got, _ := buf.GetRange(20, 2)
@@ -41,9 +46,25 @@ func TestBufferMutators(t *testing.T) {
 		t.Errorf("WriteRange failed")
 	}
 
+	// Reset for Step/Seek tests
+	buf.Reset()
+
 	// Test Step and Seek
-	_ = buf.Step(10)
-	_ = buf.Seek(5)
+	err := buf.Step(10)
+	if err != nil {
+		t.Errorf("Step(10) failed: %v", err)
+	}
+	if buf.Position() != 10 {
+		t.Errorf("expected position 10, got %d", buf.Position())
+	}
+	
+	err = buf.Seek(5)
+	if err != nil {
+		t.Errorf("Seek(5) failed: %v", err)
+	}
+	if buf.Position() != 5 {
+		t.Errorf("expected position 5, got %d", buf.Position())
+	}
 
 	// Test Error paths for other methods
 	if err := buf.WriteRange(MaxPacketSize, []byte{1}); err == nil {
@@ -64,7 +85,10 @@ func TestBuffer_ReadErrors(t *testing.T) {
 	if _, err := buf.Readu32(); err == nil {
 		t.Errorf("Readu32 at end of buffer should fail")
 	}
-	if _, err := buf.ReadRange(MaxPacketSize-1, 5); err == nil {
+	
+	buf.Reset()
+	buf.Load([]byte{1, 2})
+	if _, err := buf.ReadRange(0, 5); err == nil {
 		t.Errorf("ReadRange out of bounds should fail")
 	}
 }

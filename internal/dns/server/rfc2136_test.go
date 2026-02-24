@@ -53,7 +53,7 @@ func TestHandleUpdateAddRecord(t *testing.T) {
 
 	resPacket := packet.NewDNSPacket()
 	pBuf := packet.NewBytePacketBuffer()
-	copy(pBuf.Buf, capturedResp)
+	pBuf.Load(capturedResp)
 	_ = resPacket.FromBuffer(pBuf)
 
 	if resPacket.Header.ResCode != packet.RcodeNoError {
@@ -157,7 +157,7 @@ func TestHandleUpdatePrerequisiteFail(t *testing.T) {
 
 	resPacket := packet.NewDNSPacket()
 	pBuf := packet.NewBytePacketBuffer()
-	copy(pBuf.Buf, capturedResp)
+	pBuf.Load(capturedResp)
 	_ = resPacket.FromBuffer(pBuf)
 
 	if resPacket.Header.ResCode != packet.RcodeNxDomain {

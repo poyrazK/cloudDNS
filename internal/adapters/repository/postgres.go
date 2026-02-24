@@ -111,6 +111,37 @@ func (r *PostgresRepository) GetZone(ctx context.Context, name string) (*domain.
 	return &z, nil
 }
 
+func (r *PostgresRepository) GetRecord(ctx context.Context, id string, zoneID string) (*domain.Record, error) {
+	query := `SELECT id, zone_id, name, type, content, ttl, priority, weight, port, network FROM dns_records 
+	          WHERE id = $1 AND zone_id = $2`
+	
+	var rec domain.Record
+	var priority, weight, port sql.NullInt32
+	errRow := r.db.QueryRowContext(ctx, query, id, zoneID).Scan(&rec.ID, &rec.ZoneID, &rec.Name, &rec.Type, &rec.Content, &rec.TTL, &priority, &weight, &port, &rec.Network)
+	
+	if errors.Is(errRow, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if errRow != nil {
+		return nil, errRow
+	}
+
+	if priority.Valid {
+		p := int(priority.Int32)
+		rec.Priority = &p
+	}
+	if weight.Valid {
+		w := int(weight.Int32)
+		rec.Weight = &w
+	}
+	if port.Valid {
+		p := int(port.Int32)
+		rec.Port = &p
+	}
+
+	return &rec, nil
+}
+
 func (r *PostgresRepository) ListRecordsForZone(ctx context.Context, zoneID string) ([]domain.Record, error) {
 	query := `SELECT id, zone_id, name, type, content, ttl, priority, weight, port, network FROM dns_records WHERE zone_id = $1`
 	rows, errQuery := r.db.QueryContext(ctx, query, zoneID)

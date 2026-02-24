@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"bytes"
 	"context"
 	"net"
@@ -20,6 +21,7 @@ type mockServerRepo struct {
 	zones   []domain.Zone
 	changes []domain.ZoneChange
 	keys    []domain.DNSSECKey
+	pingErr error
 }
 
 func (m *mockServerRepo) GetRecords(_ context.Context, name string, qType domain.RecordType, clientIP string) ([]domain.Record, error) {
@@ -58,6 +60,17 @@ func (m *mockServerRepo) GetZone(_ context.Context, name string) (*domain.Zone, 
 		zName := strings.TrimSuffix(strings.ToLower(z.Name), ".")
 		if zName == qName {
 			return &z, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *mockServerRepo) GetRecord(ctx context.Context, id string, zoneID string) (*domain.Record, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, r := range m.records {
+		if r.ID == id && r.ZoneID == zoneID {
+			return &r, nil
 		}
 	}
 	return nil, nil
@@ -251,7 +264,11 @@ func (m *mockServerRepo) UpdateKey(ctx context.Context, key *domain.DNSSECKey) e
 	return nil
 }
 
-func (m *mockServerRepo) Ping(ctx context.Context) error { return nil }
+func (m *mockServerRepo) Ping(ctx context.Context) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.pingErr
+}
 
 func TestHandlePacketLocalHit(t *testing.T) {
 	repo := &mockServerRepo{
@@ -278,7 +295,7 @@ func TestHandlePacketLocalHit(t *testing.T) {
 	}
 
 	resBuf := packet.NewBytePacketBuffer()
-	copy(resBuf.Buf, capturedResp)
+	resBuf.Load(capturedResp)
 	resp := packet.NewDNSPacket()
 	_ = resp.FromBuffer(resBuf)
 
@@ -322,7 +339,7 @@ func TestHandlePacketCacheHit(t *testing.T) {
 	}
 
 	resBuf := packet.NewBytePacketBuffer()
-	copy(resBuf.Buf, capturedResp)
+	resBuf.Load(capturedResp)
 	resp := packet.NewDNSPacket()
 	_ = resp.FromBuffer(resBuf)
 
@@ -396,7 +413,7 @@ func TestHandlePacketNXDOMAIN(t *testing.T) {
 
 	resPacket := packet.NewDNSPacket()
 	pBuf := packet.NewBytePacketBuffer()
-	copy(pBuf.Buf, capturedResp)
+	pBuf.Load(capturedResp)
 	_ = resPacket.FromBuffer(pBuf)
 
 	if resPacket.Header.ResCode != 3 {
@@ -422,7 +439,7 @@ func TestHandlePacketNoQuestions(t *testing.T) {
 
 	resPacket := packet.NewDNSPacket()
 	pBuf := packet.NewBytePacketBuffer()
-	copy(pBuf.Buf, capturedResp)
+	pBuf.Load(capturedResp)
 	_ = resPacket.FromBuffer(pBuf)
 
 	if resPacket.Header.ResCode != 4 {
@@ -475,7 +492,7 @@ func TestHandlePacketTruncation(t *testing.T) {
 	if err := srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
 		resPacket := packet.NewDNSPacket()
 		resBuffer := packet.NewBytePacketBuffer()
-		copy(resBuffer.Buf, resp)
+		resBuffer.Load(resp)
 		_ = resPacket.FromBuffer(resBuffer)
 
 		if !resPacket.Header.TruncatedMessage {
@@ -562,3 +579,14 @@ func (m *mockResponseWriter) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 func (m *mockResponseWriter) WriteHeader(statusCode int) { m.code = statusCode }
+
+func TestHealthCheck_PingError(t *testing.T) {
+	repo := &mockServerRepo{pingErr: errors.New("db down")}
+	srv := NewServer("127.0.0.1:0", repo, nil)
+	
+	ctx := context.Background()
+	checks := srv.Repo.Ping(ctx)
+	if checks == nil || checks.Error() != "db down" {
+		t.Errorf("Expected 'db down' error, got %v", checks)
+	}
+}

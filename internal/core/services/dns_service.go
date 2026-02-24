@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -14,11 +15,17 @@ import (
 )
 
 type dnsService struct {
-	repo ports.DNSRepository
+	repo   ports.DNSRepository
+	cache  ports.CacheInvalidator // Used for cross-node invalidation
+	logger *slog.Logger
 }
 
-func NewDNSService(repo ports.DNSRepository) ports.DNSService {
-	return &dnsService{repo: repo}
+func NewDNSService(repo ports.DNSRepository, cache ports.CacheInvalidator) ports.DNSService {
+	return &dnsService{
+		repo:   repo,
+		cache:  cache,
+		logger: slog.Default(),
+	}
 }
 
 func (s *dnsService) CreateZone(ctx context.Context, zone *domain.Zone) error {
@@ -80,12 +87,19 @@ func (s *dnsService) CreateRecord(ctx context.Context, record *domain.Record) er
 		return err
 	}
 
+	// Invalidate cache across all nodes
+	if s.cache != nil {
+		if err := s.cache.Invalidate(ctx, record.Name, record.Type); err != nil {
+			s.logger.Warn("failed to invalidate cache after record creation", "name", record.Name, "type", record.Type, "error", err)
+		}
+	}
+
 	s.audit(ctx, "unknown", "CREATE_RECORD", "RECORD", record.ID, fmt.Sprintf("Created %s record for %s", record.Type, record.Name))
 	return nil
 }
 
 func (s *dnsService) audit(ctx context.Context, tenantID, action, resType, resID, details string) {
-	log := &domain.AuditLog{
+	logEntry := &domain.AuditLog{
 		ID:           uuid.New().String(),
 		TenantID:     tenantID,
 		Action:       action,
@@ -94,7 +108,7 @@ func (s *dnsService) audit(ctx context.Context, tenantID, action, resType, resID
 		Details:      details,
 		CreatedAt:    time.Now(),
 	}
-	_ = s.repo.SaveAuditLog(ctx, log) // Fire and forget audit for now
+	_ = s.repo.SaveAuditLog(ctx, logEntry) // Fire and forget audit for now
 }
 
 func (s *dnsService) Resolve(ctx context.Context, name string, qType domain.RecordType, clientIP string) ([]domain.Record, error) {
@@ -147,10 +161,27 @@ func (s *dnsService) DeleteZone(ctx context.Context, zoneID string, tenantID str
 }
 
 func (s *dnsService) DeleteRecord(ctx context.Context, recordID string, zoneID string) error {
+	// Fetch record details to invalidate the cache
+	record, err := s.repo.GetRecord(ctx, recordID, zoneID)
+	if err != nil {
+		return fmt.Errorf("failed to fetch record before deletion: %w", err)
+	}
+
+	if record != nil && s.cache != nil {
+		if errInv := s.cache.Invalidate(ctx, record.Name, record.Type); errInv != nil {
+			s.logger.Warn("failed to invalidate cache before record deletion", "name", record.Name, "type", record.Type, "error", errInv)
+		}
+	}
+
 	if err := s.repo.DeleteRecord(ctx, recordID, zoneID); err != nil {
 		return err
 	}
-	s.audit(ctx, "unknown", "DELETE_RECORD", "RECORD", recordID, "Deleted record")
+
+	subject := "unknown"
+	if record != nil {
+		subject = record.Name
+	}
+	s.audit(ctx, "unknown", "DELETE_RECORD", "RECORD", recordID, fmt.Sprintf("Deleted record for %s", subject))
 	return nil
 }
 
@@ -188,6 +219,15 @@ func (s *dnsService) ListAuditLogs(ctx context.Context, tenantID string) ([]doma
 	return s.repo.GetAuditLogs(ctx, tenantID)
 }
 
-func (s *dnsService) HealthCheck(ctx context.Context) error {
-	return s.repo.Ping(ctx)
+func (s *dnsService) HealthCheck(ctx context.Context) map[string]error {
+	res := make(map[string]error)
+	if s.repo != nil {
+		res["postgres"] = s.repo.Ping(ctx)
+	} else {
+		res["postgres"] = nil // Considered healthy if no repo required (test mode)
+	}
+	if s.cache != nil {
+		res["redis"] = s.cache.Ping(ctx)
+	}
+	return res
 }

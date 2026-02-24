@@ -709,6 +709,8 @@ func TestReadName_MaxJumps(t *testing.T) {
 	buf.Buf[1] = 0x02
 	buf.Buf[2] = 0xC0
 	buf.Buf[3] = 0x00
+	buf.Len = 4
+	buf.parsing = true
 	
 	_ = buf.Seek(0)
 	_, err := buf.ReadName()
@@ -953,6 +955,39 @@ func TestDNSRecord_ReadTruncated(t *testing.T) {
 	}
 }
 
+func TestDNSQuestion_QClass(t *testing.T) {
+	tests := []struct {
+		name   string
+		qclass uint16
+		want   uint16
+	}{
+		{"Default Class", 0, 1}, // Should default to IN (1)
+		{"CH Class", 3, 3},
+		{"IN Class", 1, 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			q := NewDNSQuestion("test.com.", A)
+			q.QClass = tt.qclass
+			buf := NewBytePacketBuffer()
+			if err := q.Write(buf); err != nil {
+				t.Fatalf("Write failed: %v", err)
+			}
+
+			_ = buf.Seek(0)
+			parsed := DNSQuestion{}
+			if err := parsed.Read(buf); err != nil {
+				t.Fatalf("Read failed: %v", err)
+			}
+
+			if parsed.QClass != tt.want {
+				t.Errorf("QClass = %d, want %d", parsed.QClass, tt.want)
+			}
+		})
+	}
+}
+
 func TestTSIG_SignVerify(t *testing.T) {
 	// 1. Create a standard DNS query
 	p := NewDNSPacket()
@@ -999,4 +1034,30 @@ func TestTSIG_SignVerify(t *testing.T) {
 		t.Errorf("Expected time drift error, got %v", err)
 	}
 	tsigRec.TimeSigned = originalTime
+}
+
+func TestBuffer_ReadRange_Error(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	_, err := buf.ReadRange(MaxPacketSize - 1, 10)
+	if err == nil {
+		t.Error("expected error when reading out of bounds range")
+	}
+}
+
+func TestDNSHeader_Read_Error(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	h := DNSHeader{}
+	err := h.Read(buf) // Buffer empty
+	if err == nil {
+		t.Error("expected error when reading header from empty buffer")
+	}
+}
+
+func TestDNSPacket_FromBuffer_Error(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	p := NewDNSPacket()
+	err := p.FromBuffer(buf)
+	if err == nil {
+		t.Error("expected error when parsing packet from empty buffer")
+	}
 }

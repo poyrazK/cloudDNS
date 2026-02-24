@@ -125,11 +125,16 @@ func (s *Server) sendQuery(server string, name string, _ packet.QueryType) (*pac
 
 	resBuffer := packet.NewBytePacketBuffer()
 	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-	n, errRead := conn.Read(resBuffer.Buf)
+	
+	// Read into a temporary buffer first
+	tmp := make([]byte, packet.MaxPacketSize)
+	n, errRead := conn.Read(tmp)
 	if errRead != nil {
 		return nil, errRead
 	}
-	resBuffer.Buf = resBuffer.Buf[:n]
+	
+	// Use Load() to correctly update resBuffer.Len and parsing flag
+	resBuffer.Load(tmp[:n])
 
 	resp := packet.NewDNSPacket()
 	if errFromBuf := resp.FromBuffer(resBuffer); errFromBuf != nil {

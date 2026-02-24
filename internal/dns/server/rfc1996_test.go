@@ -35,7 +35,7 @@ func TestHandleNotify(t *testing.T) {
 
 	resp := packet.NewDNSPacket()
 	resBuf := packet.NewBytePacketBuffer()
-	copy(resBuf.Buf, capturedResp)
+	resBuf.Load(capturedResp)
 	_ = resp.FromBuffer(resBuf)
 
 	// RFC 1996: The response MUST have the same ID, Opcode, and the QR bit set.

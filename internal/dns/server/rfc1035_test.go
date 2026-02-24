@@ -73,7 +73,7 @@ func TestRFC1035_ResponseFormat(t *testing.T) {
 
 	resPacket := packet.NewDNSPacket()
 	resBuf := packet.NewBytePacketBuffer()
-	copy(resBuf.Buf, capturedResp)
+	resBuf.Load(capturedResp)
 	_ = resPacket.FromBuffer(resBuf)
 
 	// RFC 1035: AA bit should be set for authoritative answers
