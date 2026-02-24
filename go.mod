@@ -1,13 +1,13 @@
 module github.com/poyrazK/cloudDNS
 
-go 1.24.0
+go 1.24.5
 
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/alicebob/miniredis/v2 v2.36.1
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.8.0
-	github.com/osrg/gobgp/v4 v4.2.0
+	github.com/osrg/gobgp/v4 v4.0.0
 	github.com/redis/go-redis/v9 v9.17.3
 	github.com/testcontainers/testcontainers-go v0.40.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.40.0
