@@ -1,11 +1,13 @@
 package main
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/binary"
 	"flag"
 	"fmt"
 	"log"
-	"math/rand"
+	"math/big"
 	"net"
 	"os"
 	"sync"
@@ -70,7 +72,7 @@ func main() {
 
 	for i := 0; i < *concurrency; i++ {
 		wg.Add(1)
-		go func(workerID int) {
+		go func() {
 			defer wg.Done()
 			
 			conn, err := net.Dial("udp", *target)
@@ -83,13 +85,21 @@ func main() {
 				}
 			}()
 
-			r := rand.New(rand.NewSource(time.Now().UnixNano() + int64(workerID)))
-			
 			for j := 0; j < queriesPerWorker; j++ {
-				name := names[r.Intn(len(names))]
+				// Use crypto/rand for secure random selection (G404)
+				n, errRand := rand.Int(rand.Reader, big.NewInt(int64(len(names))))
+				if errRand != nil {
+					continue
+				}
+				name := names[n.Int64()]
 				
 				p := packet.NewDNSPacket()
-				p.Header.ID = uint16(r.Uint32())
+				
+				// Secure random ID
+				var idBytes [2]byte
+				_, _ = rand.Read(idBytes[:])
+				p.Header.ID = binary.BigEndian.Uint16(idBytes[:])
+				
 				p.Questions = append(p.Questions, packet.DNSQuestion{Name: name, QType: packet.NS})
 
 				buf := packet.NewBytePacketBuffer()
@@ -111,7 +121,7 @@ func main() {
 					atomic.AddUint64(&success, 1)
 				}
 			}
-		}(i)
+		}()
 	}
 
 	wg.Wait()

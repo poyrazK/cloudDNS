@@ -22,8 +22,26 @@ func TestConvertPacketRecordToDomain_Extra(t *testing.T) {
 	// Test the edge cases in ConvertPacketRecordToDomain for coverage
 	zoneID := uuid.New().String()
 	
+	// Test DS record
+	dsRec := packet.DNSRecord{
+		Name: "test.com.",
+		Type: packet.DS,
+		TTL: 3600,
+		KeyTag: 12345,
+		Algorithm: 13,
+		DigestType: 2,
+		Digest: []byte{0xDE, 0xAD, 0xBE, 0xEF},
+	}
+	dRec, err := ConvertPacketRecordToDomain(dsRec, zoneID)
+	if err != nil {
+		t.Fatalf("ConvertPacketRecordToDomain failed for DS: %v", err)
+	}
+	if dRec.Type != "DS" || dRec.Content != "12345 13 2 deadbeef" {
+		t.Errorf("Unexpected DS content: %s", dRec.Content)
+	}
+
 	// Test unsupported type
-	_, err := ConvertPacketRecordToDomain(packet.DNSRecord{Type: 999}, zoneID)
+	_, err = ConvertPacketRecordToDomain(packet.DNSRecord{Type: 999}, zoneID)
 	if err == nil {
 		t.Errorf("Expected error for unsupported type 999")
 	}
