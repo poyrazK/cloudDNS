@@ -125,7 +125,7 @@ func (s *Server) automateDNSSEC() {
 
 func (s *Server) startInvalidationListener(ctx context.Context) {
 	pubsub := s.Redis.Subscribe(ctx)
-	defer pubsub.Close()
+	defer func() { _ = pubsub.Close() }()
 	
 	ch := pubsub.Channel()
 	s.Logger.Info("started global cache invalidation listener")

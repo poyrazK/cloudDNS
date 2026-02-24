@@ -51,7 +51,7 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		defer db.Close()
+		defer func() { _ = db.Close() }()
 		repo = repository.NewPostgresRepository(db)
 	}
 
