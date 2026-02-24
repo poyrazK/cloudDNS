@@ -220,6 +220,38 @@ func (r *PostgresRepository) CreateRecord(ctx context.Context, record *domain.Re
 	return err
 }
 
+func (r *PostgresRepository) BatchCreateRecords(ctx context.Context, records []domain.Record) error {
+	if len(records) == 0 {
+		return nil
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if errRollback := tx.Rollback(); errRollback != nil && !errors.Is(errRollback, sql.ErrTxDone) {
+			log.Printf("failed to rollback batch transaction: %v", errRollback)
+		}
+	}()
+
+	stmt, err := tx.PrepareContext(ctx, `INSERT INTO dns_records (id, zone_id, name, type, content, ttl, priority, weight, port, network, created_at, updated_at) 
+			  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, record := range records {
+		_, err := stmt.ExecContext(ctx, record.ID, record.ZoneID, record.Name, record.Type, record.Content, record.TTL, record.Priority, record.Weight, record.Port, record.Network, record.CreatedAt, record.UpdatedAt)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
 func (r *PostgresRepository) ListZones(ctx context.Context, tenantID string) ([]domain.Zone, error) {
 	query := `SELECT id, tenant_id, name, vpc_id, description, created_at, updated_at FROM dns_zones`
 	var rows *sql.Rows
