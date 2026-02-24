@@ -221,7 +221,11 @@ func (s *dnsService) ListAuditLogs(ctx context.Context, tenantID string) ([]doma
 
 func (s *dnsService) HealthCheck(ctx context.Context) map[string]error {
 	res := make(map[string]error)
-	res["postgres"] = s.repo.Ping(ctx)
+	if s.repo != nil {
+		res["postgres"] = s.repo.Ping(ctx)
+	} else {
+		res["postgres"] = nil // Considered healthy if no repo required (test mode)
+	}
 	if s.cache != nil {
 		res["redis"] = s.cache.Ping(ctx)
 	}

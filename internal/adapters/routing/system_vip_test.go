@@ -63,6 +63,13 @@ func TestSystemVIPAdapter_Validation(t *testing.T) {
 	if err := adapter.Bind(ctx, "1.1.1.1", ""); err == nil {
 		t.Error("expected error for empty interface")
 	}
+
+	if err := adapter.Unbind(ctx, "invalid-ip", "lo"); err == nil {
+		t.Error("expected error for invalid IP in Unbind")
+	}
+	if err := adapter.Unbind(ctx, "1.1.1.1", ""); err == nil {
+		t.Error("expected error for empty interface in Unbind")
+	}
 }
 
 func TestSystemVIPAdapter_OSLogic(t *testing.T) {

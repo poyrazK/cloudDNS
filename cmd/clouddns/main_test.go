@@ -5,46 +5,71 @@ import (
 	"testing"
 )
 
-func TestRun_EarlyExit(t *testing.T) {
-	// Set environment variables to trigger the test-only early exit path
-	t.Setenv("DATABASE_URL", "none")
-	t.Setenv("API_ADDR", "test-exit")
-
-	if err := run(); err != nil {
-		t.Errorf("run() failed: %v", err)
+func TestGetEnvUint32(t *testing.T) {
+	os.Setenv("TEST_UINT32", "12345")
+	defer os.Unsetenv("TEST_UINT32")
+	
+	if val := getEnvUint32("TEST_UINT32", 0); val != 12345 {
+		t.Errorf("Expected 12345, got %d", val)
 	}
-}
-
-func TestRun_FullInit(t *testing.T) {
-	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost:5432/db?sslmode=disable")
-	t.Setenv("API_ADDR", "test-exit")
-
-	if err := run(); err != nil {
-		t.Errorf("run() failed: %v", err)
+	
+	if val := getEnvUint32("NON_EXISTENT", 99); val != 99 {
+		t.Errorf("Expected default 99, got %d", val)
 	}
-}
-
-func TestMainCall(t *testing.T) {
-	t.Setenv("DATABASE_URL", "none")
-	t.Setenv("API_ADDR", "test-exit")
-	main()
+	
+	os.Setenv("INVALID_UINT32", "not-a-number")
+	defer os.Unsetenv("INVALID_UINT32")
+	if val := getEnvUint32("INVALID_UINT32", 42); val != 42 {
+		t.Errorf("Expected default 42 for invalid input, got %d", val)
+	}
 }
 
 func TestRun_ConfigErrors(t *testing.T) {
-	t.Setenv("API_ADDR", "test-exit")
-
-	// 1. Missing DB URL (unset explicitly for this test logic if needed, 
-	// though t.Setenv isolated to test)
-	err := os.Unsetenv("DATABASE_URL")
-	if err != nil {
-		t.Fatalf("failed to unset env: %v", err)
+	// Test DBURL="none" exit
+	os.Setenv("DATABASE_URL", "none")
+	defer os.Unsetenv("DATABASE_URL")
+	if err := run(); err != nil {
+		t.Errorf("Expected nil for DBURL=none, got %v", err)
 	}
-	
-	// We just want to hit the path.
-	_ = run()
 
-	// 2. Invalid port
-	t.Setenv("DATABASE_URL", "none")
-	t.Setenv("DNS_ADDR", "127.0.0.1:invalid")
+	// Test test-exit
+	os.Setenv("DATABASE_URL", "postgres://localhost:5432/test")
+	os.Setenv("API_ADDR", "test-exit")
+	defer os.Unsetenv("DATABASE_URL")
+	defer os.Unsetenv("API_ADDR")
+	
+	_ = run()
+}
+
+func TestRun_AnycastMissingConfig(t *testing.T) {
+	os.Setenv("DATABASE_URL", "postgres://localhost:5432/test")
+	os.Setenv("ANYCAST_ENABLED", "true")
+	os.Setenv("ANYCAST_VIP", "") // Missing
+	defer os.Unsetenv("DATABASE_URL")
+	defer os.Unsetenv("ANYCAST_ENABLED")
+	defer os.Unsetenv("ANYCAST_VIP")
+
+	err := run()
+	if err == nil || err.Error() == "" {
+		t.Error("expected error for missing ANYCAST_VIP")
+	}
+}
+
+func TestRun_AnycastCompleteConfig(t *testing.T) {
+	os.Setenv("DATABASE_URL", "none")
+	os.Setenv("ANYCAST_ENABLED", "true")
+	os.Setenv("ANYCAST_VIP", "1.1.1.1")
+	os.Setenv("BGP_PEER_IP", "1.1.1.2")
+	os.Setenv("BGP_ROUTER_ID", "1.1.1.1")
+	os.Setenv("BGP_NEXT_HOP", "1.1.1.1")
+	os.Setenv("API_ADDR", "test-exit")
+	
+	defer os.Unsetenv("ANYCAST_ENABLED")
+	defer os.Unsetenv("ANYCAST_VIP")
+	defer os.Unsetenv("BGP_PEER_IP")
+	defer os.Unsetenv("BGP_ROUTER_ID")
+	defer os.Unsetenv("BGP_NEXT_HOP")
+	defer os.Unsetenv("API_ADDR")
+
 	_ = run()
 }

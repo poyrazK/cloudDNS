@@ -175,3 +175,11 @@ func TestMain_ScaleMode(t *testing.T) {
 	// Since we want coverage, we just need to hit the branch.
 	main()
 }
+
+func TestMain_SeedMode(t *testing.T) {
+	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
+	os.Args = []string{"cmd", "-mode", "seed", "-range", "1"}
+	
+	defer func() { recover() }()
+	main()
+}

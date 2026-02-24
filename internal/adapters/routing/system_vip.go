@@ -12,10 +12,23 @@ import (
 	"github.com/poyrazK/cloudDNS/internal/core/ports"
 )
 
+// commandExecutor allows mocking exec.Command for testing
+type commandExecutor interface {
+	Run(ctx context.Context, name string, arg ...string) ([]byte, error)
+}
+
+type realExecutor struct{}
+
+func (e *realExecutor) Run(ctx context.Context, name string, arg ...string) ([]byte, error) {
+	return exec.CommandContext(ctx, name, arg...).CombinedOutput()
+}
+
 // SystemVIPAdapter implements the VIPManager port by executing system commands
 // to bind/unbind IP addresses to local interfaces.
 type SystemVIPAdapter struct {
-	logger *slog.Logger
+	logger   *slog.Logger
+	executor commandExecutor
+	os       string // for testing
 }
 
 // NewSystemVIPAdapter initializes a new SystemVIPAdapter.
@@ -23,7 +36,11 @@ func NewSystemVIPAdapter(logger *slog.Logger) *SystemVIPAdapter {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &SystemVIPAdapter{logger: logger}
+	return &SystemVIPAdapter{
+		logger:   logger,
+		executor: &realExecutor{},
+		os:       runtime.GOOS,
+	}
 }
 
 // Bind attaches a VIP to the specified interface.
@@ -35,21 +52,20 @@ func (a *SystemVIPAdapter) Bind(ctx context.Context, vip, iface string) error {
 		return fmt.Errorf("interface name cannot be empty")
 	}
 
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
+	var name string
+	var args []string
+	switch a.os {
 	case "linux":
-		// ip addr add 1.1.1.1/32 dev lo
-		// #nosec G204
-		cmd = exec.CommandContext(ctx, "ip", "addr", "add", vip+"/32", "dev", iface)
+		name = "ip"
+		args = []string{"addr", "add", vip + "/32", "dev", iface}
 	case "darwin":
-		// ifconfig lo0 alias 1.1.1.1 255.255.255.255
-		// #nosec G204
-		cmd = exec.CommandContext(ctx, "ifconfig", iface, "alias", vip, "255.255.255.255")
+		name = "ifconfig"
+		args = []string{iface, "alias", vip, "255.255.255.255"}
 	default:
-		return fmt.Errorf("unsupported OS for VIP management: %s", runtime.GOOS)
+		return fmt.Errorf("unsupported OS for VIP management: %s", a.os)
 	}
 
-	output, err := cmd.CombinedOutput()
+	output, err := a.executor.Run(ctx, name, args...)
 	if err != nil {
 		outStr := string(output)
 		// Check for common "already exists" errors to make it idempotent
@@ -74,23 +90,22 @@ func (a *SystemVIPAdapter) Unbind(ctx context.Context, vip, iface string) error 
 		return fmt.Errorf("interface name cannot be empty")
 	}
 
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
+	var name string
+	var args []string
+	switch a.os {
 	case "linux":
-		// #nosec G204
-		cmd = exec.CommandContext(ctx, "ip", "addr", "del", vip+"/32", "dev", iface)
+		name = "ip"
+		args = []string{"addr", "del", vip + "/32", "dev", iface}
 	case "darwin":
-		// #nosec G204
-		cmd = exec.CommandContext(ctx, "ifconfig", iface, "-alias", vip)
+		name = "ifconfig"
+		args = []string{iface, "-alias", vip}
 	default:
 		return a.handleUnsupportedOS()
 	}
 
-	output, err := cmd.CombinedOutput()
+	output, err := a.executor.Run(ctx, name, args...)
 	if err != nil {
 		outStr := string(output)
-		// Ignore if it's already gone? No, usually Unbind should be explicit.
-		// But for robustness we can log and return error.
 		a.logger.Warn("VIP unbind command finished with error", "error", err, "vip", vip, "output", outStr)
 		return fmt.Errorf("failed to unbind VIP: %w (output: %s)", err, outStr)
 	}
@@ -100,7 +115,7 @@ func (a *SystemVIPAdapter) Unbind(ctx context.Context, vip, iface string) error 
 }
 
 func (a *SystemVIPAdapter) handleUnsupportedOS() error {
-	return fmt.Errorf("unsupported OS for VIP management: %s", runtime.GOOS)
+	return fmt.Errorf("unsupported OS for VIP management: %s", a.os)
 }
 
 var _ ports.VIPManager = (*SystemVIPAdapter)(nil)

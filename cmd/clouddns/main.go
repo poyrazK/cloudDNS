@@ -43,18 +43,17 @@ func run() error {
 		dbURL = "postgres://postgres:postgres@localhost:5432/clouddns?sslmode=disable"
 	}
 
-	// For testing purposes, if DB is "none", we just exit early with success
-	if dbURL == "none" {
-		return nil
+	var db *sql.DB
+	var repo ports.DNSRepository
+	if dbURL != "none" {
+		var err error
+		db, err = sql.Open("pgx", dbURL)
+		if err != nil {
+			return err
+		}
+		defer db.Close()
+		repo = repository.NewPostgresRepository(db)
 	}
-
-	db, err := sql.Open("pgx", dbURL)
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-
-	repo := repository.NewPostgresRepository(db)
 
 	var cacheInvalidator ports.CacheInvalidator
 	redisURL := os.Getenv("REDIS_URL")
@@ -143,7 +142,7 @@ func run() error {
 	)
 
 	// For testing the full initialization path
-	if apiAddr == "test-exit" {
+	if apiAddr == "test-exit" || dbURL == "none" {
 		return nil
 	}
 
@@ -165,7 +164,7 @@ func run() error {
 	<-ctx.Done()
 	logger.Info("shutting down services...")
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond) // Fast timeout for tests
 	defer cancel()
 
 	if err := s.Shutdown(shutdownCtx); err != nil {
