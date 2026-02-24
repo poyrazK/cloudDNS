@@ -29,7 +29,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to connect to database: %v", err)
 	}
-	defer db.Close()
+	defer func() {
+		if errClose := db.Close(); errClose != nil {
+			log.Printf("failed to close database: %v", errClose)
+		}
+	}()
 
 	repo := repository.NewPostgresRepository(db)
 
