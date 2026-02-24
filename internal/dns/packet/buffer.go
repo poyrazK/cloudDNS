@@ -299,6 +299,16 @@ func (b *BytePacketBuffer) WriteName(name string) error {
 			return b.Write(0)
 		}
 
+		if b.HasNames {
+			lower := strings.ToLower(curr)
+			if pos, ok := b.names[lower]; ok {
+				return b.Writeu16(uint16(pos) | 0xC000) // #nosec G115
+			}
+			if b.Pos < 0x4000 {
+				b.names[lower] = b.Pos
+			}
+		}
+
 		dotIdx := strings.IndexByte(curr, '.')
 		if dotIdx == -1 {
 			return b.Write(0)
@@ -309,14 +319,6 @@ func (b *BytePacketBuffer) WriteName(name string) error {
 			return errors.New("label too long")
 		}
 		if len(label) > 0 {
-			// Save position of this suffix before writing the label length
-			if b.HasNames {
-				lower := strings.ToLower(curr)
-				if b.Pos < 0x4000 {
-					b.names[lower] = b.Pos
-				}
-			}
-
 			if err := b.Write(byte(len(label))); err != nil {
 				return err
 			}

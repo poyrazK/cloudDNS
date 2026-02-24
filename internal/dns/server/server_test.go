@@ -110,6 +110,13 @@ func (m *mockServerRepo) CreateRecord(ctx context.Context, record *domain.Record
 	return nil
 }
 
+func (m *mockServerRepo) BatchCreateRecords(ctx context.Context, records []domain.Record) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.records = append(m.records, records...)
+	return nil
+}
+
 func (m *mockServerRepo) ListZones(ctx context.Context, tenantID string) ([]domain.Zone, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

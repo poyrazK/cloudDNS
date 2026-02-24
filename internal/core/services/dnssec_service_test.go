@@ -24,6 +24,7 @@ func (m *mockDNSSECRepo) ListRecordsForZone(_ context.Context, _ string) ([]doma
 func (m *mockDNSSECRepo) CreateZone(_ context.Context, _ *domain.Zone) error { return nil }
 func (m *mockDNSSECRepo) CreateZoneWithRecords(_ context.Context, _ *domain.Zone, _ []domain.Record) error { return nil }
 func (m *mockDNSSECRepo) CreateRecord(_ context.Context, _ *domain.Record) error { return nil }
+func (m *mockDNSSECRepo) BatchCreateRecords(_ context.Context, _ []domain.Record) error { return nil }
 func (m *mockDNSSECRepo) ListZones(_ context.Context, _ string) ([]domain.Zone, error) { return nil, nil }
 func (m *mockDNSSECRepo) DeleteZone(_ context.Context, _, _ string) error { return nil }
 func (m *mockDNSSECRepo) DeleteRecord(_ context.Context, _, _ string) error { return nil }
