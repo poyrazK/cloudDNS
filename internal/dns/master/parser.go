@@ -33,6 +33,9 @@ type ZoneData struct {
 // Parse reads a master zone file from the provided reader and returns the parsed data.
 func (p *MasterParser) Parse(r io.Reader) (*ZoneData, error) {
 	scanner := bufio.NewScanner(r)
+	// Use 1MB buffer for long records like DNSKEY/RRSIG
+	buf := make([]byte, 1024*1024)
+	scanner.Buffer(buf, 1024*1024)
 	data := &ZoneData{}
 	
 	var lastName string

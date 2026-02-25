@@ -87,6 +87,12 @@ func (m *mockRepo) CreateRecord(_ context.Context, record *domain.Record) error 
 	return nil
 }
 
+func (m *mockRepo) BatchCreateRecords(_ context.Context, records []domain.Record) error {
+	if m.err != nil { return m.err }
+	m.records = append(m.records, records...)
+	return nil
+}
+
 func (m *mockRepo) ListZones(_ context.Context, _ string) ([]domain.Zone, error) {
 	if m.err != nil { return nil, m.err }
 	return m.zones, nil

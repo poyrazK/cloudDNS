@@ -213,3 +213,16 @@ func TestRecordTypeToQueryType(t *testing.T) {
 		}
 	}
 }
+
+func TestMasterParser_LargeRecord(t *testing.T) {
+	largeContent := strings.Repeat("a", 100000)
+	zoneFile := "root. 3600 IN TXT " + largeContent
+	parser := NewMasterParser()
+	data, err := parser.Parse(strings.NewReader(zoneFile))
+	if err != nil {
+		t.Fatalf("Failed to parse large record: %v", err)
+	}
+	if len(data.Records) != 1 || len(data.Records[0].Content) != 100000 {
+		t.Errorf("Large record parsing failed")
+	}
+}
