@@ -12,6 +12,7 @@ import (
 	"math"
 	"net"
 	"strings"
+	"time"
 
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
 	"github.com/poyrazK/cloudDNS/internal/dns/packet"
@@ -235,22 +236,34 @@ func (r *PostgresRepository) BatchCreateRecords(ctx context.Context, records []d
 		}
 	}()
 
-	stmt, err := tx.PrepareContext(ctx, `INSERT INTO dns_records (id, zone_id, name, type, content, ttl, priority, weight, port, network, created_at, updated_at) 
-			  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if errClose := stmt.Close(); errClose != nil {
-			log.Printf("failed to close statement: %v", errClose)
-		}
-	}()
+	// High-performance Postgres Batch Insert using UNNEST
+	ids := make([]string, len(records))
+	zoneIDs := make([]string, len(records))
+	names := make([]string, len(records))
+	types := make([]string, len(records))
+	contents := make([]string, len(records))
+	ttls := make([]int, len(records))
+	createdAts := make([]time.Time, len(records))
+	updatedAts := make([]time.Time, len(records))
 
-	for _, record := range records {
-		_, err := stmt.ExecContext(ctx, record.ID, record.ZoneID, record.Name, record.Type, record.Content, record.TTL, record.Priority, record.Weight, record.Port, record.Network, record.CreatedAt, record.UpdatedAt)
-		if err != nil {
-			return err
-		}
+	for i, rec := range records {
+		ids[i] = rec.ID
+		zoneIDs[i] = rec.ZoneID
+		names[i] = rec.Name
+		types[i] = string(rec.Type)
+		contents[i] = rec.Content
+		ttls[i] = rec.TTL
+		createdAts[i] = rec.CreatedAt
+		updatedAts[i] = rec.UpdatedAt
+	}
+
+	query := `
+		INSERT INTO dns_records (id, zone_id, name, type, content, ttl, created_at, updated_at)
+		SELECT * FROM UNNEST($1::uuid[], $2::uuid[], $3::text[], $4::text[], $5::text[], $6::int[], $7::timestamptz[], $8::timestamptz[])
+	`
+	_, err = tx.ExecContext(ctx, query, ids, zoneIDs, names, types, contents, ttls, createdAts, updatedAts)
+	if err != nil {
+		return fmt.Errorf("unnest batch insert failed: %w", err)
 	}
 
 	return tx.Commit()
