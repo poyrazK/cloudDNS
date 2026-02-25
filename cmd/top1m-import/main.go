@@ -71,7 +71,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to open csv in zip: %v", err)
 	}
-	defer f.Close()
+	defer func() {
+		if errClose := f.Close(); errClose != nil {
+			log.Printf("failed to close file in zip: %v", errClose)
+		}
+	}()
 
 	reader := csv.NewReader(f)
 	repo := repository.NewPostgresRepository(db)
