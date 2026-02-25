@@ -43,6 +43,61 @@ jobs:
       - name: Run Tests (Fast Mode)
         run: go test -short -timeout 5m ./...
 
+  iana-e2e-test:
+    name: IANA Root Integrity Test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: clouddns
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.24.13"
+          cache: true
+      
+      - name: Initialize Database Schema
+        run: |
+          sudo apt-get update && sudo apt-get install -y postgresql-client
+          psql -h localhost -U postgres -d clouddns -f internal/adapters/repository/schema.sql
+        env:
+          PGPASSWORD: postgres
+
+      - name: Build Tools
+        run: |
+          go build -o iana-import cmd/iana-import/main.go
+          go build -o iana-bench cmd/iana-bench/main.go
+          go build -o clouddns cmd/clouddns/main.go
+
+      - name: Import IANA Root Zone
+        run: ./iana-import
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/clouddns?sslmode=disable
+
+      - name: Run DNS Server
+        run: |
+          ./clouddns &
+          sleep 5
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/clouddns?sslmode=disable
+          DNS_ADDR: "127.0.0.1:10053"
+
+      - name: Run Integrity Benchmark
+        run: ./iana-bench -server 127.0.0.1:10053 -n 1000 -c 10
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/clouddns?sslmode=disable
+
   coverage:
     name: Coverage & Thorough Check
     runs-on: ubuntu-latest
