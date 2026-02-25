@@ -39,10 +39,16 @@ func main() {
 		}
 	}()
 
+	if err := RunBench(db, *target, *count, *concurrency); err != nil {
+		log.Fatalf("benchmark failed: %v", err)
+	}
+}
+
+func RunBench(db *sql.DB, target string, count, concurrency int) error {
 	fmt.Println("Fetching domain names from database...")
 	rows, err := db.Query("SELECT DISTINCT name FROM dns_records WHERE name != '.'")
 	if err != nil {
-		log.Fatalf("failed to fetch names: %v", err)
+		return fmt.Errorf("failed to fetch names: %w", err)
 	}
 	defer func() {
 		if errClose := rows.Close(); errClose != nil {
@@ -59,23 +65,23 @@ func main() {
 	}
 
 	if len(names) == 0 {
-		log.Fatal("No names found in database. Run iana-import first.")
+		return fmt.Errorf("no names found in database")
 	}
 
-	fmt.Printf("Starting stress test: %d queries, %d concurrency using %d unique names\n", *count, *concurrency, len(names))
+	fmt.Printf("Starting stress test: %d queries, %d concurrency using %d unique names\n", count, concurrency, len(names))
 
 	var success, errors uint64
 	var wg sync.WaitGroup
 	start := time.Now()
 
-	queriesPerWorker := *count / *concurrency
+	queriesPerWorker := count / concurrency
 
-	for i := 0; i < *concurrency; i++ {
+	for i := 0; i < concurrency; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			
-			conn, err := net.Dial("udp", *target)
+			conn, err := net.Dial("udp", target)
 			if err != nil {
 				return
 			}
@@ -86,7 +92,6 @@ func main() {
 			}()
 
 			for j := 0; j < queriesPerWorker; j++ {
-				// Use crypto/rand for secure random selection (G404)
 				n, errRand := rand.Int(rand.Reader, big.NewInt(int64(len(names))))
 				if errRand != nil {
 					continue
@@ -94,19 +99,16 @@ func main() {
 				name := names[n.Int64()]
 				
 				p := packet.NewDNSPacket()
-				
-				// Secure random ID
 				var idBytes [2]byte
 				_, _ = rand.Read(idBytes[:])
 				p.Header.ID = binary.BigEndian.Uint16(idBytes[:])
-				
 				p.Questions = append(p.Questions, packet.DNSQuestion{Name: name, QType: packet.NS})
 
 				buf := packet.NewBytePacketBuffer()
 				_ = p.Write(buf)
 				data := buf.Buf[:buf.Position()]
 
-				_, err := conn.Write(data)
+				_, err = conn.Write(data)
 				if err != nil {
 					atomic.AddUint64(&errors, 1)
 					continue
@@ -128,10 +130,11 @@ func main() {
 	duration := time.Since(start)
 
 	fmt.Printf("\n--- Stress Test Results ---\n")
-	fmt.Printf("Total Queries: %d\n", *count)
+	fmt.Printf("Total Queries: %d\n", count)
 	fmt.Printf("Successful:    %d\n", success)
 	fmt.Printf("Failed:        %d\n", errors)
 	fmt.Printf("Time Taken:    %v\n", duration)
 	fmt.Printf("Throughput:    %.2f queries/sec\n", float64(success)/duration.Seconds())
-	fmt.Printf("Reliability:   %.2f%%\n", (float64(success)/float64(*count))*100)
+	fmt.Printf("Reliability:   %.2f%%\n", (float64(success)/float64(count))*100)
+	return nil
 }

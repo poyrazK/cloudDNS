@@ -35,12 +35,18 @@ func main() {
 		}
 	}()
 
+	if err := RunImport(context.Background(), db, rootZoneURL); err != nil {
+		log.Fatalf("import failed: %v", err)
+	}
+}
+
+func RunImport(ctx context.Context, db *sql.DB, url string) error {
 	repo := repository.NewPostgresRepository(db)
 
-	fmt.Printf("Downloading IANA root zone from %s...\n", rootZoneURL)
-	resp, err := http.Get(rootZoneURL)
+	fmt.Printf("Downloading IANA root zone from %s...\n", url)
+	resp, err := http.Get(url)
 	if err != nil {
-		log.Fatalf("failed to download root zone: %v", err)
+		return fmt.Errorf("failed to download: %w", err)
 	}
 	defer func() {
 		if errClose := resp.Body.Close(); errClose != nil {
@@ -49,7 +55,7 @@ func main() {
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		log.Fatalf("bad status: %s", resp.Status)
+		return fmt.Errorf("bad status: %s", resp.Status)
 	}
 
 	parser := master.NewMasterParser()
@@ -58,17 +64,15 @@ func main() {
 	fmt.Println("Parsing root zone file...")
 	data, err := parser.Parse(resp.Body)
 	if err != nil {
-		log.Fatalf("failed to parse root zone: %v", err)
+		return fmt.Errorf("failed to parse: %w", err)
 	}
 
 	fmt.Printf("Parsed %d records. Importing into database...\n", len(data.Records))
 
-	ctx := context.Background()
-	
 	// 1. Ensure root zone exists
 	zone, err := repo.GetZone(ctx, ".")
 	if err != nil {
-		log.Fatalf("failed to check for root zone: %v", err)
+		return fmt.Errorf("failed to check for root zone: %w", err)
 	}
 
 	var zoneID string
@@ -82,7 +86,7 @@ func main() {
 			UpdatedAt: time.Now(),
 		}
 		if err := repo.CreateZone(ctx, newZone); err != nil {
-			log.Fatalf("failed to create root zone: %v", err)
+			return fmt.Errorf("failed to create root zone: %w", err)
 		}
 		fmt.Println("Created new root zone (.)")
 	} else {
@@ -115,7 +119,7 @@ func main() {
 		}
 
 		if err := repo.BatchCreateRecords(ctx, batch); err != nil {
-			log.Fatalf("failed to import batch %d-%d: %v", i, end, err)
+			return fmt.Errorf("failed to import batch %d-%d: %w", i, end, err)
 		}
 
 		totalImported += len(batch)
@@ -125,4 +129,5 @@ func main() {
 	fmt.Printf("\nImport Completed Successfully!\n")
 	fmt.Printf("Total Records: %d\n", totalImported)
 	fmt.Printf("Time Taken:    %v\n", time.Since(start))
+	return nil
 }
