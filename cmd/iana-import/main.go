@@ -44,6 +44,7 @@ func RunImport(ctx context.Context, db *sql.DB, url string) error {
 	repo := repository.NewPostgresRepository(db)
 
 	fmt.Printf("Downloading IANA root zone from %s...\n", url)
+	// #nosec G107 -- URL is trusted IANA source
 	resp, err := http.Get(url)
 	if err != nil {
 		return fmt.Errorf("failed to download: %w", err)
