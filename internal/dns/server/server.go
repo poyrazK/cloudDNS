@@ -80,10 +80,10 @@ func NewServer(addr string, repo ports.DNSRepository, logger *slog.Logger) *Serv
 		Repo:        repo,
 		Cache:       NewDNSCache(),
 		DNSSEC:      services.NewDNSSECService(repo),
-		WorkerCount: runtime.NumCPU() * 8,
-		udpQueue:    make(chan udpTask, 10000),
+		WorkerCount: runtime.NumCPU() * 32, // High concurrency tuning
+		udpQueue:    make(chan udpTask, 50000),
 		Logger:      logger,
-		limiter:     newRateLimiter(200000, 100000),
+		limiter:     newRateLimiter(500000, 200000),
 		TsigKeys:    make(map[string][]byte),
 		NodeID:      nodeID,
 	}
@@ -125,7 +125,11 @@ func (s *Server) automateDNSSEC() {
 
 func (s *Server) startInvalidationListener(ctx context.Context) {
 	pubsub := s.Redis.Subscribe(ctx)
-	defer func() { _ = pubsub.Close() }()
+	defer func() {
+		if errClose := pubsub.Close(); errClose != nil {
+			s.Logger.Error("failed to close pubsub", "error", errClose)
+		}
+	}()
 	
 	ch := pubsub.Channel()
 	s.Logger.Info("started global cache invalidation listener")
