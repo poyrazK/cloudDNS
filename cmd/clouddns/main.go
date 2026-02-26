@@ -19,6 +19,7 @@ import (
 	"github.com/poyrazK/cloudDNS/internal/core/ports"
 	"github.com/poyrazK/cloudDNS/internal/core/services"
 	"github.com/poyrazK/cloudDNS/internal/dns/server"
+	"github.com/poyrazK/cloudDNS/internal/infrastructure/metrics"
 )
 
 func main() {
@@ -58,6 +59,21 @@ func run() error {
 		
 		defer func() { _ = db.Close() }()
 		repo = repository.NewPostgresRepository(db)
+
+		// Periodic DB metrics update
+		go func() {
+			ticker := time.NewTicker(15 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					stats := db.Stats()
+					metrics.DBConnectionsActive.Set(float64(stats.InUse))
+				}
+			}
+		}()
 	}
 
 	var cacheInvalidator ports.CacheInvalidator
