@@ -27,6 +27,7 @@ import (
 	"github.com/poyrazK/cloudDNS/internal/core/services"
 	"github.com/poyrazK/cloudDNS/internal/dns/master"
 	"github.com/poyrazK/cloudDNS/internal/dns/packet"
+	"github.com/poyrazK/cloudDNS/internal/infrastructure/metrics"
 )
 
 // ClassCHAOS is the DNS class for server identity and metadata.
@@ -320,14 +321,16 @@ func (s *Server) handleDoH(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(resp)
 		return nil
-	}); errHandle != nil {
+	}, "doh"); errHandle != nil {
 		http.Error(w, "server error", http.StatusInternalServerError)
 	}
 }
 
 func (s *Server) udpWorker() {
 	for task := range s.udpQueue {
+		metrics.ActiveWorkers.Inc()
 		s.handleUDPConnection(task.conn, task.addr, task.data)
+		metrics.ActiveWorkers.Dec()
 	}
 }
 
@@ -335,7 +338,7 @@ func (s *Server) handleUDPConnection(pc net.PacketConn, addr net.Addr, data []by
 	if errHandle := s.handlePacket(data, addr, func(resp []byte) error {
 		_, errWrite := pc.WriteTo(resp, addr)
 		return errWrite
-	}); errHandle != nil {
+	}, "udp"); errHandle != nil {
 		s.Logger.Error("failed to handle UDP packet", "error", errHandle)
 	}
 }
@@ -376,7 +379,7 @@ func (s *Server) handleTCPConnection(conn net.Conn) {
 			fullResp := append([]byte{byte(resLen >> 8), byte(resLen & 0xFF)}, resp...)
 			_, errWrite := conn.Write(fullResp)
 			return errWrite
-		}); errHandle != nil {
+		}, "tcp"); errHandle != nil {
 			s.Logger.Error("Failed to handle TCP packet", "error", errHandle)
 		}
 	}
@@ -483,8 +486,11 @@ func (s *Server) sendTCPError(conn net.Conn, id uint16, rcode uint8) {
 	packet.PutBuffer(resBuffer)
 }
 
-func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]byte) error) error {
+func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]byte) error, protocol string) error {
 	start := time.Now()
+	defer func() {
+		metrics.QueryDuration.WithLabelValues("total").Observe(time.Since(start).Seconds())
+	}()
 
 	var clientIP string
 	switch addr := srcAddr.(type) {
@@ -508,12 +514,26 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 		return errParse
 	}
 
+	// Default labels for metrics
+	qTypeLabel := "UNKNOWN"
+	if len(request.Questions) > 0 {
+		qTypeLabel = request.Questions[0].QType.String()
+	}
+
 	if request.Header.Opcode == packet.OpcodeUpdate {
-		return s.handleUpdate(request, data, clientIP, sendFn)
+		err := s.handleUpdate(request, data, clientIP, sendFn)
+		rcode := "0"
+		if err == nil {
+			rcode = fmt.Sprintf("%d", request.Header.ResCode)
+		}
+		metrics.QueriesTotal.WithLabelValues("UPDATE", rcode, protocol).Inc()
+		return err
 	}
 
 	if request.Header.Opcode == packet.OpcodeNotify {
-		return s.handleNotify(request, clientIP, sendFn)
+		err := s.handleNotify(request, clientIP, sendFn)
+		metrics.QueriesTotal.WithLabelValues("NOTIFY", "0", protocol).Inc()
+		return err
 	}
 
 	if len(request.Questions) == 0 {
@@ -521,6 +541,7 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 		response.Header.ID = request.Header.ID
 		response.Header.Response = true
 		response.Header.ResCode = 4 // FORMERR
+		metrics.QueriesTotal.WithLabelValues("NONE", "4", protocol).Inc()
 		resBuffer := packet.GetBuffer()
 		defer packet.PutBuffer(resBuffer)
 		_ = response.Write(resBuffer)
@@ -546,6 +567,7 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 			}
 			response.Answers = append(response.Answers, txtRec)
 			
+			metrics.QueriesTotal.WithLabelValues(qTypeLabel, "0", protocol).Inc()
 			resBuffer := packet.GetBuffer()
 			defer packet.PutBuffer(resBuffer)
 			_ = response.Write(resBuffer)
@@ -561,6 +583,9 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 
 	// L1/L2 Check
 	if cachedData, found := s.Cache.Get(cacheKey); found {
+		metrics.CacheOperations.WithLabelValues("l1", "hit").Inc()
+		metrics.QueriesTotal.WithLabelValues(qTypeLabel, "0", protocol).Inc()
+		metrics.QueryDuration.WithLabelValues("cache_l1").Observe(time.Since(start).Seconds())
 		// Rewrite Transaction ID
 		if len(cachedData) >= 2 {
 			cachedData[0] = byte(request.Header.ID >> 8)
@@ -568,8 +593,13 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 		}
 		return sendFn(cachedData)
 	}
+	metrics.CacheOperations.WithLabelValues("l1", "miss").Inc()
+
 	if s.Redis != nil {
 		if cachedData, found := s.Redis.Get(context.Background(), cacheKey); found {
+			metrics.CacheOperations.WithLabelValues("l2", "hit").Inc()
+			metrics.QueriesTotal.WithLabelValues(qTypeLabel, "0", protocol).Inc()
+			metrics.QueryDuration.WithLabelValues("cache_l2").Observe(time.Since(start).Seconds())
 			// Rewrite Transaction ID
 			if len(cachedData) >= 2 {
 				cachedData[0] = byte(request.Header.ID >> 8)
@@ -578,6 +608,7 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 			s.Cache.Set(cacheKey, cachedData, 60*time.Second)
 			return sendFn(cachedData)
 		}
+		metrics.CacheOperations.WithLabelValues("l2", "miss").Inc()
 	}
 
 	// L3 Resolution
@@ -647,6 +678,7 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 	// Guard against nil repository (useful for identity-only nodes or tests)
 	if s.Repo == nil {
 		response.Header.ResCode = packet.RcodeServFail
+		metrics.QueriesTotal.WithLabelValues(qTypeLabel, "2", protocol).Inc()
 		resBuffer := packet.GetBuffer()
 		defer packet.PutBuffer(resBuffer)
 		_ = response.Write(resBuffer)
@@ -670,8 +702,11 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 	}
 
 	// 2. Resolve Main Records
+	dbStart := time.Now()
 	qTypeStr := queryTypeToRecordType(q.QType)
 	records, errRepo := s.Repo.GetRecords(ctx, q.Name, qTypeStr, clientIP)
+	metrics.QueryDuration.WithLabelValues("database").Observe(time.Since(dbStart).Seconds())
+
 	if errRepo == nil && len(records) > 0 {
 		for _, rec := range records {
 			pRec, errConv := repository.ConvertDomainToPacketRecord(rec)
@@ -812,6 +847,7 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 		}
 	}
 
+	metrics.QueriesTotal.WithLabelValues(qTypeLabel, fmt.Sprintf("%d", response.Header.ResCode), protocol).Inc()
 	s.Logger.Info("query processed", "name", q.Name, "src", source, "lat", time.Since(start).Milliseconds())
 	return sendFn(resData)
 }
