@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
 	"github.com/poyrazK/cloudDNS/internal/core/ports"
 )
@@ -22,6 +23,7 @@ func NewAPIHandler(svc ports.DNSService) *APIHandler {
 // RegisterRoutes registers the API routes with the provided ServeMux.
 func (h *APIHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /health", h.HealthCheck)
+	mux.HandleFunc("GET /metrics", h.Metrics)
 	mux.HandleFunc("POST /zones", h.CreateZone)
 	mux.HandleFunc("GET /zones", h.ListZones)
 	mux.HandleFunc("GET /zones/{id}/records", h.ListRecordsForZone)
@@ -29,6 +31,11 @@ func (h *APIHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /zones/{id}/records", h.CreateRecord)
 	mux.HandleFunc("DELETE /zones/{zone_id}/records/{id}", h.DeleteRecord)
 	mux.HandleFunc("GET /audit-logs", h.ListAuditLogs)
+}
+
+// Metrics handles Prometheus metrics scraping requests.
+func (h *APIHandler) Metrics(w http.ResponseWriter, r *http.Request) {
+	promhttp.Handler().ServeHTTP(w, r)
 }
 
 // HealthCheck handles health check requests.

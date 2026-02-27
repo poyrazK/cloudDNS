@@ -27,7 +27,7 @@ func TestHandleNotify(t *testing.T) {
 	err := srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], "127.0.0.1:12345", func(resp []byte) error {
 		capturedResp = resp
 		return nil
-	})
+	}, "udp")
 
 	if err != nil {
 		t.Fatalf("handleNotify failed: %v", err)

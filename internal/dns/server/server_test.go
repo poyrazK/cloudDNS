@@ -297,7 +297,7 @@ func TestHandlePacketLocalHit(t *testing.T) {
 	if err := srv.handlePacket(data, &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
 		capturedResp = resp
 		return nil
-	}); err != nil {
+	}, "udp"); err != nil {
 		t.Fatalf("HandlePacket failed: %v", err)
 	}
 
@@ -341,7 +341,7 @@ func TestHandlePacketCacheHit(t *testing.T) {
 	if err := srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
 		capturedResp = resp
 		return nil
-	}); err != nil {
+	}, "udp"); err != nil {
 		t.Fatalf("handlePacket failed: %v", err)
 	}
 
@@ -414,7 +414,7 @@ func TestHandlePacketNXDOMAIN(t *testing.T) {
 	if err := srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
 		capturedResp = resp
 		return nil
-	}); err != nil {
+	}, "udp"); err != nil {
 		t.Fatalf("handlePacket failed: %v", err)
 	}
 
@@ -440,7 +440,7 @@ func TestHandlePacketNoQuestions(t *testing.T) {
 	if err := srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
 		capturedResp = resp
 		return nil
-	}); err != nil {
+	}, "udp"); err != nil {
 		t.Fatalf("handlePacket failed: %v", err)
 	}
 
@@ -471,7 +471,7 @@ func TestHandlePacketEDNS(t *testing.T) {
 
 	if err := srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
 		return nil
-	}); err != nil {
+	}, "udp"); err != nil {
 		t.Errorf("HandlePacket failed with EDNS: %v", err)
 	}
 }
@@ -509,7 +509,7 @@ func TestHandlePacketTruncation(t *testing.T) {
 			t.Errorf("Expected answers to be cleared in truncated response, got %d", len(resPacket.Answers))
 		}
 		return nil
-	}); err != nil {
+	}, "udp"); err != nil {
 		t.Fatalf("handlePacket failed: %v", err)
 	}
 }

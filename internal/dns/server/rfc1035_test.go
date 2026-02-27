@@ -28,7 +28,7 @@ func TestRFC1035_MessageCompression(t *testing.T) {
 	_ = srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 53}, func(resp []byte) error {
 		capturedResp = resp
 		return nil
-	})
+	}, "udp")
 
 	// Check for compression pointers (0xC0)
 	// RFC 1035 Section 4.1.4: "a pointer is an unsigned 16-bit integer with the top two bits set to 1"
@@ -69,7 +69,7 @@ func TestRFC1035_ResponseFormat(t *testing.T) {
 	_ = srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 53}, func(resp []byte) error {
 		capturedResp = resp
 		return nil
-	})
+	}, "udp")
 
 	resPacket := packet.NewDNSPacket()
 	resBuf := packet.NewBytePacketBuffer()

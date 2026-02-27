@@ -94,7 +94,7 @@ func TestHandlePacket_NoQuestions(t *testing.T) {
 			t.Errorf("Expected FORMERR, got %d", p.Header.ResCode)
 		}
 		return nil
-	})
+	}, "udp")
 	if err != nil {
 		t.Fatalf("handlePacket failed: %v", err)
 	}
