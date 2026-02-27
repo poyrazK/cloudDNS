@@ -56,7 +56,7 @@ func run() error {
 		db.SetMaxOpenConns(2000)
 		db.SetMaxIdleConns(1000)
 		db.SetConnMaxLifetime(10 * time.Minute)
-		
+
 		defer func() { _ = db.Close() }()
 		repo = repository.NewPostgresRepository(db)
 
@@ -101,29 +101,29 @@ func run() error {
 	if os.Getenv("ANYCAST_ENABLED") == "true" {
 		vip := os.Getenv("ANYCAST_VIP")
 		peerIP := os.Getenv("BGP_PEER_IP")
-		
+
 		if vip == "" || peerIP == "" {
 			return fmt.Errorf("ANYCAST_VIP and BGP_PEER_IP must be set when ANYCAST_ENABLED=true")
 		}
 
 		routingAdapter = routing.NewGoBGPAdapter(logger)
 		vipAdapter := routing.NewSystemVIPAdapter(logger)
-		
+
 		iface := os.Getenv("ANYCAST_INTERFACE")
 		if iface == "" {
 			iface = "lo"
 		}
-		
+
 		localASN := getEnvUint32("ANYCAST_LOCAL_ASN", 65001)
 		peerASN := getEnvUint32("BGP_PEER_ASN", 65000)
-		
+
 		// Configure RouterID and NextHop if provided
 		routerID := os.Getenv("BGP_ROUTER_ID")
 		nextHop := os.Getenv("BGP_NEXT_HOP")
 		routingAdapter.SetConfig(routerID, 179, nextHop)
 
 		anycastMgr = services.NewAnycastManager(dnsSvc, routingAdapter, vipAdapter, vip, iface, logger)
-		
+
 		go func() {
 			if err := routingAdapter.Start(ctx, localASN, peerASN, peerIP); err != nil {
 				logger.Error("failed to start BGP speaker", "error", err)
@@ -152,12 +152,12 @@ func run() error {
 	if apiAddr == "" {
 		apiAddr = ":8080"
 	}
-	apiHandler := api.NewAPIHandler(dnsSvc)
+	apiHandler := api.NewAPIHandler(dnsSvc, repo)
 	mux := http.NewServeMux()
 	apiHandler.RegisterRoutes(mux)
 
-	logger.Info("cloudDNS services starting", 
-		"dns_addr", dnsAddr, 
+	logger.Info("cloudDNS services starting",
+		"dns_addr", dnsAddr,
 		"api_addr", apiAddr,
 		"node_id", dnsServer.NodeID,
 	)
