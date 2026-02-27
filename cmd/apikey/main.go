@@ -27,14 +27,14 @@ func main() {
 
 	db, err := sql.Open("pgx", dbURL)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to open database: %v\n", err)
+		_, _ = fmt.Fprintf(os.Stderr, "failed to open database: %v\n", err)
 		os.Exit(1)
 	}
 	defer db.Close()
 
 	repo := repository.NewPostgresRepository(db)
 	if err := run(os.Args, os.Stdout, repo); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -106,18 +106,18 @@ func generateKey(repo ports.DNSRepository, tenantID, role, name string, days int
 	}
 
 	if err := repo.CreateAPIKey(context.Background(), apiKey); err != nil {
-		return fmt.Errorf("failed to save API key: %v", err)
+		return fmt.Errorf("failed to save API key: %w", err)
 	}
 
-	fmt.Fprintf(out, "API Key Created Successfully!\n")
-	fmt.Fprintf(out, "---------------------------\n")
-	fmt.Fprintf(out, "ID:         %s\n", id)
-	fmt.Fprintf(out, "Tenant:     %s\n", tenantID)
-	fmt.Fprintf(out, "Role:       %s\n", role)
-	fmt.Fprintf(out, "Expires:    %v\n", expiresAt.Format(time.RFC3339))
-	fmt.Fprintf(out, "VALUE:      %s\n", keyString)
-	fmt.Fprintf(out, "---------------------------\n")
-	fmt.Fprintf(out, "CAUTION: This is the only time the key will be shown.\n")
+	_, _ = fmt.Fprintf(out, "API Key Created Successfully!\n")
+	_, _ = fmt.Fprintf(out, "---------------------------\n")
+	_, _ = fmt.Fprintf(out, "ID:         %s\n", id)
+	_, _ = fmt.Fprintf(out, "Tenant:     %s\n", tenantID)
+	_, _ = fmt.Fprintf(out, "Role:       %s\n", role)
+	_, _ = fmt.Fprintf(out, "Expires:    %v\n", expiresAt.Format(time.RFC3339))
+	_, _ = fmt.Fprintf(out, "VALUE:      %s\n", keyString)
+	_, _ = fmt.Fprintf(out, "---------------------------\n")
+	_, _ = fmt.Fprintf(out, "CAUTION: This is the only time the key will be shown.\n")
 	return nil
 }
 
@@ -127,14 +127,14 @@ func listKeys(repo ports.DNSRepository, tenantID string, out io.Writer) error {
 		return err
 	}
 
-	fmt.Fprintf(out, "API Keys for Tenant: %s\n", tenantID)
-	fmt.Fprintf(out, "%-36s %-15s %-10s %-8s %-6s\n", "ID", "Name", "Role", "Prefix", "Status")
+	_, _ = fmt.Fprintf(out, "API Keys for Tenant: %s\n", tenantID)
+	_, _ = fmt.Fprintf(out, "%-36s %-15s %-10s %-8s %-6s\n", "ID", "Name", "Role", "Prefix", "Status")
 	for _, k := range keys {
 		status := "active"
 		if !k.Active {
 			status = "revoked"
 		}
-		fmt.Fprintf(out, "%-36s %-15s %-10s %-8s %-6s\n", k.ID, k.Name, k.Role, k.KeyPrefix, status)
+		_, _ = fmt.Fprintf(out, "%-36s %-15s %-10s %-8s %-6s\n", k.ID, k.Name, k.Role, k.KeyPrefix, status)
 	}
 	return nil
 }
@@ -146,6 +146,6 @@ func revokeKey(repo ports.DNSRepository, id string, out io.Writer) error {
 	if err := repo.DeleteAPIKey(context.Background(), id); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "API Key %s revoked (deleted)\n", id)
+	_, _ = fmt.Fprintf(out, "API Key %s revoked (deleted)\n", id)
 	return nil
 }

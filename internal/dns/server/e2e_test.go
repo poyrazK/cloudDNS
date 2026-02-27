@@ -66,8 +66,8 @@ func TestEndToEndDNSAdvanced(t *testing.T) {
 		t.Fatalf("Failed to create zone: %v", err)
 	}
 	var createdZone domain.Zone
-	if err := json.NewDecoder(resp.Body).Decode(&createdZone); err != nil {
-		t.Fatalf("Failed to decode zone: %v", err)
+	if decErr := json.NewDecoder(resp.Body).Decode(&createdZone); decErr != nil {
+		t.Fatalf("Failed to decode zone: %v", decErr)
 	}
 	_ = resp.Body.Close()
 
