@@ -41,6 +41,7 @@ cloudDNS is a high-performance, authoritative, and recursive DNS server built fr
 *   **PostgreSQL Backend**: Robust persistence for zones, records, and keys.
 *   **RESTful API**: Full CRUD API for managing zones, records, and viewing audit logs.
 *   **Split-Horizon DNS**: Intelligent resolution providing different answers based on client source IP (CIDR).
+*   **API Authentication & RBAC**: Secure RESTful API with SHA-256 hashed API keys and role-based permissions (`admin`, `reader`).
 *   **Rate Limiting**: Token-bucket based DoS protection per client IP.
 
 ## Architecture
@@ -92,6 +93,20 @@ export DATABASE_URL="postgres://user:pass@localhost:5432/clouddns?sslmode=disabl
 # Run the server
 go run cmd/clouddns/main.go
 ```
+
+### API Key Management
+
+cloudDNS uses API keys for managing zones and records. You can generate a bootstrap admin key using the `apikey` tool:
+
+```bash
+# Create an admin key for a tenant
+go run cmd/apikey/main.go create -tenant "my-org" -role "admin" -name "Production Key"
+
+# List keys for a tenant
+go run cmd/apikey/main.go list -tenant "my-org"
+```
+
+All API requests must include the `Authorization: Bearer <key>` header.
 
 ## Testing
 

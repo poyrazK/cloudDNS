@@ -43,6 +43,7 @@ Unlike standard implementations that use libraries, cloudDNS implements the bina
 ## 7. Architecture & Management
 *   **Hexagonal Architecture**: Strict separation between Domain logic, Ports (Interfaces), and Adapters (PostgreSQL, Redis, BGP, API).
 *   **RESTful Management API**: Multi-tenant CRUD endpoints for Zone and Record management.
+*   **API Authentication & RBAC**: Secure access control via SHA-256 hashed API keys and granular roles (`admin`, `reader`), ensuring strict tenant isolation.
 *   **Incremental Zone Transfer (IXFR)**: Efficient replication that transfers only serialized changes between masters and slaves.
 *   **Audit Trails**: Persistent change logging for every administrative action.
 
