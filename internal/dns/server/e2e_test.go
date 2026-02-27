@@ -18,7 +18,7 @@ import (
 	"github.com/poyrazK/cloudDNS/internal/dns/packet"
 )
 
-func TestEndToEndDNS_Advanced(t *testing.T) {
+func TestEndToEndDNSAdvanced(t *testing.T) {
 	// 1. Setup Stack with Mock Repo (or real PG if we wanted even more integration)
 	repo := &mockServerRepo{}
 	svc := services.NewDNSService(repo, nil)
