@@ -57,7 +57,7 @@ jobs:
       - name: Inject Secrets
         run: |
           DB_URL=$(gcloud secrets versions access latest \
-            --secret=clouddns-db-url --project=${{ secrets.GCP_PROJECT_ID }})
+            --secret=clouddns-database-url --project=${{ secrets.GCP_PROJECT_ID }})
           kubectl create secret generic clouddns-secrets \
             --from-literal=database-url="$DB_URL" \
             --dry-run=client -o yaml | kubectl apply -f -
