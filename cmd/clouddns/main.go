@@ -23,21 +23,21 @@ import (
 )
 
 func main() {
-	if err := run(); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if err := run(ctx); err != nil {
 		slog.Error("application failed", "error", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
+func run(ctx context.Context) error {
 	// 1. Initialize Structured Logging
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
 	slog.SetDefault(logger)
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
