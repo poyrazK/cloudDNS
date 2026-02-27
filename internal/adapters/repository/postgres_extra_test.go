@@ -32,9 +32,9 @@ func TestPostgresRepository_GetRecord_Mock(t *testing.T) {
 	// 1. Success case
 	rows := sqlmock.NewRows([]string{"id", "zone_id", "name", "type", "content", "ttl", "priority", "weight", "port", "network"}).
 		AddRow(id, zoneID, "test.com.", "A", "1.1.1.1", 300, nil, nil, nil, nil)
-	mock.ExpectQuery("SELECT .* FROM dns_records").WithArgs(id, zoneID).WillReturnRows(rows)
+	mock.ExpectQuery("SELECT .* FROM dns_records").WithArgs(id, zoneID, "").WillReturnRows(rows)
 
-	rec, err := repo.GetRecord(ctx, id, zoneID)
+	rec, err := repo.GetRecord(ctx, id, zoneID, "")
 	if err != nil {
 		t.Fatalf("GetRecord failed: %v", err)
 	}
@@ -43,8 +43,8 @@ func TestPostgresRepository_GetRecord_Mock(t *testing.T) {
 	}
 
 	// 2. Not found
-	mock.ExpectQuery("SELECT .* FROM dns_records").WithArgs("none", zoneID).WillReturnRows(sqlmock.NewRows(nil))
-	rec, err = repo.GetRecord(ctx, "none", zoneID)
+	mock.ExpectQuery("SELECT .* FROM dns_records").WithArgs("none", zoneID, "").WillReturnRows(sqlmock.NewRows(nil))
+	rec, err = repo.GetRecord(ctx, "none", zoneID, "")
 	if err != nil || rec != nil {
 		t.Errorf("Expected nil record and no error for not found")
 	}
@@ -52,16 +52,16 @@ func TestPostgresRepository_GetRecord_Mock(t *testing.T) {
 
 func TestConvertPacketRecordToDomain_Extra(t *testing.T) {
 	zoneID := uuid.New().String()
-	
+
 	// Test DS record
 	dsRec := packet.DNSRecord{
-		Name: "test.com.",
-		Type: packet.DS,
-		TTL: 3600,
-		KeyTag: 12345,
-		Algorithm: 13,
+		Name:       "test.com.",
+		Type:       packet.DS,
+		TTL:        3600,
+		KeyTag:     12345,
+		Algorithm:  13,
 		DigestType: 2,
-		Digest: []byte{0xDE, 0xAD, 0xBE, 0xEF},
+		Digest:     []byte{0xDE, 0xAD, 0xBE, 0xEF},
 	}
 	dRec, err := ConvertPacketRecordToDomain(dsRec, zoneID)
 	if err != nil {
@@ -73,9 +73,9 @@ func TestConvertPacketRecordToDomain_Extra(t *testing.T) {
 
 	// Test DNSKEY
 	dkRec := packet.DNSRecord{
-		Name: "test.com.",
-		Type: packet.DNSKEY,
-		Flags: 256,
+		Name:      "test.com.",
+		Type:      packet.DNSKEY,
+		Flags:     256,
 		Algorithm: 13,
 		PublicKey: []byte{0x01, 0x02},
 	}
@@ -86,9 +86,9 @@ func TestConvertPacketRecordToDomain_Extra(t *testing.T) {
 
 	// Test RRSIG
 	sigRec := packet.DNSRecord{
-		Type: packet.RRSIG,
+		Type:       packet.RRSIG,
 		SignerName: "test.",
-		Signature: []byte{0x01},
+		Signature:  []byte{0x01},
 	}
 	dRec, _ = ConvertPacketRecordToDomain(sigRec, zoneID)
 	if dRec.Type != "RRSIG" {
@@ -97,7 +97,7 @@ func TestConvertPacketRecordToDomain_Extra(t *testing.T) {
 
 	// Test NSEC
 	nsecRec := packet.DNSRecord{
-		Type: packet.NSEC,
+		Type:     packet.NSEC,
 		NextName: "next.",
 	}
 	dRec, _ = ConvertPacketRecordToDomain(nsecRec, zoneID)
@@ -107,8 +107,8 @@ func TestConvertPacketRecordToDomain_Extra(t *testing.T) {
 
 	// Test NSEC3
 	nsec3Rec := packet.DNSRecord{
-		Type: packet.NSEC3,
-		Salt: []byte{0x01},
+		Type:     packet.NSEC3,
+		Salt:     []byte{0x01},
 		NextHash: []byte{0x02},
 	}
 	dRec, _ = ConvertPacketRecordToDomain(nsec3Rec, zoneID)

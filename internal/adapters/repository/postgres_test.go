@@ -135,7 +135,7 @@ func TestPostgresRepositoryIntegration(t *testing.T) {
 	}
 
 	// 4.1 Test GetRecord
-	gotRec, errGetRec := repo.GetRecord(ctx, recordID1, zoneID1)
+	gotRec, errGetRec := repo.GetRecord(ctx, recordID1, zoneID1, "t1")
 	if errGetRec != nil || gotRec == nil || gotRec.ID != recordID1 {
 		t.Errorf("GetRecord failed: %v, got %+v", errGetRec, gotRec)
 	}
@@ -153,7 +153,7 @@ func TestPostgresRepositoryIntegration(t *testing.T) {
 	}
 
 	// 7. Test ListRecordsForZone
-	allRecs, errList := repo.ListRecordsForZone(ctx, zoneID1)
+	allRecs, errList := repo.ListRecordsForZone(ctx, zoneID1, "t1")
 	if errList != nil || len(allRecs) != 1 {
 		t.Errorf("ListRecordsForZone failed: %v, count: %d", errList, len(allRecs))
 	}
@@ -173,7 +173,7 @@ func TestPostgresRepositoryIntegration(t *testing.T) {
 	}
 
 	// 9. Test DeleteRecord
-	if errDel := repo.DeleteRecord(ctx, recordID1, zoneID1); errDel != nil {
+	if errDel := repo.DeleteRecord(ctx, recordID1, zoneID1, "t1"); errDel != nil {
 		t.Errorf("DeleteRecord failed: %v", errDel)
 	}
 
@@ -304,7 +304,7 @@ func TestPostgresRepositoryAPIKeys(t *testing.T) {
 	}
 
 	// 4. Delete API Key
-	if err := repo.DeleteAPIKey(ctx, tKeyID); err != nil {
+	if err := repo.DeleteAPIKey(ctx, tTenantID, tKeyID); err != nil {
 		t.Fatalf("DeleteAPIKey failed: %v", err)
 	}
 

@@ -120,21 +120,21 @@ func (r *PostgresRepository) GetZone(ctx context.Context, name string) (*domain.
 	return &z, nil
 }
 
-func (r *PostgresRepository) GetRecord(ctx context.Context, id string, zoneID string) (*domain.Record, error) {
-	query := `SELECT id, zone_id, name, type, content, ttl, priority, weight, port, network FROM dns_records 
-	          WHERE id = $1 AND zone_id = $2`
-
+func (r *PostgresRepository) GetRecord(ctx context.Context, id string, zoneID string, tenantID string) (*domain.Record, error) {
+	query := `
+		SELECT r.id, r.zone_id, r.name, r.type, r.content, r.ttl, r.priority, r.weight, r.port, r.network 
+		FROM dns_records r
+		JOIN dns_zones z ON r.zone_id = z.id
+		WHERE r.id = $1 AND r.zone_id = $2 AND z.tenant_id = $3`
 	var rec domain.Record
 	var priority, weight, port sql.NullInt32
-	errRow := r.db.QueryRowContext(ctx, query, id, zoneID).Scan(&rec.ID, &rec.ZoneID, &rec.Name, &rec.Type, &rec.Content, &rec.TTL, &priority, &weight, &port, &rec.Network)
-
+	errRow := r.db.QueryRowContext(ctx, query, id, zoneID, tenantID).Scan(&rec.ID, &rec.ZoneID, &rec.Name, &rec.Type, &rec.Content, &rec.TTL, &priority, &weight, &port, &rec.Network)
 	if errors.Is(errRow, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if errRow != nil {
 		return nil, errRow
 	}
-
 	if priority.Valid {
 		p := int(priority.Int32)
 		rec.Priority = &p
@@ -151,9 +151,13 @@ func (r *PostgresRepository) GetRecord(ctx context.Context, id string, zoneID st
 	return &rec, nil
 }
 
-func (r *PostgresRepository) ListRecordsForZone(ctx context.Context, zoneID string) ([]domain.Record, error) {
-	query := `SELECT id, zone_id, name, type, content, ttl, priority, weight, port, network FROM dns_records WHERE zone_id = $1`
-	rows, errQuery := r.db.QueryContext(ctx, query, zoneID)
+func (r *PostgresRepository) ListRecordsForZone(ctx context.Context, zoneID string, tenantID string) ([]domain.Record, error) {
+	query := `
+		SELECT r.id, r.zone_id, r.name, r.type, r.content, r.ttl, r.priority, r.weight, r.port, r.network 
+		FROM dns_records r
+		JOIN dns_zones z ON r.zone_id = z.id
+		WHERE r.zone_id = $1 AND z.tenant_id = $2`
+	rows, errQuery := r.db.QueryContext(ctx, query, zoneID, tenantID)
 	if errQuery != nil {
 		return nil, errQuery
 	}
@@ -319,9 +323,13 @@ func (r *PostgresRepository) DeleteZone(ctx context.Context, zoneID string, tena
 	return err
 }
 
-func (r *PostgresRepository) DeleteRecord(ctx context.Context, recordID string, zoneID string) error {
-	query := `DELETE FROM dns_records WHERE id = $1 AND zone_id = $2`
-	_, err := r.db.ExecContext(ctx, query, recordID, zoneID)
+func (r *PostgresRepository) DeleteRecord(ctx context.Context, recordID string, zoneID string, tenantID string) error {
+	query := `
+		DELETE FROM dns_records 
+		WHERE id = $1 AND zone_id = $2 AND EXISTS (
+			SELECT 1 FROM dns_zones WHERE id = $2 AND tenant_id = $3
+		)`
+	_, err := r.db.ExecContext(ctx, query, recordID, zoneID, tenantID)
 	return err
 }
 
@@ -482,13 +490,14 @@ func (r *PostgresRepository) CreateAPIKey(ctx context.Context, key *domain.APIKe
 func (r *PostgresRepository) ListAPIKeys(ctx context.Context, tenantID string) ([]domain.APIKey, error) {
 	query := `SELECT id, tenant_id, name, key_hash, key_prefix, role, active, created_at, expires_at 
 	          FROM api_keys WHERE tenant_id = $1`
-	rows, err := r.db.QueryContext(ctx, query, tenantID)
-	if err != nil {
-		return nil, err
+	rows, errQuery := r.db.QueryContext(ctx, query, tenantID)
+	if errQuery != nil {
+		return nil, errQuery
 	}
+	var retErr error
 	defer func() {
-		if errClose := rows.Close(); errClose != nil {
-			log.Printf("failed to close rows: %v", errClose)
+		if cerr := rows.Close(); cerr != nil && retErr == nil {
+			retErr = cerr
 		}
 	}()
 
@@ -500,12 +509,15 @@ func (r *PostgresRepository) ListAPIKeys(ctx context.Context, tenantID string) (
 		}
 		keys = append(keys, k)
 	}
-	return keys, nil
+	if serr := rows.Err(); serr != nil && retErr == nil {
+		retErr = serr
+	}
+	return keys, retErr
 }
 
-func (r *PostgresRepository) DeleteAPIKey(ctx context.Context, id string) error {
-	query := `DELETE FROM api_keys WHERE id = $1`
-	_, err := r.db.ExecContext(ctx, query, id)
+func (r *PostgresRepository) DeleteAPIKey(ctx context.Context, tenantID string, id string) error {
+	query := `DELETE FROM api_keys WHERE tenant_id = $1 AND id = $2`
+	_, err := r.db.ExecContext(ctx, query, tenantID, id)
 	return err
 }
 
