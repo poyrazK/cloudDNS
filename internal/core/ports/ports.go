@@ -4,6 +4,7 @@ package ports
 import (
 	"context"
 	"io"
+
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
 )
 
@@ -34,6 +35,12 @@ type DNSRepository interface {
 	CreateKey(ctx context.Context, key *domain.DNSSECKey) error
 	ListKeysForZone(ctx context.Context, zoneID string) ([]domain.DNSSECKey, error)
 	UpdateKey(ctx context.Context, key *domain.DNSSECKey) error
+
+	// API Key Management
+	GetAPIKeyByHash(ctx context.Context, keyHash string) (*domain.APIKey, error)
+	CreateAPIKey(ctx context.Context, key *domain.APIKey) error
+	ListAPIKeys(ctx context.Context, tenantID string) ([]domain.APIKey, error)
+	DeleteAPIKey(ctx context.Context, id string) error
 }
 
 // DNSService defines the interface for core DNS business logic.
