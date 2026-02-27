@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: clouddns-config
+data:
+  # Redis URL is non-sensitive (internal VPC IP, no auth) — OK in ConfigMap
+  redis-url: "10.181.239.131:6379"
+---
+# This Secret is created by the deploy script (infra/create-k8s-secrets.sh)
+# which pulls values from Google Secret Manager at deploy time.
+# This file is a TEMPLATE ONLY — it is safe to commit.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: clouddns-secrets
+type: Opaque
+stringData:
+  database-url: "INJECTED_FROM_GCP_SECRET_MANAGER_AT_DEPLOY_TIME"
