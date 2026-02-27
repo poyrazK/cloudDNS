@@ -48,10 +48,10 @@ func TestListKeys(t *testing.T) {
 
 func TestRevokeKey(t *testing.T) {
 	mockRepo := new(testutil.MockRepo)
-	mockRepo.On("DeleteAPIKey", "id1").Return(nil)
+	mockRepo.On("DeleteAPIKey", "tenant1", "id1").Return(nil)
 
 	out := &bytes.Buffer{}
-	err := revokeKey(mockRepo, "id1", out)
+	err := revokeKey(mockRepo, "tenant1", "id1", out)
 
 	if err != nil {
 		t.Fatalf("revokeKey failed: %v", err)
@@ -95,7 +95,7 @@ func TestRunCommand(t *testing.T) {
 	}
 
 	// Test revoke path
-	mockRepo.On("DeleteAPIKey", "id1").Return(nil).Once()
+	mockRepo.On("DeleteAPIKey", "default-tenant", "id1").Return(nil).Once()
 	err = run([]string{"apikey", "revoke", "-id", "id1"}, out, mockRepo)
 	if err != nil {
 		t.Errorf("Unexpected error for revoke: %v", err)

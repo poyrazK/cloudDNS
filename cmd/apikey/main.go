@@ -53,6 +53,7 @@ func run(args []string, out io.Writer, repo ports.DNSRepository) error {
 
 	revokeCmd := flag.NewFlagSet("revoke", flag.ContinueOnError)
 	revokeCmd.SetOutput(io.Discard)
+	revokeTenant := revokeCmd.String("tenant", "default-tenant", "Tenant ID")
 	revokeID := revokeCmd.String("id", "", "API Key UUID to revoke")
 
 	if len(args) < 2 {
@@ -64,6 +65,12 @@ func run(args []string, out io.Writer, repo ports.DNSRepository) error {
 		if err := createCmd.Parse(args[2:]); err != nil {
 			return err
 		}
+		if *role != "admin" && *role != "reader" && *role != "writer" {
+			return fmt.Errorf("invalid role %q: must be 'admin', 'writer', or 'reader'", *role)
+		}
+		if *days <= 0 {
+			return fmt.Errorf("invalid days %d: must be > 0", *days)
+		}
 		return generateKey(repo, *tenantID, *role, *name, *days, out)
 	case "list":
 		if err := listCmd.Parse(args[2:]); err != nil {
@@ -74,7 +81,7 @@ func run(args []string, out io.Writer, repo ports.DNSRepository) error {
 		if err := revokeCmd.Parse(args[2:]); err != nil {
 			return err
 		}
-		return revokeKey(repo, *revokeID, out)
+		return revokeKey(repo, *revokeTenant, *revokeID, out)
 	default:
 		return fmt.Errorf("unknown subcommand: %s", args[1])
 	}
@@ -98,7 +105,7 @@ func generateKey(repo ports.DNSRepository, tenantID, role, name string, days int
 		TenantID:  tenantID,
 		Name:      name,
 		KeyHash:   keyHash,
-		KeyPrefix: keyString[:8],
+		KeyPrefix: hex.EncodeToString(rawKey)[:8],
 		Role:      domain.Role(role),
 		Active:    true,
 		CreatedAt: time.Now(),
@@ -139,11 +146,11 @@ func listKeys(repo ports.DNSRepository, tenantID string, out io.Writer) error {
 	return nil
 }
 
-func revokeKey(repo ports.DNSRepository, id string, out io.Writer) error {
+func revokeKey(repo ports.DNSRepository, tenantID string, id string, out io.Writer) error {
 	if id == "" {
 		return fmt.Errorf("ID is required for revocation")
 	}
-	if err := repo.DeleteAPIKey(context.Background(), id); err != nil {
+	if err := repo.DeleteAPIKey(context.Background(), tenantID, id); err != nil {
 		return err
 	}
 	_, _ = fmt.Fprintf(out, "API Key %s revoked (deleted)\n", id)

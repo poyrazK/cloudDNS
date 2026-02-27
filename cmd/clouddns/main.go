@@ -124,13 +124,22 @@ func run(ctx context.Context) error {
 
 		anycastMgr = services.NewAnycastManager(dnsSvc, routingAdapter, vipAdapter, vip, iface, logger)
 
+		errChan := make(chan error, 1)
 		go func() {
 			if err := routingAdapter.Start(ctx, localASN, peerASN, peerIP); err != nil {
-				logger.Error("failed to start BGP speaker", "error", err)
+				errChan <- fmt.Errorf("failed to start BGP speaker: %w", err)
 				return
 			}
 			anycastMgr.Start(ctx)
 		}()
+
+		// Provide a short grace period to immediately catch bind/startup errors
+		select {
+		case err := <-errChan:
+			return err
+		case <-time.After(500 * time.Millisecond):
+			// Started successfully
+		}
 	}
 
 	// 3. Start DNS Server
