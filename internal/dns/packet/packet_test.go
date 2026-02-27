@@ -47,7 +47,7 @@ func TestHeaderSerialization(t *testing.T) {
 func TestNameSerialization(t *testing.T) {
 	buffer := NewBytePacketBuffer()
 	name := "google.com."
-	
+
 	err := buffer.WriteName(name)
 	if err != nil {
 		t.Fatalf("Failed to write name: %v", err)
@@ -316,11 +316,13 @@ func TestReadWriteAllTypes(t *testing.T) {
 		}
 
 		expectedName := rec.Name
-		if expectedName == "" { expectedName = "." }
+		if expectedName == "" {
+			expectedName = "."
+		}
 		if parsed.Name != expectedName {
 			t.Errorf("%v: Name mismatch: %s vs %s", rec.Type, parsed.Name, expectedName)
 		}
-		
+
 		switch rec.Type {
 		case A, AAAA:
 			if parsed.IP.String() != rec.IP.String() {
@@ -355,7 +357,7 @@ func TestReadName_InfiniteLoop(t *testing.T) {
 	// Create a pointer that points to itself
 	_ = buffer.Write(0xC0)
 	_ = buffer.Write(0x00)
-	
+
 	_ = buffer.Seek(0)
 	_, err := buffer.ReadName()
 	if err == nil {
@@ -638,7 +640,7 @@ func TestEDERecordSerialization(t *testing.T) {
 	if opt.Code != 15 {
 		t.Errorf("Expected EDE option (15), got %d", opt.Code)
 	}
-	
+
 	infoCode := uint16(opt.Data[0])<<8 | uint16(opt.Data[1])
 	if infoCode != EdeBlocked {
 		t.Errorf("Expected EdeBlocked (%d), got %d", EdeBlocked, infoCode)
@@ -656,7 +658,7 @@ func TestBufferPool(t *testing.T) {
 	}
 	_ = buf.Write(1)
 	PutBuffer(buf)
-	
+
 	buf2 := GetBuffer()
 	if buf2.Position() != 0 {
 		t.Errorf("Expected reused buffer to be reset")
@@ -667,11 +669,11 @@ func TestBufferRandomAccess(t *testing.T) {
 	buf := NewBytePacketBuffer()
 	data := []byte{0xDE, 0xAD, 0xBE, 0xEF}
 	_ = buf.WriteRange(10, data)
-	
+
 	if val, _ := buf.Get(10); val != 0xDE {
 		t.Errorf("Get(10) failed")
 	}
-	
+
 	got, _ := buf.GetRange(10, 4)
 	if string(got) != string(data) {
 		t.Errorf("GetRange mismatch")
@@ -681,21 +683,21 @@ func TestBufferRandomAccess(t *testing.T) {
 func TestNameCompression(t *testing.T) {
 	buf := NewBytePacketBuffer()
 	buf.HasNames = true
-	
+
 	// Write name first time
 	_ = buf.WriteName("example.com.")
 	pos1 := 0 // should be at 0
-	
+
 	// Write same name again
 	_ = buf.WriteName("example.com.")
-	
+
 	// Buffer should now contain:
 	// [7] 'e' 'x' 'a' 'm' 'p' 'l' 'e' [3] 'c' 'o' 'm' [0] [0xC0, 0x00]
 	// Total 13 bytes for first name, then 2 byte pointer
 	if buf.Position() != 15 {
 		t.Errorf("Expected 15 bytes total, got %d", buf.Position())
 	}
-	
+
 	// Verify pointer
 	if buf.Buf[13] != 0xC0 || buf.Buf[14] != byte(pos1) {
 		t.Errorf("Invalid compression pointer: %x %x", buf.Buf[13], buf.Buf[14])
@@ -711,7 +713,7 @@ func TestReadName_MaxJumps(t *testing.T) {
 	buf.Buf[3] = 0x00
 	buf.Len = 4
 	buf.parsing = true
-	
+
 	_ = buf.Seek(0)
 	_, err := buf.ReadName()
 	if err == nil || !strings.Contains(err.Error(), "limit") {
@@ -832,7 +834,7 @@ func TestBufferLoad(t *testing.T) {
 
 func TestBuffer_EdgeCases(t *testing.T) {
 	buf := NewBytePacketBuffer()
-	
+
 	// 1. Step and Seek
 	_ = buf.Step(10)
 	if buf.Position() != 10 {
@@ -846,12 +848,12 @@ func TestBuffer_EdgeCases(t *testing.T) {
 	// 2. Nested Name Compression
 	buf.Reset()
 	buf.HasNames = true
-	
+
 	// Write "a.b.test.com."
 	_ = buf.WriteName("a.b.test.com.")
 	// Write "b.test.com." (should reuse suffix)
 	_ = buf.WriteName("b.test.com.")
-	
+
 	if buf.Position() >= 30 { // Total should be less than naive sum
 		t.Errorf("Compression not working effectively")
 	}
@@ -920,7 +922,7 @@ func TestDNSRecord_ExtraTypes(t *testing.T) {
 		if parsed.Type != rec.Type {
 			t.Errorf("Type mismatch for %v: got %v", rec.Type, parsed.Type)
 		}
-		
+
 		switch rec.Type {
 		case DS:
 			if parsed.KeyTag != rec.KeyTag || string(parsed.Digest) != string(rec.Digest) {
@@ -944,10 +946,10 @@ func TestDNSRecord_ReadTruncated(t *testing.T) {
 	buf := NewBytePacketBuffer()
 	_, _ = rec.Write(buf)
 	data := buf.Buf[:buf.Position()-1] // Truncate last byte of IP
-	
+
 	truncatedBuf := NewBytePacketBuffer()
 	truncatedBuf.Load(data)
-	
+
 	parsed := DNSRecord{}
 	err := parsed.Read(truncatedBuf)
 	if err == nil {
@@ -993,20 +995,20 @@ func TestTSIG_SignVerify(t *testing.T) {
 	p := NewDNSPacket()
 	p.Header.ID = 1234
 	p.Questions = append(p.Questions, DNSQuestion{Name: "test.com.", QType: A})
-	
+
 	buf := NewBytePacketBuffer()
 	secret := []byte("secret")
-	
+
 	// 2. Proactively write the packet to the buffer (WITHOUT TSIG yet)
 	if err := p.Write(buf); err != nil {
 		t.Fatalf("Failed to write packet: %v", err)
 	}
-	
+
 	// 3. Append the TSIG signature to the message
 	if err := p.SignTSIG(buf, "key.", secret); err != nil {
 		t.Fatalf("SignTSIG failed: %v", err)
 	}
-	
+
 	// 4. Capture the final signed data and parse it back into a new packet
 	data := buf.Buf[:buf.Position()]
 	parsed := NewDNSPacket()
@@ -1015,7 +1017,7 @@ func TestTSIG_SignVerify(t *testing.T) {
 	if err := parsed.FromBuffer(pBuf); err != nil {
 		t.Fatalf("FromBuffer failed: %v", err)
 	}
-	
+
 	// 5. Verify successful verification
 	if err := parsed.VerifyTSIG(data, parsed.TSIGStart, secret); err != nil {
 		t.Errorf("VerifyTSIG validation failed: %v", err)
@@ -1038,7 +1040,7 @@ func TestTSIG_SignVerify(t *testing.T) {
 
 func TestBuffer_ReadRange_Error(t *testing.T) {
 	buf := NewBytePacketBuffer()
-	_, err := buf.ReadRange(MaxPacketSize - 1, 10)
+	_, err := buf.ReadRange(MaxPacketSize-1, 10)
 	if err == nil {
 		t.Error("expected error when reading out of bounds range")
 	}
@@ -1059,5 +1061,60 @@ func TestDNSPacket_FromBuffer_Error(t *testing.T) {
 	err := p.FromBuffer(buf)
 	if err == nil {
 		t.Error("expected error when parsing packet from empty buffer")
+	}
+}
+
+func TestPTRRecordSerialization(t *testing.T) {
+	record := DNSRecord{
+		Name: "4.3.2.1.in-addr.arpa.",
+		Type: PTR,
+		TTL:  300,
+		Host: "host.test.com.",
+	}
+
+	buffer := NewBytePacketBuffer()
+	_, err := record.Write(buffer)
+	if err != nil {
+		t.Fatalf("Failed to write PTR record: %v", err)
+	}
+
+	_ = buffer.Seek(0)
+	parsed := DNSRecord{}
+	err = parsed.Read(buffer)
+	if err != nil {
+		t.Fatalf("Failed to read PTR record: %v", err)
+	}
+
+	if parsed.Host != "host.test.com." {
+		t.Errorf("PTR mismatch: expected host.test.com., got %s", parsed.Host)
+	}
+}
+
+func TestSRVRecordSerialization(t *testing.T) {
+	record := DNSRecord{
+		Name:     "_sip._tcp.example.com.",
+		Type:     SRV,
+		TTL:      300,
+		Priority: 10,
+		Weight:   20,
+		Port:     5060,
+		Host:     "sipserver.example.com.",
+	}
+
+	buffer := NewBytePacketBuffer()
+	_, err := record.Write(buffer)
+	if err != nil {
+		t.Fatalf("Failed to write SRV record: %v", err)
+	}
+
+	_ = buffer.Seek(0)
+	parsed := DNSRecord{}
+	err = parsed.Read(buffer)
+	if err != nil {
+		t.Fatalf("Failed to read SRV record: %v", err)
+	}
+
+	if parsed.Priority != 10 || parsed.Weight != 20 || parsed.Port != 5060 || parsed.Host != "sipserver.example.com." {
+		t.Errorf("SRV mismatch: %+v", parsed)
 	}
 }

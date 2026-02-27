@@ -403,7 +403,7 @@ func (s *Server) handleAXFR(conn net.Conn, request *packet.DNSPacket) {
 		return
 	}
 
-	records, errList := s.Repo.ListRecordsForZone(ctx, zone.ID)
+	records, errList := s.Repo.ListRecordsForZone(ctx, zone.ID, zone.TenantID)
 	if errList != nil {
 		s.Logger.Error("AXFR failed to list records", "zone", zone.ID, "error", errList)
 		s.sendTCPError(conn, request.Header.ID, 2) // SERVFAIL
@@ -1001,7 +1001,7 @@ func (s *Server) handleUpdate(request *packet.DNSPacket, rawData []byte, clientI
 				soa.Content = strings.Join(parts, " ")
 
 				// Delete old SOA and create new one (simplified update)
-				_ = s.Repo.DeleteRecord(ctx, soa.ID, dbZone.ID)
+				_ = s.Repo.DeleteRecord(ctx, soa.ID, dbZone.ID, dbZone.TenantID)
 				_ = s.Repo.CreateRecord(ctx, &soa)
 
 				// Persist changes with the new serial
@@ -1386,7 +1386,7 @@ func (s *Server) notifySlaves(zoneName string) {
 }
 
 func (s *Server) generateNSEC(ctx context.Context, zone *domain.Zone, queryName string) (packet.DNSRecord, error) {
-	records, errZoneRecs := s.Repo.ListRecordsForZone(ctx, zone.ID)
+	records, errZoneRecs := s.Repo.ListRecordsForZone(ctx, zone.ID, zone.TenantID)
 	if errZoneRecs != nil {
 		return packet.DNSRecord{}, errZoneRecs
 	}
@@ -1477,7 +1477,7 @@ func (s *Server) generateNSEC3(ctx context.Context, zone *domain.Zone, queryName
 		salt = ""
 	}
 
-	records, _ := s.Repo.ListRecordsForZone(ctx, zone.ID)
+	records, _ := s.Repo.ListRecordsForZone(ctx, zone.ID, zone.TenantID)
 	nameToTypes := make(map[string][]domain.RecordType)
 	var ownerNames []string
 	seen := make(map[string]bool)

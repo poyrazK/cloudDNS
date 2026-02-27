@@ -3,7 +3,9 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -23,7 +25,7 @@ func TestEndToEnd_Protocols(t *testing.T) {
 	svc := services.NewDNSService(repo, nil)
 	dnsAddr := "127.0.0.1:10058"
 	apiAddr := "127.0.0.1:18083"
-	
+
 	// Use unprivileged port for DoH tests
 	t.Setenv("DOH_PORT", "10443")
 
@@ -31,12 +33,12 @@ func TestEndToEnd_Protocols(t *testing.T) {
 	// Mock TLS for DoT/DoH testing
 	cert, _ := tls.X509KeyPair([]byte(""), []byte("")) // Mock won't actually work without real certs, but we test the setup
 	dnsSrv.TLSConfig = &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}
-	
+
 	go func() {
 		_ = dnsSrv.Run()
 	}()
 
-	apiHandler := api.NewAPIHandler(svc)
+	apiHandler := api.NewAPIHandler(svc, repo)
 	mux := http.NewServeMux()
 	apiHandler.RegisterRoutes(mux)
 	apiSrv := &http.Server{Addr: apiAddr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
@@ -49,10 +51,23 @@ func TestEndToEnd_Protocols(t *testing.T) {
 		_ = apiSrv.Shutdown(context.Background())
 	}()
 
-	// 2. Setup Zone
+	// 2. Setup Authentication and Zone
+	testKey := "cdns_proto_key_123"
+	hash := sha256.Sum256([]byte(testKey))
+	keyHash := hex.EncodeToString(hash[:])
+	_ = repo.CreateAPIKey(context.Background(), &domain.APIKey{
+		ID: "proto-key-id", TenantID: "admin", Role: domain.RoleAdmin, Active: true, KeyHash: keyHash,
+	})
+	authHeader := "Bearer " + testKey
+	client := &http.Client{}
+
 	zoneReq := domain.Zone{Name: "protocols.test.", TenantID: "admin"}
 	bz, _ := json.Marshal(zoneReq)
-	resp, err := http.Post(fmt.Sprintf("http://%s/zones", apiAddr), "application/json", bytes.NewBuffer(bz))
+	req, _ := http.NewRequest("POST", fmt.Sprintf("http://%s/zones", apiAddr), bytes.NewBuffer(bz))
+	req.Header.Set("Authorization", authHeader)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("Failed to create zone: %v", err)
 	}
@@ -62,7 +77,12 @@ func TestEndToEnd_Protocols(t *testing.T) {
 
 	rec := domain.Record{Name: "www.protocols.test.", Type: domain.TypeA, Content: "1.2.3.4", TTL: 60, ZoneID: createdZone.ID}
 	br, _ := json.Marshal(rec)
-	if resp2, err2 := http.Post(fmt.Sprintf("http://%s/zones/%s/records", apiAddr, createdZone.ID), "application/json", bytes.NewBuffer(br)); err2 == nil { _ = resp2.Body.Close() }
+	req2, _ := http.NewRequest("POST", fmt.Sprintf("http://%s/zones/%s/records", apiAddr, createdZone.ID), bytes.NewBuffer(br))
+	req2.Header.Set("Authorization", authHeader)
+	req2.Header.Set("Content-Type", "application/json")
+	if resp2, err2 := client.Do(req2); err2 == nil {
+		_ = resp2.Body.Close()
+	}
 
 	// 3. Test UDP
 	conn, err := net.Dial("udp", dnsAddr)
@@ -74,7 +94,7 @@ func TestEndToEnd_Protocols(t *testing.T) {
 	qb := packet.NewBytePacketBuffer()
 	_ = q.Write(qb)
 	_, _ = conn.Write(qb.Buf[:qb.Position()])
-	
+
 	rb := make([]byte, 1024)
 	n, _ := conn.Read(rb)
 	res := packet.NewDNSPacket()
@@ -96,13 +116,13 @@ func TestEndToEnd_Protocols(t *testing.T) {
 	data := tqb.Buf[:tqb.Position()]
 	fullData := append([]byte{byte(len(data) >> 8), byte(len(data) & 0xFF)}, data...)
 	_, _ = tConn.Write(fullData)
-	
+
 	lenB := make([]byte, 2)
 	_, _ = tConn.Read(lenB)
 	rlen := uint16(lenB[0])<<8 | uint16(lenB[1])
 	rdata := make([]byte, rlen)
 	_, _ = tConn.Read(rdata)
-	
+
 	res2 := packet.NewDNSPacket()
 	pb2 := packet.NewBytePacketBuffer()
 	pb2.Load(rdata)

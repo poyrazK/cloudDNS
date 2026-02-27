@@ -5,32 +5,40 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
 	"github.com/poyrazK/cloudDNS/internal/core/ports"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // APIHandler handles HTTP requests for zone and record management.
 type APIHandler struct {
-	svc ports.DNSService
+	svc  ports.DNSService
+	repo ports.DNSRepository
 }
 
 // NewAPIHandler creates and returns a new APIHandler instance.
-func NewAPIHandler(svc ports.DNSService) *APIHandler {
-	return &APIHandler{svc: svc}
+func NewAPIHandler(svc ports.DNSService, repo ports.DNSRepository) *APIHandler {
+	return &APIHandler{svc: svc, repo: repo}
 }
 
 // RegisterRoutes registers the API routes with the provided ServeMux.
 func (h *APIHandler) RegisterRoutes(mux *http.ServeMux) {
+	// Public Routes
 	mux.HandleFunc("GET /health", h.HealthCheck)
 	mux.HandleFunc("GET /metrics", h.Metrics)
-	mux.HandleFunc("POST /zones", h.CreateZone)
-	mux.HandleFunc("GET /zones", h.ListZones)
-	mux.HandleFunc("GET /zones/{id}/records", h.ListRecordsForZone)
-	mux.HandleFunc("DELETE /zones/{id}", h.DeleteZone)
-	mux.HandleFunc("POST /zones/{id}/records", h.CreateRecord)
-	mux.HandleFunc("DELETE /zones/{zone_id}/records/{id}", h.DeleteRecord)
-	mux.HandleFunc("GET /audit-logs", h.ListAuditLogs)
+
+	// Middleware
+	auth := AuthMiddleware(h.repo)
+	admin := RequireRole(domain.RoleAdmin)
+
+	// Protected Routes (scoped by tenant_id from auth key)
+	mux.Handle("POST /zones", auth(admin(http.HandlerFunc(h.CreateZone))))
+	mux.Handle("GET /zones", auth(http.HandlerFunc(h.ListZones)))
+	mux.Handle("GET /zones/{id}/records", auth(http.HandlerFunc(h.ListRecordsForZone)))
+	mux.Handle("DELETE /zones/{id}", auth(admin(http.HandlerFunc(h.DeleteZone))))
+	mux.Handle("POST /zones/{id}/records", auth(admin(http.HandlerFunc(h.CreateRecord))))
+	mux.Handle("DELETE /zones/{zone_id}/records/{id}", auth(admin(http.HandlerFunc(h.DeleteRecord))))
+	mux.Handle("GET /audit-logs", auth(http.HandlerFunc(h.ListAuditLogs)))
 }
 
 // Metrics handles Prometheus metrics scraping requests.
@@ -44,10 +52,10 @@ func (h *APIHandler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 	details := make(map[string]string)
 	checks := h.svc.HealthCheck(r.Context())
 
-	for name, err := range checks {
-		if err != nil {
+	for name, checkErr := range checks {
+		if checkErr != nil {
 			status = "DEGRADED"
-			details[name] = err.Error()
+			details[name] = checkErr.Error()
 		} else {
 			details[name] = "OK"
 		}
@@ -72,9 +80,11 @@ func (h *APIHandler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 
 // ListAuditLogs retrieves audit entries for a specific tenant via the management API.
 func (h *APIHandler) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
-	tenantID := r.URL.Query().Get("tenant_id")
-	if tenantID == "" {
-		tenantID = "default-tenant"
+	tenantID, ok := r.Context().Value(CtxTenantID).(string)
+	if !ok || tenantID == "" {
+		log.Printf("ListAuditLogs: missing or invalid tenant ID in context")
+		http.Error(w, "Unauthorized: missing tenant context", http.StatusUnauthorized)
+		return
 	}
 
 	logs, err := h.svc.ListAuditLogs(r.Context(), tenantID)
@@ -101,10 +111,14 @@ func (h *APIHandler) CreateZone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// In a real app, we would get TenantID from Auth context
-	if zone.TenantID == "" {
-		zone.TenantID = "default-tenant"
+	// Extract TenantID from Auth context
+	tenantID, ok := r.Context().Value(CtxTenantID).(string)
+	if !ok || tenantID == "" {
+		log.Printf("CreateZone: missing or invalid tenant ID in context")
+		http.Error(w, "Unauthorized: missing tenant context", http.StatusUnauthorized)
+		return
 	}
+	zone.TenantID = tenantID
 
 	if err := h.svc.CreateZone(r.Context(), &zone); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -119,9 +133,11 @@ func (h *APIHandler) CreateZone(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *APIHandler) ListZones(w http.ResponseWriter, r *http.Request) {
-	tenantID := r.URL.Query().Get("tenant_id")
-	if tenantID == "" {
-		tenantID = "default-tenant"
+	tenantID, ok := r.Context().Value(CtxTenantID).(string)
+	if !ok || tenantID == "" {
+		log.Printf("ListZones: missing or invalid tenant ID in context")
+		http.Error(w, "Unauthorized: missing tenant context", http.StatusUnauthorized)
+		return
 	}
 
 	zones, err := h.svc.ListZones(r.Context(), tenantID)
@@ -138,8 +154,15 @@ func (h *APIHandler) ListZones(w http.ResponseWriter, r *http.Request) {
 
 func (h *APIHandler) ListRecordsForZone(w http.ResponseWriter, r *http.Request) {
 	zoneID := r.PathValue("id")
-	
-	records, err := h.svc.ListRecordsForZone(r.Context(), zoneID)
+
+	tenantID, ok := r.Context().Value(CtxTenantID).(string)
+	if !ok || tenantID == "" {
+		log.Printf("ListRecordsForZone: missing or invalid tenant ID in context")
+		http.Error(w, "Unauthorized: missing tenant context", http.StatusUnauthorized)
+		return
+	}
+
+	records, err := h.svc.ListRecordsForZone(r.Context(), zoneID, tenantID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -168,6 +191,14 @@ func (h *APIHandler) CreateRecord(w http.ResponseWriter, r *http.Request) {
 
 	record.ZoneID = zoneID
 
+	tenantID, ok := r.Context().Value(CtxTenantID).(string)
+	if !ok || tenantID == "" {
+		log.Printf("CreateRecord: missing or invalid tenant ID in context")
+		http.Error(w, "Unauthorized: missing tenant context", http.StatusUnauthorized)
+		return
+	}
+	record.TenantID = tenantID
+
 	if err := h.svc.CreateRecord(r.Context(), &record); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -182,9 +213,11 @@ func (h *APIHandler) CreateRecord(w http.ResponseWriter, r *http.Request) {
 
 func (h *APIHandler) DeleteZone(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	tenantID := r.URL.Query().Get("tenant_id")
-	if tenantID == "" {
-		tenantID = "default-tenant"
+	tenantID, ok := r.Context().Value(CtxTenantID).(string)
+	if !ok || tenantID == "" {
+		log.Printf("DeleteZone: missing or invalid tenant ID in context")
+		http.Error(w, "Unauthorized: missing tenant context", http.StatusUnauthorized)
+		return
 	}
 
 	if err := h.svc.DeleteZone(r.Context(), id, tenantID); err != nil {
@@ -199,7 +232,14 @@ func (h *APIHandler) DeleteRecord(w http.ResponseWriter, r *http.Request) {
 	zoneID := r.PathValue("zone_id")
 	id := r.PathValue("id")
 
-	if err := h.svc.DeleteRecord(r.Context(), id, zoneID); err != nil {
+	tenantID, ok := r.Context().Value(CtxTenantID).(string)
+	if !ok || tenantID == "" {
+		log.Printf("DeleteRecord: missing or invalid tenant ID in context")
+		http.Error(w, "Unauthorized: missing tenant context", http.StatusUnauthorized)
+		return
+	}
+
+	if err := h.svc.DeleteRecord(r.Context(), id, zoneID, tenantID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

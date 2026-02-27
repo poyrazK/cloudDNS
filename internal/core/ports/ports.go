@@ -4,6 +4,7 @@ package ports
 import (
 	"context"
 	"io"
+
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
 )
 
@@ -12,15 +13,15 @@ type DNSRepository interface {
 	GetRecords(ctx context.Context, name string, qType domain.RecordType, clientIP string) ([]domain.Record, error)
 	GetIPsForName(ctx context.Context, name string, clientIP string) ([]string, error)
 	GetZone(ctx context.Context, name string) (*domain.Zone, error)
-	GetRecord(ctx context.Context, id string, zoneID string) (*domain.Record, error)
-	ListRecordsForZone(ctx context.Context, zoneID string) ([]domain.Record, error)
+	GetRecord(ctx context.Context, id string, zoneID string, tenantID string) (*domain.Record, error)
+	ListRecordsForZone(ctx context.Context, zoneID string, tenantID string) ([]domain.Record, error)
 	CreateZone(ctx context.Context, zone *domain.Zone) error
 	CreateZoneWithRecords(ctx context.Context, zone *domain.Zone, records []domain.Record) error
 	CreateRecord(ctx context.Context, record *domain.Record) error
 	BatchCreateRecords(ctx context.Context, records []domain.Record) error
 	ListZones(ctx context.Context, tenantID string) ([]domain.Zone, error)
 	DeleteZone(ctx context.Context, zoneID string, tenantID string) error
-	DeleteRecord(ctx context.Context, recordID string, zoneID string) error
+	DeleteRecord(ctx context.Context, recordID string, zoneID string, tenantID string) error
 	DeleteRecordsByNameAndType(ctx context.Context, zoneID string, name string, qType domain.RecordType) error
 	DeleteRecordsByName(ctx context.Context, zoneID string, name string) error
 	DeleteRecordSpecific(ctx context.Context, zoneID string, name string, qType domain.RecordType, content string) error
@@ -34,6 +35,12 @@ type DNSRepository interface {
 	CreateKey(ctx context.Context, key *domain.DNSSECKey) error
 	ListKeysForZone(ctx context.Context, zoneID string) ([]domain.DNSSECKey, error)
 	UpdateKey(ctx context.Context, key *domain.DNSSECKey) error
+
+	// API Key Management
+	GetAPIKeyByHash(ctx context.Context, keyHash string) (*domain.APIKey, error)
+	CreateAPIKey(ctx context.Context, key *domain.APIKey) error
+	ListAPIKeys(ctx context.Context, tenantID string) ([]domain.APIKey, error)
+	DeleteAPIKey(ctx context.Context, tenantID string, id string) error
 }
 
 // DNSService defines the interface for core DNS business logic.
@@ -42,9 +49,9 @@ type DNSService interface {
 	CreateRecord(ctx context.Context, record *domain.Record) error
 	Resolve(ctx context.Context, name string, qType domain.RecordType, clientIP string) ([]domain.Record, error)
 	ListZones(ctx context.Context, tenantID string) ([]domain.Zone, error)
-	ListRecordsForZone(ctx context.Context, zoneID string) ([]domain.Record, error)
+	ListRecordsForZone(ctx context.Context, zoneID string, tenantID string) ([]domain.Record, error)
 	DeleteZone(ctx context.Context, zoneID string, tenantID string) error
-	DeleteRecord(ctx context.Context, recordID string, zoneID string) error
+	DeleteRecord(ctx context.Context, recordID string, zoneID string, tenantID string) error
 	ImportZone(ctx context.Context, tenantID string, r io.Reader) (*domain.Zone, error)
 	ListAuditLogs(ctx context.Context, tenantID string) ([]domain.AuditLog, error)
 	HealthCheck(ctx context.Context) map[string]error

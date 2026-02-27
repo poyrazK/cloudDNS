@@ -3,6 +3,8 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -16,7 +18,7 @@ import (
 	"github.com/poyrazK/cloudDNS/internal/dns/packet"
 )
 
-func TestEndToEndDNS_Advanced(t *testing.T) {
+func TestEndToEndDNSAdvanced(t *testing.T) {
 	// 1. Setup Stack with Mock Repo (or real PG if we wanted even more integration)
 	repo := &mockServerRepo{}
 	svc := services.NewDNSService(repo, nil)
@@ -28,7 +30,7 @@ func TestEndToEndDNS_Advanced(t *testing.T) {
 		_ = dnsSrv.Run()
 	}()
 
-	apiHandler := api.NewAPIHandler(svc)
+	apiHandler := api.NewAPIHandler(svc, repo)
 	mux := http.NewServeMux()
 	apiHandler.RegisterRoutes(mux)
 	apiSrv := &http.Server{Addr: apiAddr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
@@ -42,49 +44,101 @@ func TestEndToEndDNS_Advanced(t *testing.T) {
 		_ = apiSrv.Shutdown(context.Background())
 	}()
 
-	// 2. Setup Zone with multiple records including Wildcards
+	// 2. Setup Authentication and Zone
+	testKey := "cdns_test_key_1234567890"
+	hash := sha256.Sum256([]byte(testKey))
+	keyHash := hex.EncodeToString(hash[:])
+	_ = repo.CreateAPIKey(context.Background(), &domain.APIKey{
+		ID: "test-key-id", TenantID: "admin", Role: domain.RoleAdmin, Active: true, KeyHash: keyHash,
+	})
+
+	authHeader := "Bearer " + testKey
+
 	zoneReq := domain.Zone{Name: "advanced.test.", TenantID: "admin"}
-	body, _ := json.Marshal(zoneReq)
-	resp, err := http.Post(fmt.Sprintf("http://%s/zones", apiAddr), "application/json", bytes.NewBuffer(body))
+	body, err := json.Marshal(zoneReq)
+	if err != nil {
+		t.Fatalf("Failed to marshal zone req: %v", err)
+	}
+	req, err := http.NewRequest("POST", fmt.Sprintf("http://%s/zones", apiAddr), bytes.NewBuffer(body))
+	if err != nil {
+		t.Fatalf("Failed to create req: %v", err)
+	}
+	req.Header.Set("Authorization", authHeader)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("Failed to create zone: %v", err)
 	}
 	var createdZone domain.Zone
-	_ = json.NewDecoder(resp.Body).Decode(&createdZone)
+	if decErr := json.NewDecoder(resp.Body).Decode(&createdZone); decErr != nil {
+		t.Fatalf("Failed to decode zone: %v", decErr)
+	}
 	_ = resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("Failed to create zone: expected 201, got %d", resp.StatusCode)
+	}
 
 	records := []domain.Record{
 		{Name: "a.advanced.test.", Type: domain.TypeA, Content: "1.1.1.1", TTL: 300, ZoneID: createdZone.ID},
 		{Name: "*.advanced.test.", Type: domain.TypeTXT, Content: "wildcard", TTL: 300, ZoneID: createdZone.ID},
 	}
 	for _, r := range records {
-		b, _ := json.Marshal(r)
-		if resp2, err2 := http.Post(fmt.Sprintf("http://%s/zones/%s/records", apiAddr, createdZone.ID), "application/json", bytes.NewBuffer(b)); err2 == nil { _ = resp2.Body.Close() }
+		b, err := json.Marshal(r)
+		if err != nil {
+			t.Fatalf("Failed to marshal record: %v", err)
+		}
+		req2, err := http.NewRequest("POST", fmt.Sprintf("http://%s/zones/%s/records", apiAddr, createdZone.ID), bytes.NewBuffer(b))
+		if err != nil {
+			t.Fatalf("Failed to build request: %v", err)
+		}
+		req2.Header.Set("Authorization", authHeader)
+		req2.Header.Set("Content-Type", "application/json")
+		if resp2, err2 := client.Do(req2); err2 == nil {
+			if cerr := resp2.Body.Close(); cerr != nil {
+				t.Fatalf("Failed to close response: %v", cerr)
+			}
+		} else {
+			t.Fatalf("Failed to create record %s: %v", r.Name, err2)
+		}
 	}
 
 	// 3. Test Wildcard Resolution
 	query := packet.NewDNSPacket()
 	query.Questions = append(query.Questions, packet.DNSQuestion{Name: "anything.advanced.test.", QType: packet.TXT})
 	qBuf := packet.NewBytePacketBuffer()
-	_ = query.Write(qBuf)
+	if err := query.Write(qBuf); err != nil {
+		t.Fatalf("Failed to write to buffer: %v", err)
+	}
 
 	conn, err := net.Dial("udp", dnsAddr)
 	if err != nil {
 		t.Fatalf("Failed to connect to DNS: %v", err)
 	}
-	_, _ = conn.Write(qBuf.Buf[:qBuf.Position()])
+	if _, err := conn.Write(qBuf.Buf[:qBuf.Position()]); err != nil {
+		t.Fatalf("Failed to write udp: %v", err)
+	}
 	resBuf := make([]byte, 1024)
-	n, _ := conn.Read(resBuf)
-	
+	n, err := conn.Read(resBuf)
+	if err != nil {
+		t.Fatalf("Failed to read udp res: %v", err)
+	}
+
 	res := packet.NewDNSPacket()
 	pBuf := packet.NewBytePacketBuffer()
 	pBuf.Load(resBuf[:n])
-	_ = res.FromBuffer(pBuf)
+	if err := res.FromBuffer(pBuf); err != nil {
+		t.Fatalf("Failed to parse packet: %v", err)
+	}
 
 	if len(res.Answers) == 0 || res.Answers[0].Txt != "wildcard" {
 		t.Errorf("Wildcard E2E failed")
 	}
-	_ = conn.Close()
+	if cerr := conn.Close(); cerr != nil {
+		t.Fatalf("Failed to close TCP conn: %v", cerr)
+	}
 
 	// 4. Test AXFR over TCP
 	tcpConn, err := net.Dial("tcp", dnsAddr)
@@ -95,45 +149,69 @@ func TestEndToEndDNS_Advanced(t *testing.T) {
 	axfrQuery.Header.ID = 0x1234
 	axfrQuery.Questions = append(axfrQuery.Questions, packet.DNSQuestion{Name: "advanced.test.", QType: packet.AXFR})
 	aqBuf := packet.NewBytePacketBuffer()
-	_ = axfrQuery.Write(aqBuf)
+	if err := axfrQuery.Write(aqBuf); err != nil {
+		t.Fatalf("Failed to write axfr qbuf: %v", err)
+	}
 
 	data := aqBuf.Buf[:aqBuf.Position()]
 	fullData := append([]byte{byte(len(data) >> 8), byte(len(data) & 0xFF)}, data...)
-	_, _ = tcpConn.Write(fullData)
+	if _, err := tcpConn.Write(fullData); err != nil {
+		t.Fatalf("Failed to write axfr req: %v", err)
+	}
 
 	// Read first SOA
 	lenB := make([]byte, 2)
-	_, _ = tcpConn.Read(lenB)
+	if _, err := tcpConn.Read(lenB); err != nil {
+		t.Fatalf("Failed to read axfr length: %v", err)
+	}
 	axfrRLen := uint16(lenB[0])<<8 | uint16(lenB[1])
 	axfrRData := make([]byte, axfrRLen)
-	_, _ = tcpConn.Read(axfrRData)
-	
+	if _, err := tcpConn.Read(axfrRData); err != nil {
+		t.Fatalf("Failed to read axfr data: %v", err)
+	}
+
 	axfrRes := packet.NewDNSPacket()
 	arb := packet.NewBytePacketBuffer()
 	arb.Load(axfrRData)
-	_ = axfrRes.FromBuffer(arb)
-	
+	if err := axfrRes.FromBuffer(arb); err != nil {
+		t.Fatalf("Failed to parse packet: %v", err)
+	}
+
 	if len(axfrRes.Answers) == 0 || axfrRes.Answers[0].Type != packet.SOA {
 		t.Errorf("AXFR E2E failed to start with SOA")
 	}
-	_ = tcpConn.Close()
+	if cerr := tcpConn.Close(); cerr != nil {
+		t.Fatalf("Failed to close TCP conn: %v", cerr)
+	}
 
 	// 5. Test EDNS(0) + NSEC (Authenticated Denial)
-	conn2, _ := net.Dial("udp", dnsAddr)
+	conn2, err := net.Dial("udp", dnsAddr)
+	if err != nil {
+		t.Fatalf("Failed to dial udp: %v", err)
+	}
 	query2 := packet.NewDNSPacket()
 	query2.Questions = append(query2.Questions, packet.DNSQuestion{Name: "missing.advanced.test.", QType: packet.A})
 	query2.Resources = append(query2.Resources, packet.DNSRecord{
 		Name: ".", Type: packet.OPT, UDPPayloadSize: 4096, Z: 0x8000,
 	})
 	qBuf2 := packet.NewBytePacketBuffer()
-	_ = query2.Write(qBuf2)
-	_, _ = conn2.Write(qBuf2.Buf[:qBuf2.Position()])
-	
-	n2, _ := conn2.Read(resBuf)
+	if err := query2.Write(qBuf2); err != nil {
+		t.Fatalf("Failed to write to buffer: %v", err)
+	}
+	if _, err := conn2.Write(qBuf2.Buf[:qBuf2.Position()]); err != nil {
+		t.Fatalf("Failed to write to conn: %v", err)
+	}
+
+	n2, err := conn2.Read(resBuf)
+	if err != nil {
+		t.Fatalf("Failed to read from conn: %v", err)
+	}
 	res2 := packet.NewDNSPacket()
 	pBuf2 := packet.NewBytePacketBuffer()
 	pBuf2.Load(resBuf[:n2])
-	_ = res2.FromBuffer(pBuf2)
+	if err := res2.FromBuffer(pBuf2); err != nil {
+		t.Fatalf("Failed to parse packet: %v", err)
+	}
 
 	foundNSEC := false
 	for _, auth := range res2.Authorities {

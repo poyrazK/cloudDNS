@@ -1,23 +1,28 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
+	"github.com/poyrazK/cloudDNS/internal/testutil"
 )
 
 func TestListAuditLogs(t *testing.T) {
 	svc := &mockDNSService{}
-	handler := NewAPIHandler(svc)
-	
-	req := httptest.NewRequest("GET", "/audit-logs?tenant_id=t1", nil)
+	repo := &testutil.MockRepo{}
+	handler := NewAPIHandler(svc, repo)
+
+	req := httptest.NewRequest("GET", "/audit-logs", nil)
+	ctx := context.WithValue(req.Context(), CtxTenantID, "t1")
+	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
-	
+
 	handler.ListAuditLogs(w, req)
-	
+
 	if w.Code != http.StatusOK {
 		t.Errorf("Expected status 200, got %d", w.Code)
 	}

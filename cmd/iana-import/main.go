@@ -14,6 +14,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/poyrazK/cloudDNS/internal/adapters/repository"
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
+	"github.com/poyrazK/cloudDNS/internal/core/ports"
 	"github.com/poyrazK/cloudDNS/internal/dns/master"
 )
 
@@ -35,14 +36,13 @@ func main() {
 		}
 	}()
 
-	if err := RunImport(context.Background(), db, rootZoneURL); err != nil {
+	repo := repository.NewPostgresRepository(db)
+	if err := RunImport(context.Background(), repo, rootZoneURL); err != nil {
 		log.Fatalf("import failed: %v", err)
 	}
 }
 
-func RunImport(ctx context.Context, db *sql.DB, url string) error {
-	repo := repository.NewPostgresRepository(db)
-
+func RunImport(ctx context.Context, repo ports.DNSRepository, url string) error {
 	fmt.Printf("Downloading IANA root zone from %s...\n", url)
 	// #nosec G107 -- URL is trusted IANA source
 	resp, err := http.Get(url)
@@ -61,7 +61,7 @@ func RunImport(ctx context.Context, db *sql.DB, url string) error {
 
 	parser := master.NewMasterParser()
 	parser.Origin = "."
-	
+
 	fmt.Println("Parsing root zone file...")
 	data, err := parser.Parse(resp.Body)
 	if err != nil {
@@ -112,7 +112,7 @@ func RunImport(ctx context.Context, db *sql.DB, url string) error {
 			batch[j].ZoneID = zoneID
 			batch[j].CreatedAt = time.Now()
 			batch[j].UpdatedAt = time.Now()
-			
+
 			// Standardize name
 			if !strings.HasSuffix(batch[j].Name, ".") {
 				batch[j].Name += "."

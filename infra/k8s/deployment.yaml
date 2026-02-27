@@ -24,7 +24,7 @@ spec:
         fsGroup: 1000
       containers:
       - name: clouddns
-        image: europe-west3-docker.pkg.dev/thecloud-clouddns/clouddns/clouddns:latest
+        image: europe-west3-docker.pkg.dev/thecloud-clouddns/clouddns/clouddns:v0.1.0
         securityContext:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true
