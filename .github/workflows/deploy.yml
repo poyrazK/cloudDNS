@@ -69,8 +69,8 @@ jobs:
             clouddns="$IMAGE:${{ github.sha }}"
           kubectl rollout status deployment/clouddns --timeout=150s
 
-      # Smoke test against the live service with retry loop
-      - name: Verify
+      # Smoke test: HTTP Health Check
+      - name: Verify Health
         run: |
           echo "Waiting for LoadBalancer IP and health check..."
           for i in {1..20}; do
@@ -85,5 +85,29 @@ jobs:
             echo "Retrying in 10s..."
             sleep 10
           done
-          echo "❌ Smoke test failed after 20 attempts"
+          echo "❌ Health check failed after 20 attempts"
           exit 1
+
+      # DNS Verification: Live recursive lookups
+      - name: DNS Smoke Test
+        run: |
+          DNS_IP=$(kubectl get svc clouddns-lb-udp -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+          echo "Testing DNS resolution at $DNS_IP..."
+          
+          echo "--- Testing google.com ---"
+          DIG_OUT=$(dig @$DNS_IP google.com +short +timeout=5 +tries=2)
+          if [[ -z "$DIG_OUT" ]]; then
+            echo "❌ Failed to resolve google.com"
+            exit 1
+          fi
+          echo "Result: $DIG_OUT"
+          
+          echo "--- Testing example.com ---"
+          DIG_OUT=$(dig @$DNS_IP example.com +short +timeout=5 +tries=2)
+          if [[ -z "$DIG_OUT" ]]; then
+            echo "❌ Failed to resolve example.com"
+            exit 1
+          fi
+          echo "Result: $DIG_OUT"
+          
+          echo "✅ DNS Smoke Test Passed!"
