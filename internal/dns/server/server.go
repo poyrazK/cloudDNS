@@ -34,18 +34,19 @@ import (
 const ClassCHAOS = 3
 
 type Server struct {
-	Addr        string
-	Repo        ports.DNSRepository
-	Cache       *DNSCache
-	Redis       *RedisCache
-	DNSSEC      *services.DNSSECService
-	WorkerCount int
-	udpQueue    chan udpTask
-	Logger      *slog.Logger
-	queryFn     func(server string, name string, qtype packet.QueryType) (*packet.DNSPacket, error)
-	limiter     *rateLimiter
-	TsigKeys    map[string][]byte
-	NodeID      string
+	Addr             string
+	Repo             ports.DNSRepository
+	Cache            *DNSCache
+	Redis            *RedisCache
+	DNSSEC           *services.DNSSECService
+	WorkerCount      int
+	udpQueue         chan udpTask
+	Logger           *slog.Logger
+	queryFn          func(server string, name string, qtype packet.QueryType) (*packet.DNSPacket, error)
+	limiter          *rateLimiter
+	TsigKeys         map[string][]byte
+	NodeID           string
+	RecursionEnabled bool
 
 	// Testing/Chaos flags
 	SimulateDBLatency  time.Duration
@@ -68,25 +69,28 @@ func NewServer(addr string, repo ports.DNSRepository, logger *slog.Logger) *Serv
 
 	nodeID := os.Getenv("NODE_ID")
 	if nodeID == "" {
-		hostname, _ := os.Hostname()
-		if hostname != "" {
-			nodeID = hostname
+		h, _ := os.Hostname()
+		if h != "" {
+			nodeID = h
 		} else {
 			nodeID = "unknown-node"
 		}
 	}
 
+	recursion := os.Getenv("RECURSION_ENABLED") == "true"
+
 	s := &Server{
-		Addr:        addr,
-		Repo:        repo,
-		Cache:       NewDNSCache(),
-		DNSSEC:      services.NewDNSSECService(repo),
-		WorkerCount: runtime.NumCPU() * 32, // High concurrency tuning
-		udpQueue:    make(chan udpTask, 50000),
-		Logger:      logger,
-		limiter:     newRateLimiter(500000, 200000),
-		TsigKeys:    make(map[string][]byte),
-		NodeID:      nodeID,
+		Addr:             addr,
+		Repo:             repo,
+		Cache:            NewDNSCache(),
+		DNSSEC:           services.NewDNSSECService(repo),
+		WorkerCount:      runtime.NumCPU() * 32, // High concurrency tuning
+		udpQueue:         make(chan udpTask, 50000),
+		Logger:           logger,
+		limiter:          newRateLimiter(500000, 200000),
+		TsigKeys:         make(map[string][]byte),
+		NodeID:           nodeID,
+		RecursionEnabled: recursion,
 	}
 	s.queryFn = s.sendQuery
 
@@ -131,7 +135,7 @@ func (s *Server) startInvalidationListener(ctx context.Context) {
 			s.Logger.Error("failed to close pubsub", "error", errClose)
 		}
 	}()
-	
+
 	ch := pubsub.Channel()
 	s.Logger.Info("started global cache invalidation listener")
 
@@ -143,7 +147,7 @@ func (s *Server) startInvalidationListener(ctx context.Context) {
 		case msg := <-ch:
 			// msg.Payload format is "name:type"
 			s.Logger.Debug("received cache invalidation event", "key", msg.Payload)
-			
+
 			// Standardize key for L1 cache lookup (lowercase name)
 			parts := strings.SplitN(msg.Payload, ":", 2)
 			if len(parts) == 2 {
@@ -557,7 +561,7 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 			response.Header.Response = true
 			response.Header.AuthoritativeAnswer = true
 			response.Questions = append(response.Questions, q)
-			
+
 			txtRec := packet.DNSRecord{
 				Name:  q.Name,
 				Type:  packet.TXT,
@@ -566,7 +570,7 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 				Txt:   s.NodeID,
 			}
 			response.Answers = append(response.Answers, txtRec)
-			
+
 			metrics.QueriesTotal.WithLabelValues(qTypeLabel, "0", protocol).Inc()
 			resBuffer := packet.GetBuffer()
 			defer packet.PutBuffer(resBuffer)
@@ -634,7 +638,7 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 			}
 			// DO bit is the first bit of the Z field (TTL bits 15-0)
 			dnssecOK = (res.Z & 0x8000) != 0
-			
+
 			// Check for NSID option (RFC 5001)
 			for _, opt := range res.Options {
 				if opt.Code == 3 { // NSID
@@ -650,6 +654,7 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 	response.Header.ID = request.Header.ID
 	response.Header.Response = true
 	response.Header.AuthoritativeAnswer = true
+	response.Header.RecursionAvailable = s.RecursionEnabled
 	response.Questions = append(response.Questions, q)
 
 	// If query had EDNS, response MUST have EDNS
@@ -764,9 +769,26 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 				}
 			}
 		} else {
-			// Not authoritative for this zone
-			response.Header.AuthoritativeAnswer = false
-			response.Header.ResCode = 3
+			// Not authoritative for this zone - try recursive resolution if enabled
+			if s.RecursionEnabled && request.Header.RecursionDesired {
+				s.Logger.Info("fallback to recursive resolution", "name", q.Name)
+				recursiveResp, errRecurse := s.resolveRecursive(q.Name)
+				if errRecurse == nil && recursiveResp != nil {
+					response.Header.AuthoritativeAnswer = false
+					response.Header.ResCode = recursiveResp.Header.ResCode
+					response.Answers = recursiveResp.Answers
+					response.Authorities = recursiveResp.Authorities
+					// Internal recursion doesn't set recursion available in the response usually,
+					// but our upstream root hints might. We already set RA in the header earlier.
+				} else {
+					s.Logger.Error("recursive resolution failed", "name", q.Name, "error", errRecurse)
+					response.Header.AuthoritativeAnswer = false
+					response.Header.ResCode = 2 // SERVFAIL
+				}
+			} else {
+				response.Header.AuthoritativeAnswer = false
+				response.Header.ResCode = 3 // NXDOMAIN
+			}
 		}
 
 		// RFC 8914: Extended DNS Error (EDE)
@@ -1328,7 +1350,7 @@ func (s *Server) notifySlaves(zoneName string) {
 			if s.NotifyPortOverride > 0 {
 				targetPort = s.NotifyPortOverride
 			}
-			
+
 			targetAddr := net.JoinHostPort(ip, fmt.Sprintf("%d", targetPort))
 			if s.Addr == targetAddr {
 				continue
@@ -1563,8 +1585,8 @@ func (s *Server) generateTypeBitMap(types []domain.RecordType) []byte {
 		}
 	}
 
-	res := make([]byte, 0, 2 + (maxType + 1))
-	res = append(res, 0, byte(maxType + 1))
+	res := make([]byte, 0, 2+(maxType+1))
+	res = append(res, 0, byte(maxType+1))
 	res = append(res, bits[:maxType+1]...)
 	return res
 }

@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: clouddns-config
+data:
+  # Replace with your actual Redis/Memorystore IP or service DNS
+  redis-url: "10.181.239.131:6379"

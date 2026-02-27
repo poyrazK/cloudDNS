@@ -1,3 +1,14 @@
 /clouddns
+/clouddns-bin
+/cloud-sql-proxy
+server.log
+bench.log
 *.out
 *.txt
+
+# Never commit secrets or credentials
+infra/k8s/secrets-*.yaml
+*.secrets.yaml
+application_default_credentials.json
+.env
+.env.*

@@ -1,0 +1,127 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: clouddns
+  labels:
+    app: clouddns
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: clouddns
+  # Using Recreate due to resource constraints on e2-small nodes (RollingUpdate fails to schedule second pod)
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: clouddns
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: clouddns
+        image: europe-west3-docker.pkg.dev/thecloud-clouddns/clouddns/clouddns:latest
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        ports:
+        - containerPort: 1053
+          name: dns-udp
+          protocol: UDP
+        - containerPort: 1053
+          name: dns-tcp
+          protocol: TCP
+        - containerPort: 8080
+          name: api-tcp
+          protocol: TCP
+        - containerPort: 853
+          name: dot-tcp
+          protocol: TCP
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: clouddns-secrets
+              key: database-url
+        - name: REDIS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: clouddns-config
+              key: redis-url
+        - name: DNS_ADDR
+          value: ":1053"
+        - name: API_ADDR
+          value: ":8080"
+        - name: NODE_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: RECURSION_ENABLED
+          value: "true"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          requests:
+            cpu: "50m"
+            memory: "64Mi"
+            ephemeral-storage: "100Mi"
+          limits:
+            cpu: "250m"
+            memory: "256Mi"
+            ephemeral-storage: "500Mi"
+---
+# DNS over UDP (port 53) — needs a separate LB service for GKE
+apiVersion: v1
+kind: Service
+metadata:
+  name: clouddns-lb-udp
+spec:
+  type: LoadBalancer
+  loadBalancerIP: "34.107.124.218"
+  selector:
+    app: clouddns
+  ports:
+  - name: dns-udp
+    port: 53
+    targetPort: 1053
+    protocol: UDP
+---
+# DNS over TCP + API + DoT — separate LB service for GKE
+apiVersion: v1
+kind: Service
+metadata:
+  name: clouddns-lb-tcp
+spec:
+  type: LoadBalancer
+  selector:
+    app: clouddns
+  ports:
+  - name: dns-tcp
+    port: 53
+    targetPort: 1053
+    protocol: TCP
+  - name: api
+    port: 8080
+    targetPort: 8080
+    protocol: TCP
+  - name: dot
+    port: 853
+    targetPort: 853
+    protocol: TCP

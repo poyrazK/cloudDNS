@@ -1,0 +1,89 @@
+name: Deploy to GKE
+
+on:
+  push:
+    branches: ["main"]
+
+permissions:
+  contents: read
+  id-token: write    # Required for Workload Identity Federation
+
+jobs:
+  # Wait for existing CI to pass first
+  ci:
+    uses: ./.github/workflows/go.yml
+
+  deploy:
+    name: Build & Deploy
+    needs: ci
+    runs-on: ubuntu-latest
+    env:
+      REGION: europe-west3
+      CLUSTER: clouddns-cluster
+      ZONE: europe-west3-a
+      IMAGE: europe-west3-docker.pkg.dev/thecloud-clouddns/clouddns/clouddns
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Keyless auth via Workload Identity Federation
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      # Configure Docker to push to Artifact Registry
+      - run: gcloud auth configure-docker europe-west3-docker.pkg.dev --quiet
+
+      # Build and push with commit SHA tag
+      - name: Build & Push
+        run: |
+          docker build --platform linux/amd64 \
+            -t "$IMAGE:${{ github.sha }}" \
+            -t "$IMAGE:latest" .
+          docker push "$IMAGE:${{ github.sha }}"
+          docker push "$IMAGE:latest"
+
+      # Connect to GKE
+      - uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.CLUSTER }}
+          location: ${{ env.ZONE }}
+
+      # Inject secrets from GCP Secret Manager into K8s
+      - name: Inject Secrets
+        run: |
+          DB_URL=$(gcloud secrets versions access latest \
+            --secret=clouddns-db-url --project=${{ secrets.GCP_PROJECT_ID }})
+          kubectl create secret generic clouddns-secrets \
+            --from-literal=database-url="$DB_URL" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      # Deploy with the exact commit SHA (to ensure traceability)
+      - name: Deploy
+        run: |
+          kubectl set image deployment/clouddns \
+            clouddns="$IMAGE:${{ github.sha }}"
+          kubectl rollout status deployment/clouddns --timeout=150s
+
+      # Smoke test against the live service with retry loop
+      - name: Verify
+        run: |
+          echo "Waiting for LoadBalancer IP and health check..."
+          for i in {1..20}; do
+            EXTERNAL_IP=$(kubectl get svc clouddns-lb-tcp -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+            if [ -n "$EXTERNAL_IP" ]; then
+              echo "Checking http://$EXTERNAL_IP:8080/health (attempt $i)"
+              if curl -sf --max-time 5 "http://$EXTERNAL_IP:8080/health" | grep -q '"status":"UP"'; then
+                echo "✅ Health check passed!"
+                exit 0
+              fi
+            fi
+            echo "Retrying in 10s..."
+            sleep 10
+          done
+          echo "❌ Smoke test failed after 20 attempts"
+          exit 1

@@ -1,0 +1,14 @@
+.git/
+*.log
+*.out
+*.txt
+clouddns-bin
+server.log
+bench.log
+packet.out
+coverage.txt
+# Binaries
+iana-import
+iana-bench
+clouddns
+*debug*
