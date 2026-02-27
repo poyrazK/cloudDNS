@@ -8,7 +8,7 @@ import (
 	"encoding/hex"
 	"flag"
 	"fmt"
-	"log"
+	"io"
 	"os"
 	"time"
 
@@ -16,26 +16,10 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/poyrazK/cloudDNS/internal/adapters/repository"
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
+	"github.com/poyrazK/cloudDNS/internal/core/ports"
 )
 
 func main() {
-	createCmd := flag.NewFlagSet("create", flag.ExitOnError)
-	tenantID := createCmd.String("tenant", "default-tenant", "Tenant ID")
-	role := createCmd.String("role", "admin", "Role (admin or reader)")
-	name := createCmd.String("name", "generic-key", "Description of the key")
-	days := createCmd.Int("days", 365, "Validity in days")
-
-	listCmd := flag.NewFlagSet("list", flag.ExitOnError)
-	listTenant := listCmd.String("tenant", "default-tenant", "Tenant ID")
-
-	revokeCmd := flag.NewFlagSet("revoke", flag.ExitOnError)
-	revokeID := revokeCmd.String("id", "", "API Key UUID to revoke")
-
-	if len(os.Args) < 2 {
-		fmt.Println("expected 'create', 'list' or 'revoke' subcommands")
-		os.Exit(1)
-	}
-
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		dbURL = "postgres://postgres:postgres@localhost:5432/clouddns?sslmode=disable"
@@ -43,42 +27,63 @@ func main() {
 
 	db, err := sql.Open("pgx", dbURL)
 	if err != nil {
-		log.Fatalf("failed to open database: %v", err)
+		fmt.Fprintf(os.Stderr, "failed to open database: %v\n", err)
+		os.Exit(1)
 	}
-	defer func() {
-		if err := db.Close(); err != nil {
-			log.Printf("failed to close database: %v", err)
-		}
-	}()
+	defer db.Close()
 
 	repo := repository.NewPostgresRepository(db)
-
-	switch os.Args[1] {
-	case "create":
-		if err := createCmd.Parse(os.Args[2:]); err != nil {
-			log.Fatalf("failed to parse create commands: %v", err)
-		}
-		generateKey(repo, *tenantID, *role, *name, *days)
-	case "list":
-		if err := listCmd.Parse(os.Args[2:]); err != nil {
-			log.Fatalf("failed to parse list commands: %v", err)
-		}
-		listKeys(repo, *listTenant)
-	case "revoke":
-		if err := revokeCmd.Parse(os.Args[2:]); err != nil {
-			log.Fatalf("failed to parse revoke commands: %v", err)
-		}
-		revokeKey(repo, *revokeID)
-	default:
-		fmt.Println("expected 'create', 'list' or 'revoke' subcommands")
+	if err := run(os.Args, os.Stdout, repo); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func generateKey(repo *repository.PostgresRepository, tenantID, role, name string, days int) {
+func run(args []string, out io.Writer, repo ports.DNSRepository) error {
+	createCmd := flag.NewFlagSet("create", flag.ContinueOnError)
+	createCmd.SetOutput(io.Discard)
+	tenantID := createCmd.String("tenant", "default-tenant", "Tenant ID")
+	role := createCmd.String("role", "admin", "Role (admin or reader)")
+	name := createCmd.String("name", "generic-key", "Description of the key")
+	days := createCmd.Int("days", 365, "Validity in days")
+
+	listCmd := flag.NewFlagSet("list", flag.ContinueOnError)
+	listCmd.SetOutput(io.Discard)
+	listTenant := listCmd.String("tenant", "default-tenant", "Tenant ID")
+
+	revokeCmd := flag.NewFlagSet("revoke", flag.ContinueOnError)
+	revokeCmd.SetOutput(io.Discard)
+	revokeID := revokeCmd.String("id", "", "API Key UUID to revoke")
+
+	if len(args) < 2 {
+		return fmt.Errorf("expected 'create', 'list' or 'revoke' subcommands")
+	}
+
+	switch args[1] {
+	case "create":
+		if err := createCmd.Parse(args[2:]); err != nil {
+			return err
+		}
+		return generateKey(repo, *tenantID, *role, *name, *days, out)
+	case "list":
+		if err := listCmd.Parse(args[2:]); err != nil {
+			return err
+		}
+		return listKeys(repo, *listTenant, out)
+	case "revoke":
+		if err := revokeCmd.Parse(args[2:]); err != nil {
+			return err
+		}
+		return revokeKey(repo, *revokeID, out)
+	default:
+		return fmt.Errorf("unknown subcommand: %s", args[1])
+	}
+}
+
+func generateKey(repo ports.DNSRepository, tenantID, role, name string, days int, out io.Writer) error {
 	rawKey := make([]byte, 16)
 	if _, err := rand.Read(rawKey); err != nil {
-		log.Fatal(err)
+		return err
 	}
 	keyString := "cdns_" + hex.EncodeToString(rawKey)
 
@@ -101,43 +106,46 @@ func generateKey(repo *repository.PostgresRepository, tenantID, role, name strin
 	}
 
 	if err := repo.CreateAPIKey(context.Background(), apiKey); err != nil {
-		log.Fatalf("failed to save API key: %v", err)
+		return fmt.Errorf("failed to save API key: %v", err)
 	}
 
-	fmt.Printf("API Key Created Successfully!\n")
-	fmt.Printf("---------------------------\n")
-	fmt.Printf("ID:         %s\n", id)
-	fmt.Printf("Tenant:     %s\n", tenantID)
-	fmt.Printf("Role:       %s\n", role)
-	fmt.Printf("Expires:    %v\n", expiresAt.Format(time.RFC3339))
-	fmt.Printf("VALUE:      %s\n", keyString)
-	fmt.Printf("---------------------------\n")
-	fmt.Printf("CAUTION: This is the only time the key will be shown.\n")
+	fmt.Fprintf(out, "API Key Created Successfully!\n")
+	fmt.Fprintf(out, "---------------------------\n")
+	fmt.Fprintf(out, "ID:         %s\n", id)
+	fmt.Fprintf(out, "Tenant:     %s\n", tenantID)
+	fmt.Fprintf(out, "Role:       %s\n", role)
+	fmt.Fprintf(out, "Expires:    %v\n", expiresAt.Format(time.RFC3339))
+	fmt.Fprintf(out, "VALUE:      %s\n", keyString)
+	fmt.Fprintf(out, "---------------------------\n")
+	fmt.Fprintf(out, "CAUTION: This is the only time the key will be shown.\n")
+	return nil
 }
 
-func listKeys(repo *repository.PostgresRepository, tenantID string) {
+func listKeys(repo ports.DNSRepository, tenantID string, out io.Writer) error {
 	keys, err := repo.ListAPIKeys(context.Background(), tenantID)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
-	fmt.Printf("API Keys for Tenant: %s\n", tenantID)
-	fmt.Printf("%-36s %-15s %-10s %-8s %-6s\n", "ID", "Name", "Role", "Prefix", "Status")
+	fmt.Fprintf(out, "API Keys for Tenant: %s\n", tenantID)
+	fmt.Fprintf(out, "%-36s %-15s %-10s %-8s %-6s\n", "ID", "Name", "Role", "Prefix", "Status")
 	for _, k := range keys {
 		status := "active"
 		if !k.Active {
 			status = "revoked"
 		}
-		fmt.Printf("%-36s %-15s %-10s %-8s %-6s\n", k.ID, k.Name, k.Role, k.KeyPrefix, status)
+		fmt.Fprintf(out, "%-36s %-15s %-10s %-8s %-6s\n", k.ID, k.Name, k.Role, k.KeyPrefix, status)
 	}
+	return nil
 }
 
-func revokeKey(repo *repository.PostgresRepository, id string) {
+func revokeKey(repo ports.DNSRepository, id string, out io.Writer) error {
 	if id == "" {
-		log.Fatal("ID is required for revocation")
+		return fmt.Errorf("ID is required for revocation")
 	}
 	if err := repo.DeleteAPIKey(context.Background(), id); err != nil {
-		log.Fatal(err)
+		return err
 	}
-	fmt.Printf("API Key %s revoked (deleted)\n", id)
+	fmt.Fprintf(out, "API Key %s revoked (deleted)\n", id)
+	return nil
 }
