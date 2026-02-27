@@ -19,9 +19,15 @@ DB_URL=$(gcloud secrets versions access latest \
 
 echo "✅ Got database-url from Secret Manager"
 
-echo "🚀 Creating Kubernetes secret (values stay in memory, never written to disk)..."
+# Configurable namespace
+NAMESPACE="${NAMESPACE:-default}"
+echo "Using namespace: $NAMESPACE"
+
+# 2. Inject into Kubernetes
+# We use --dry-run=client -o yaml | kubectl apply to avoid "already exists" errors
 kubectl create secret generic clouddns-secrets \
   --from-literal=database-url="$DB_URL" \
+  --namespace="$NAMESPACE" \
   --dry-run=client -o yaml | kubectl apply -f -
 
 echo "✅ Kubernetes secret 'clouddns-secrets' created/updated successfully!"

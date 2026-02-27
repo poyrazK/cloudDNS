@@ -65,11 +65,20 @@ echo "🗄️  Creating database '$DB_NAME'..."
 gcloud sql databases create "$DB_NAME" --instance="$DB_INSTANCE" 2>/dev/null || \
   echo "  ✅ Database '$DB_NAME' already exists."
 
-echo "👤 Creating database user '$DB_USER'..."
-gcloud sql users create "$DB_USER" \
-  --instance="$DB_INSTANCE" \
-  --password="$DB_PASSWORD" 2>/dev/null || \
-  echo "  ✅ User '$DB_USER' already exists."
+if gcloud sql users list --instance="$DB_INSTANCE" --project="$GCP_PROJECT" | grep -q "$DB_USER"; then
+    echo "👤 User $DB_USER already exists, updating password..."
+    gcloud sql users set-password "$DB_USER" "%" \
+      --instance="$DB_INSTANCE" \
+      --password="$DB_PASSWORD" \
+      --project="$GCP_PROJECT"
+else
+    echo "👤 Creating cloudDNS database user..."
+    gcloud sql users create "$DB_USER" "%" \
+      --instance="$DB_INSTANCE" \
+      --password="$DB_PASSWORD" \
+      --project="$GCP_PROJECT"
+fi
+echo "  ✅ User '$DB_USER' configured."
 
 # ─── Step 3: Memorystore (Redis 7.2) ────────────────────────────────────────
 echo "🔴 Creating Memorystore Redis instance..."
@@ -128,14 +137,24 @@ gcloud compute firewall-rules create allow-dot \
 
 # Management API (TCP port 8080) — restricted!
 # Replace 0.0.0.0/0 with your own IP for security
-gcloud compute firewall-rules create allow-api \
-  --direction=INGRESS \
-  --action=ALLOW \
-  --rules=tcp:8080 \
-  --source-ranges=0.0.0.0/0 \
-  --target-tags=clouddns-node \
-  --description="Allow Management API (restrict in production!)" 2>/dev/null || \
-  echo "  ✅ Firewall rule 'allow-api' already exists."
+# 4. Create Firewall rule for Management API
+if [ -z "$MGMT_API_SOURCE_RANGE" ]; then
+    echo "❌ MGMT_API_SOURCE_RANGE is not set. For security, please provide an explicit CIDR (e.g. your IP/32)."
+    exit 1
+fi
+
+if gcloud compute firewall-rules describe allow-clouddns-api &>/dev/null; then
+  echo "  ✅ Firewall rule 'allow-clouddns-api' already exists."
+else
+  gcloud compute firewall-rules create allow-clouddns-api \
+    --project="$GCP_PROJECT" \
+    --network=default \
+    --allow=tcp:8080 \
+    --source-ranges="$MGMT_API_SOURCE_RANGE" \
+    --target-tags=clouddns-node \
+    --description="Allow management API traffic (restricted to MGMT_API_SOURCE_RANGE)"
+  echo "  ✅ Firewall rule 'allow-clouddns-api' created."
+fi
 
 # ─── Step 6: Artifact Registry ──────────────────────────────────────────────
 echo "📦 Creating Artifact Registry repository..."

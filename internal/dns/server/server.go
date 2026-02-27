@@ -69,14 +69,11 @@ func NewServer(addr string, repo ports.DNSRepository, logger *slog.Logger) *Serv
 
 	nodeID := os.Getenv("NODE_ID")
 	if nodeID == "" {
-		hostname, _ := os.Hostname()
-		if hostname != "" {
-			nodeID = hostname
+		h, _ := os.Hostname()
+		if h != "" {
+			nodeID = h
 		} else {
-			nodeID = hostname
-			if nodeID == "" {
-				nodeID = "unknown-node"
-			}
+			nodeID = "unknown-node"
 		}
 	}
 

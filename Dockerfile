@@ -34,14 +34,9 @@ COPY --from=builder /app/clouddns .
 # Copy schema for database initialization if needed (used by entrypoint scripts)
 COPY --from=builder /app/internal/adapters/repository/schema.sql ./schema.sql
 
-# Expose standard DNS ports
-EXPOSE 53/udp 53/tcp
-# Expose DoT port
-EXPOSE 853/tcp
-# Expose Management API and DoH port
-EXPOSE 8080/tcp
-# Expose default DoH port if configured
-EXPOSE 443/tcp
+# DNS defaults to 1053 for unprivileged execution (Standard ports 53/853/443 require root)
+# Management API on 8080
+EXPOSE 1053/udp 1053/tcp 8080/tcp 853/tcp
 
 # Run the server
 ENTRYPOINT ["./clouddns"]

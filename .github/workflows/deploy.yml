@@ -42,10 +42,10 @@ jobs:
       - name: Build & Push
         run: |
           docker build --platform linux/amd64 \
-            -t $IMAGE:${{ github.sha }} \
-            -t $IMAGE:latest .
-          docker push $IMAGE:${{ github.sha }}
-          docker push $IMAGE:latest
+            -t "$IMAGE:${{ github.sha }}" \
+            -t "$IMAGE:latest" .
+          docker push "$IMAGE:${{ github.sha }}"
+          docker push "$IMAGE:latest"
 
       # Connect to GKE
       - uses: google-github-actions/get-gke-credentials@v2
@@ -66,14 +66,24 @@ jobs:
       - name: Deploy
         run: |
           kubectl set image deployment/clouddns \
-            clouddns=$IMAGE:${{ github.sha }}
-          kubectl rollout status deployment/clouddns --timeout=120s
+            clouddns="$IMAGE:${{ github.sha }}"
+          kubectl rollout status deployment/clouddns --timeout=150s
 
-      # Smoke test against the live service
+      # Smoke test against the live service with retry loop
       - name: Verify
         run: |
-          sleep 15
-          EXTERNAL_IP=$(kubectl get svc clouddns-lb-tcp -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-          echo "Connecting to http://$EXTERNAL_IP:8080/health"
-          curl -sf --max-time 10 "http://$EXTERNAL_IP:8080/health" | grep -q '"status":"UP"'
-          echo "✅ Health check passed"
+          echo "Waiting for LoadBalancer IP and health check..."
+          for i in {1..20}; do
+            EXTERNAL_IP=$(kubectl get svc clouddns-lb-tcp -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+            if [ -n "$EXTERNAL_IP" ]; then
+              echo "Checking http://$EXTERNAL_IP:8080/health (attempt $i)"
+              if curl -sf --max-time 5 "http://$EXTERNAL_IP:8080/health" | grep -q '"status":"UP"'; then
+                echo "✅ Health check passed!"
+                exit 0
+              fi
+            fi
+            echo "Retrying in 10s..."
+            sleep 10
+          done
+          echo "❌ Smoke test failed after 20 attempts"
+          exit 1
