@@ -52,16 +52,25 @@ func TestEndToEndDNSSEC_Lifecycle(t *testing.T) {
 	testKey := "cdns_dnssec_test_key"
 	hash := sha256.Sum256([]byte(testKey))
 	keyHash := hex.EncodeToString(hash[:])
-	_ = repo.CreateAPIKey(context.Background(), &domain.APIKey{
+	err := repo.CreateAPIKey(context.Background(), &domain.APIKey{
 		ID: "dnssec-key-id", TenantID: "admin", Role: domain.RoleAdmin, Active: true, KeyHash: keyHash,
 	})
+	if err != nil {
+		t.Fatalf("Failed to setup API key: %v", err)
+	}
 	authHeader := "Bearer " + testKey
 	client := &http.Client{}
 
 	// Create a new zone via API
 	zoneReq := domain.Zone{Name: "dnssec.e2e.", TenantID: "admin"}
-	body, _ := json.Marshal(zoneReq)
-	req, _ := http.NewRequest("POST", fmt.Sprintf("http://%s/zones", apiAddr), bytes.NewBuffer(body))
+	body, err := json.Marshal(zoneReq)
+	if err != nil {
+		t.Fatalf("Failed to marshal zone req: %v", err)
+	}
+	req, err := http.NewRequest("POST", fmt.Sprintf("http://%s/zones", apiAddr), bytes.NewBuffer(body))
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
 	req.Header.Set("Authorization", authHeader)
 	req.Header.Set("Content-Type", "application/json")
 
@@ -70,8 +79,12 @@ func TestEndToEndDNSSEC_Lifecycle(t *testing.T) {
 		t.Fatalf("Failed to create zone via API: %v", err)
 	}
 	var createdZone domain.Zone
-	_ = json.NewDecoder(resp.Body).Decode(&createdZone)
-	_ = resp.Body.Close()
+	if decodeErr := json.NewDecoder(resp.Body).Decode(&createdZone); decodeErr != nil {
+		t.Fatalf("Failed to decode response: %v", decodeErr)
+	}
+	if cerr := resp.Body.Close(); cerr != nil {
+		t.Fatalf("Failed to close response body: %v", cerr)
+	}
 
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("Failed to create zone: expected 201, got %d", resp.StatusCode)
@@ -85,8 +98,14 @@ func TestEndToEndDNSSEC_Lifecycle(t *testing.T) {
 		TTL:     300,
 		ZoneID:  createdZone.ID,
 	}
-	rb, _ := json.Marshal(record)
-	req2, _ := http.NewRequest("POST", fmt.Sprintf("http://%s/zones/%s/records", apiAddr, createdZone.ID), bytes.NewBuffer(rb))
+	rb, err := json.Marshal(record)
+	if err != nil {
+		t.Fatalf("Failed to marshal record: %v", err)
+	}
+	req2, err := http.NewRequest("POST", fmt.Sprintf("http://%s/zones/%s/records", apiAddr, createdZone.ID), bytes.NewBuffer(rb))
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
 	req2.Header.Set("Authorization", authHeader)
 	req2.Header.Set("Content-Type", "application/json")
 	resp2, err := client.Do(req2)
@@ -96,7 +115,9 @@ func TestEndToEndDNSSEC_Lifecycle(t *testing.T) {
 	if resp2.StatusCode != http.StatusCreated {
 		t.Fatalf("Failed to create record: expected 201, got %d", resp2.StatusCode)
 	}
-	_ = resp2.Body.Close()
+	if cerr := resp2.Body.Close(); cerr != nil {
+		t.Fatalf("Failed to close response body: %v", cerr)
+	}
 
 	// 3. Trigger DNSSEC Automation
 	// Force the lifecycle management to generate keys for the new zone
@@ -135,7 +156,9 @@ func TestEndToEndDNSSEC_Lifecycle(t *testing.T) {
 	})
 
 	qBuf := packet.NewBytePacketBuffer()
-	_ = query.Write(qBuf)
+	if err := query.Write(qBuf); err != nil {
+		t.Fatalf("Failed to write query to buffer: %v", err)
+	}
 
 	conn, err := net.Dial("udp", dnsAddr)
 	if err != nil {
@@ -145,7 +168,9 @@ func TestEndToEndDNSSEC_Lifecycle(t *testing.T) {
 		_ = conn.Close()
 	}()
 
-	_, _ = conn.Write(qBuf.Buf[:qBuf.Position()])
+	if _, err := conn.Write(qBuf.Buf[:qBuf.Position()]); err != nil {
+		t.Fatalf("Failed to write to DNS server: %v", err)
+	}
 
 	resBuf := make([]byte, 2048)
 	n, err := conn.Read(resBuf)
@@ -156,7 +181,9 @@ func TestEndToEndDNSSEC_Lifecycle(t *testing.T) {
 	res := packet.NewDNSPacket()
 	pBuf := packet.NewBytePacketBuffer()
 	pBuf.Load(resBuf[:n])
-	_ = res.FromBuffer(pBuf)
+	if err := res.FromBuffer(pBuf); err != nil {
+		t.Fatalf("Failed to parse packet from buffer: %v", err)
+	}
 
 	// Verify Answer section has the A record AND its corresponding RRSIG
 	foundA := false

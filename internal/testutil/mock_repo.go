@@ -24,16 +24,25 @@ func (m *MockRepo) GetIPsForName(ctx context.Context, name string, clientIP stri
 
 func (m *MockRepo) GetZone(ctx context.Context, name string) (*domain.Zone, error) {
 	args := m.Called(name)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
 	return args.Get(0).(*domain.Zone), args.Error(1)
 }
 
-func (m *MockRepo) GetRecord(ctx context.Context, id string, zoneID string) (*domain.Record, error) {
-	args := m.Called(id, zoneID)
+func (m *MockRepo) GetRecord(ctx context.Context, id string, zoneID string, tenantID string) (*domain.Record, error) {
+	args := m.Called(id, zoneID, tenantID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
 	return args.Get(0).(*domain.Record), args.Error(1)
 }
 
-func (m *MockRepo) ListRecordsForZone(ctx context.Context, zoneID string) ([]domain.Record, error) {
-	args := m.Called(zoneID)
+func (m *MockRepo) ListRecordsForZone(ctx context.Context, zoneID string, tenantID string) ([]domain.Record, error) {
+	args := m.Called(zoneID, tenantID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
 	return args.Get(0).([]domain.Record), args.Error(1)
 }
 
@@ -67,8 +76,8 @@ func (m *MockRepo) DeleteZone(ctx context.Context, zoneID string, tenantID strin
 	return args.Error(0)
 }
 
-func (m *MockRepo) DeleteRecord(ctx context.Context, recordID string, zoneID string) error {
-	args := m.Called(recordID, zoneID)
+func (m *MockRepo) DeleteRecord(ctx context.Context, recordID string, zoneID string, tenantID string) error {
+	args := m.Called(recordID, zoneID, tenantID)
 	return args.Error(0)
 }
 
@@ -145,8 +154,8 @@ func (m *MockRepo) ListAPIKeys(ctx context.Context, tenantID string) ([]domain.A
 	return args.Get(0).([]domain.APIKey), args.Error(1)
 }
 
-func (m *MockRepo) DeleteAPIKey(ctx context.Context, id string) error {
-	args := m.Called(id)
+func (m *MockRepo) DeleteAPIKey(ctx context.Context, tenantID string, id string) error {
+	args := m.Called(tenantID, id)
 	return args.Error(0)
 }
 
@@ -174,8 +183,11 @@ func (m *MockDNSService) ListZones(ctx context.Context, tenantID string) ([]doma
 	return args.Get(0).([]domain.Zone), args.Error(1)
 }
 
-func (m *MockDNSService) ListRecordsForZone(ctx context.Context, zoneID string) ([]domain.Record, error) {
-	args := m.Called(zoneID)
+func (m *MockDNSService) ListRecordsForZone(ctx context.Context, zoneID string, tenantID string) ([]domain.Record, error) {
+	args := m.Called(zoneID, tenantID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
 	return args.Get(0).([]domain.Record), args.Error(1)
 }
 
@@ -184,13 +196,16 @@ func (m *MockDNSService) DeleteZone(ctx context.Context, zoneID string, tenantID
 	return args.Error(0)
 }
 
-func (m *MockDNSService) DeleteRecord(ctx context.Context, recordID string, zoneID string) error {
-	args := m.Called(recordID, zoneID)
+func (m *MockDNSService) DeleteRecord(ctx context.Context, recordID string, zoneID string, tenantID string) error {
+	args := m.Called(recordID, zoneID, tenantID)
 	return args.Error(0)
 }
 
 func (m *MockDNSService) ImportZone(ctx context.Context, tenantID string, r io.Reader) (*domain.Zone, error) {
 	args := m.Called(tenantID, r)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
 	return args.Get(0).(*domain.Zone), args.Error(1)
 }
 

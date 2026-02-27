@@ -80,7 +80,12 @@ func (h *APIHandler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 
 // ListAuditLogs retrieves audit entries for a specific tenant via the management API.
 func (h *APIHandler) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
-	tenantID, _ := r.Context().Value(CtxTenantID).(string)
+	tenantID, ok := r.Context().Value(CtxTenantID).(string)
+	if !ok || tenantID == "" {
+		log.Printf("ListAuditLogs: missing or invalid tenant ID in context")
+		http.Error(w, "Unauthorized: missing tenant context", http.StatusUnauthorized)
+		return
+	}
 
 	logs, err := h.svc.ListAuditLogs(r.Context(), tenantID)
 	if err != nil {
@@ -107,7 +112,12 @@ func (h *APIHandler) CreateZone(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Extract TenantID from Auth context
-	tenantID, _ := r.Context().Value(CtxTenantID).(string)
+	tenantID, ok := r.Context().Value(CtxTenantID).(string)
+	if !ok || tenantID == "" {
+		log.Printf("CreateZone: missing or invalid tenant ID in context")
+		http.Error(w, "Unauthorized: missing tenant context", http.StatusUnauthorized)
+		return
+	}
 	zone.TenantID = tenantID
 
 	if err := h.svc.CreateZone(r.Context(), &zone); err != nil {
@@ -123,7 +133,12 @@ func (h *APIHandler) CreateZone(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *APIHandler) ListZones(w http.ResponseWriter, r *http.Request) {
-	tenantID, _ := r.Context().Value(CtxTenantID).(string)
+	tenantID, ok := r.Context().Value(CtxTenantID).(string)
+	if !ok || tenantID == "" {
+		log.Printf("ListZones: missing or invalid tenant ID in context")
+		http.Error(w, "Unauthorized: missing tenant context", http.StatusUnauthorized)
+		return
+	}
 
 	zones, err := h.svc.ListZones(r.Context(), tenantID)
 	if err != nil {
@@ -140,7 +155,14 @@ func (h *APIHandler) ListZones(w http.ResponseWriter, r *http.Request) {
 func (h *APIHandler) ListRecordsForZone(w http.ResponseWriter, r *http.Request) {
 	zoneID := r.PathValue("id")
 
-	records, err := h.svc.ListRecordsForZone(r.Context(), zoneID)
+	tenantID, ok := r.Context().Value(CtxTenantID).(string)
+	if !ok || tenantID == "" {
+		log.Printf("ListRecordsForZone: missing or invalid tenant ID in context")
+		http.Error(w, "Unauthorized: missing tenant context", http.StatusUnauthorized)
+		return
+	}
+
+	records, err := h.svc.ListRecordsForZone(r.Context(), zoneID, tenantID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -169,6 +191,14 @@ func (h *APIHandler) CreateRecord(w http.ResponseWriter, r *http.Request) {
 
 	record.ZoneID = zoneID
 
+	tenantID, ok := r.Context().Value(CtxTenantID).(string)
+	if !ok || tenantID == "" {
+		log.Printf("CreateRecord: missing or invalid tenant ID in context")
+		http.Error(w, "Unauthorized: missing tenant context", http.StatusUnauthorized)
+		return
+	}
+	record.TenantID = tenantID
+
 	if err := h.svc.CreateRecord(r.Context(), &record); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -183,7 +213,12 @@ func (h *APIHandler) CreateRecord(w http.ResponseWriter, r *http.Request) {
 
 func (h *APIHandler) DeleteZone(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	tenantID, _ := r.Context().Value(CtxTenantID).(string)
+	tenantID, ok := r.Context().Value(CtxTenantID).(string)
+	if !ok || tenantID == "" {
+		log.Printf("DeleteZone: missing or invalid tenant ID in context")
+		http.Error(w, "Unauthorized: missing tenant context", http.StatusUnauthorized)
+		return
+	}
 
 	if err := h.svc.DeleteZone(r.Context(), id, tenantID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -197,7 +232,14 @@ func (h *APIHandler) DeleteRecord(w http.ResponseWriter, r *http.Request) {
 	zoneID := r.PathValue("zone_id")
 	id := r.PathValue("id")
 
-	if err := h.svc.DeleteRecord(r.Context(), id, zoneID); err != nil {
+	tenantID, ok := r.Context().Value(CtxTenantID).(string)
+	if !ok || tenantID == "" {
+		log.Printf("DeleteRecord: missing or invalid tenant ID in context")
+		http.Error(w, "Unauthorized: missing tenant context", http.StatusUnauthorized)
+		return
+	}
+
+	if err := h.svc.DeleteRecord(r.Context(), id, zoneID, tenantID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

@@ -19,7 +19,7 @@ We have implemented a Bearer token-based authentication system with Role-Based A
 
 2.  **Authentication Middleware**:
     *   Extracts the Bearer token from the `Authorization` header.
-    *   Hashes the token and lookups the corresponding record in the `api_keys` table.
+    *   Hashes the token and looks up the corresponding record in the `api_keys` table.
     *   Validates that the key is `active` and not `expired`.
     *   Injects the `TenantID` and `Role` into the request `context.Context` for use by downstream handlers.
 
@@ -30,7 +30,7 @@ We have implemented a Bearer token-based authentication system with Role-Based A
     *   A `RequireRole` middleware enforces these permissions at the route level.
 
 4.  **CLI Management Tool**:
-    *   A dedicated CLI tool (`cmd/apikey`) is provided for bootstraping and ongoing key management.
+    *   A dedicated CLI tool (`cmd/apikey`) is provided for bootstrapping and ongoing key management.
     *   Supports `create`, `list`, and `revoke` operations.
 
 ## Consequences

@@ -27,14 +27,14 @@ func TestMockRepo_GetZone(t *testing.T) {
 
 func TestMockRepo_GetRecord(t *testing.T) {
 	m := new(MockRepo)
-	m.On("GetRecord", "id", "zone").Return(&domain.Record{}, nil)
-	_, _ = m.GetRecord(context.Background(), "id", "zone")
+	m.On("GetRecord", "id", "zone", "tenant").Return(&domain.Record{}, nil)
+	_, _ = m.GetRecord(context.Background(), "id", "zone", "tenant")
 }
 
 func TestMockRepo_ListRecordsForZone(t *testing.T) {
 	m := new(MockRepo)
-	m.On("ListRecordsForZone", "zone").Return([]domain.Record{}, nil)
-	_, _ = m.ListRecordsForZone(context.Background(), "zone")
+	m.On("ListRecordsForZone", "zone", "tenant").Return([]domain.Record{}, nil)
+	_, _ = m.ListRecordsForZone(context.Background(), "zone", "tenant")
 }
 
 func TestMockRepo_CreateZone(t *testing.T) {
@@ -75,8 +75,8 @@ func TestMockRepo_DeleteZone(t *testing.T) {
 
 func TestMockRepo_DeleteRecord(t *testing.T) {
 	m := new(MockRepo)
-	m.On("DeleteRecord", "record", "zone").Return(nil)
-	_ = m.DeleteRecord(context.Background(), "record", "zone")
+	m.On("DeleteRecord", "record", "zone", "tenant").Return(nil)
+	_ = m.DeleteRecord(context.Background(), "record", "zone", "tenant")
 }
 
 func TestMockRepo_DeleteRecordsByNameAndType(t *testing.T) {

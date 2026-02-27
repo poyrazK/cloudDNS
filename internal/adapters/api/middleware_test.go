@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -96,6 +97,40 @@ func TestAuthMiddleware(t *testing.T) {
 
 		if rr.Code != http.StatusUnauthorized {
 			t.Errorf("expected 401, got %d", rr.Code)
+		}
+	})
+
+	t.Run("Inactive Key", func(t *testing.T) {
+		rawKey := "cdns_inactivekey"
+		hash := sha256.Sum256([]byte(rawKey))
+		keyHash := hex.EncodeToString(hash[:])
+
+		mockRepo.On("GetAPIKeyByHash", keyHash).Return(&domain.APIKey{Active: false, TenantID: "t"}, nil).Once()
+
+		req := httptest.NewRequest("GET", "/zones", nil)
+		req.Header.Set("Authorization", "Bearer "+rawKey)
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusUnauthorized {
+			t.Errorf("expected 401, got %d", rr.Code)
+		}
+	})
+
+	t.Run("Repository Error", func(t *testing.T) {
+		rawKey := "cdns_db_err"
+		hash := sha256.Sum256([]byte(rawKey))
+		keyHash := hex.EncodeToString(hash[:])
+
+		mockRepo.On("GetAPIKeyByHash", keyHash).Return((*domain.APIKey)(nil), errors.New("db error")).Once()
+
+		req := httptest.NewRequest("GET", "/zones", nil)
+		req.Header.Set("Authorization", "Bearer "+rawKey)
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusInternalServerError {
+			t.Errorf("expected 500, got %d", rr.Code)
 		}
 	})
 }

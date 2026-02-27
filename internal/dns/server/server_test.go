@@ -55,7 +55,7 @@ func (m *mockServerRepo) ListAPIKeys(_ context.Context, tenantID string) ([]doma
 	return res, nil
 }
 
-func (m *mockServerRepo) DeleteAPIKey(_ context.Context, id string) error {
+func (m *mockServerRepo) DeleteAPIKey(_ context.Context, _ string, id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var next []domain.APIKey
@@ -110,23 +110,23 @@ func (m *mockServerRepo) GetZone(_ context.Context, name string) (*domain.Zone, 
 	return nil, nil
 }
 
-func (m *mockServerRepo) GetRecord(ctx context.Context, id string, zoneID string) (*domain.Record, error) {
+func (m *mockServerRepo) GetRecord(ctx context.Context, id string, zoneID string, tenantID string) (*domain.Record, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	for _, r := range m.records {
-		if r.ID == id && r.ZoneID == zoneID {
+		if r.ID == id && r.ZoneID == zoneID && (tenantID == "" || r.TenantID == tenantID) {
 			return &r, nil
 		}
 	}
 	return nil, nil
 }
 
-func (m *mockServerRepo) ListRecordsForZone(ctx context.Context, zoneID string) ([]domain.Record, error) {
+func (m *mockServerRepo) ListRecordsForZone(ctx context.Context, zoneID string, tenantID string) ([]domain.Record, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	var res []domain.Record
 	for _, r := range m.records {
-		if r.ZoneID == zoneID {
+		if r.ZoneID == zoneID && (tenantID == "" || r.TenantID == tenantID) {
 			res = append(res, r)
 		}
 	}
@@ -180,7 +180,7 @@ func (m *mockServerRepo) DeleteZone(ctx context.Context, zoneID string, tenantID
 	// 1. Delete Zone
 	var nextZones []domain.Zone
 	for _, z := range m.zones {
-		if z.ID == zoneID {
+		if z.ID == zoneID && z.TenantID == tenantID {
 			continue
 		}
 		nextZones = append(nextZones, z)
@@ -190,7 +190,7 @@ func (m *mockServerRepo) DeleteZone(ctx context.Context, zoneID string, tenantID
 	// 2. Delete associated Records
 	var nextRecords []domain.Record
 	for _, r := range m.records {
-		if r.ZoneID == zoneID {
+		if r.ZoneID == zoneID && r.TenantID == tenantID {
 			continue
 		}
 		nextRecords = append(nextRecords, r)
@@ -199,14 +199,15 @@ func (m *mockServerRepo) DeleteZone(ctx context.Context, zoneID string, tenantID
 
 	return nil
 }
-func (m *mockServerRepo) DeleteRecord(ctx context.Context, recordID string, zoneID string) error {
+func (m *mockServerRepo) DeleteRecord(ctx context.Context, recordID string, zoneID string, tenantID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var next []domain.Record
 	for _, r := range m.records {
-		if r.ID != recordID {
-			next = append(next, r)
+		if r.ID == recordID && r.ZoneID == zoneID && r.TenantID == tenantID {
+			continue
 		}
+		next = append(next, r)
 	}
 	m.records = next
 	return nil

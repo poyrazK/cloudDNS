@@ -57,7 +57,7 @@ func (m *mockDNSService) ListZones(_ context.Context, _ string) ([]domain.Zone, 
 	return m.zones, nil
 }
 
-func (m *mockDNSService) ListRecordsForZone(_ context.Context, _ string) ([]domain.Record, error) {
+func (m *mockDNSService) ListRecordsForZone(_ context.Context, _, _ string) ([]domain.Record, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -68,7 +68,7 @@ func (m *mockDNSService) DeleteZone(_ context.Context, _, _ string) error {
 	return m.err
 }
 
-func (m *mockDNSService) DeleteRecord(_ context.Context, _, _ string) error {
+func (m *mockDNSService) DeleteRecord(_ context.Context, _, _, _ string) error {
 	return m.err
 }
 

@@ -28,7 +28,11 @@ func AuthMiddleware(repo ports.DNSRepository) func(http.Handler) http.Handler {
 				return
 			}
 
-			key := strings.TrimPrefix(authHeader, "Bearer ")
+			key := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+			if key == "" {
+				http.Error(w, "Unauthorized: missing or invalid authorization header", http.StatusUnauthorized)
+				return
+			}
 			hash := sha256.Sum256([]byte(key))
 			keyHash := hex.EncodeToString(hash[:])
 
