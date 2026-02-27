@@ -16,35 +16,59 @@ type mockDNSSECRepo struct {
 	err  error
 }
 
-func (m *mockDNSSECRepo) GetRecords(_ context.Context, _ string, _ domain.RecordType, _ string) ([]domain.Record, error) { return nil, nil }
-func (m *mockDNSSECRepo) GetIPsForName(_ context.Context, _ string, _ string) ([]string, error) { return nil, nil }
+func (m *mockDNSSECRepo) GetRecords(_ context.Context, _ string, _ domain.RecordType, _ string) ([]domain.Record, error) {
+	return nil, nil
+}
+func (m *mockDNSSECRepo) GetIPsForName(_ context.Context, _ string, _ string) ([]string, error) {
+	return nil, nil
+}
 func (m *mockDNSSECRepo) GetZone(_ context.Context, _ string) (*domain.Zone, error) { return nil, nil }
-func (m *mockDNSSECRepo) GetRecord(_ context.Context, _ string, _ string) (*domain.Record, error) { return nil, nil }
-func (m *mockDNSSECRepo) ListRecordsForZone(_ context.Context, _ string) ([]domain.Record, error) { return nil, nil }
+func (m *mockDNSSECRepo) GetRecord(_ context.Context, _ string, _ string) (*domain.Record, error) {
+	return nil, nil
+}
+func (m *mockDNSSECRepo) ListRecordsForZone(_ context.Context, _ string) ([]domain.Record, error) {
+	return nil, nil
+}
 func (m *mockDNSSECRepo) CreateZone(_ context.Context, _ *domain.Zone) error { return nil }
-func (m *mockDNSSECRepo) CreateZoneWithRecords(_ context.Context, _ *domain.Zone, _ []domain.Record) error { return nil }
-func (m *mockDNSSECRepo) CreateRecord(_ context.Context, _ *domain.Record) error { return nil }
+func (m *mockDNSSECRepo) CreateZoneWithRecords(_ context.Context, _ *domain.Zone, _ []domain.Record) error {
+	return nil
+}
+func (m *mockDNSSECRepo) CreateRecord(_ context.Context, _ *domain.Record) error        { return nil }
 func (m *mockDNSSECRepo) BatchCreateRecords(_ context.Context, _ []domain.Record) error { return nil }
-func (m *mockDNSSECRepo) ListZones(_ context.Context, _ string) ([]domain.Zone, error) { return nil, nil }
-func (m *mockDNSSECRepo) DeleteZone(_ context.Context, _, _ string) error { return nil }
+func (m *mockDNSSECRepo) ListZones(_ context.Context, _ string) ([]domain.Zone, error) {
+	return nil, nil
+}
+func (m *mockDNSSECRepo) DeleteZone(_ context.Context, _, _ string) error   { return nil }
 func (m *mockDNSSECRepo) DeleteRecord(_ context.Context, _, _ string) error { return nil }
-func (m *mockDNSSECRepo) DeleteRecordsByNameAndType(_ context.Context, _, _ string, _ domain.RecordType) error { return nil }
+func (m *mockDNSSECRepo) DeleteRecordsByNameAndType(_ context.Context, _, _ string, _ domain.RecordType) error {
+	return nil
+}
 func (m *mockDNSSECRepo) DeleteRecordsByName(_ context.Context, _, _ string) error { return nil }
-func (m *mockDNSSECRepo) DeleteRecordSpecific(_ context.Context, _, _ string, _ domain.RecordType, _ string) error { return nil }
+func (m *mockDNSSECRepo) DeleteRecordSpecific(_ context.Context, _, _ string, _ domain.RecordType, _ string) error {
+	return nil
+}
 func (m *mockDNSSECRepo) RecordZoneChange(_ context.Context, _ *domain.ZoneChange) error { return nil }
-func (m *mockDNSSECRepo) ListZoneChanges(_ context.Context, _ string, _ uint32) ([]domain.ZoneChange, error) { return nil, nil }
+func (m *mockDNSSECRepo) ListZoneChanges(_ context.Context, _ string, _ uint32) ([]domain.ZoneChange, error) {
+	return nil, nil
+}
 func (m *mockDNSSECRepo) SaveAuditLog(_ context.Context, _ *domain.AuditLog) error { return nil }
-func (m *mockDNSSECRepo) GetAuditLogs(_ context.Context, _ string) ([]domain.AuditLog, error) { return nil, nil }
+func (m *mockDNSSECRepo) GetAuditLogs(_ context.Context, _ string) ([]domain.AuditLog, error) {
+	return nil, nil
+}
 func (m *mockDNSSECRepo) Ping(_ context.Context) error { return nil }
 
 func (m *mockDNSSECRepo) CreateKey(_ context.Context, key *domain.DNSSECKey) error {
-	if m.err != nil { return m.err }
+	if m.err != nil {
+		return m.err
+	}
 	m.keys = append(m.keys, *key)
 	return nil
 }
 
 func (m *mockDNSSECRepo) ListKeysForZone(_ context.Context, zoneID string) ([]domain.DNSSECKey, error) {
-	if m.err != nil { return nil, m.err }
+	if m.err != nil {
+		return nil, m.err
+	}
 	var result []domain.DNSSECKey
 	for _, k := range m.keys {
 		if k.ZoneID == zoneID {
@@ -55,7 +79,9 @@ func (m *mockDNSSECRepo) ListKeysForZone(_ context.Context, zoneID string) ([]do
 }
 
 func (m *mockDNSSECRepo) UpdateKey(_ context.Context, key *domain.DNSSECKey) error {
-	if m.err != nil { return m.err }
+	if m.err != nil {
+		return m.err
+	}
 	for i, k := range m.keys {
 		if k.ID == key.ID {
 			m.keys[i] = *key
@@ -64,6 +90,15 @@ func (m *mockDNSSECRepo) UpdateKey(_ context.Context, key *domain.DNSSECKey) err
 	}
 	return nil
 }
+
+func (m *mockDNSSECRepo) GetAPIKeyByHash(_ context.Context, _ string) (*domain.APIKey, error) {
+	return nil, nil
+}
+func (m *mockDNSSECRepo) CreateAPIKey(_ context.Context, _ *domain.APIKey) error { return nil }
+func (m *mockDNSSECRepo) ListAPIKeys(_ context.Context, _ string) ([]domain.APIKey, error) {
+	return nil, nil
+}
+func (m *mockDNSSECRepo) DeleteAPIKey(_ context.Context, _ string) error { return nil }
 
 // TestGenerateKey verifies that the service can generate valid ECDSA P-256 keys.
 func TestGenerateKey(t *testing.T) {
@@ -112,8 +147,12 @@ func TestAutomateLifecycle(t *testing.T) {
 	hasKSK := false
 	hasZSK := false
 	for _, k := range keys {
-		if k.KeyType == "KSK" { hasKSK = true }
-		if k.KeyType == "ZSK" { hasZSK = true }
+		if k.KeyType == "KSK" {
+			hasKSK = true
+		}
+		if k.KeyType == "ZSK" {
+			hasZSK = true
+		}
 	}
 	if !hasKSK || !hasZSK {
 		t.Errorf("AutomateLifecycle failed to create both required key types")
@@ -259,14 +298,22 @@ func TestAutomateLifecycle_Rollover(t *testing.T) {
 
 	// 4. Verify old ZSK is STILL active (Double Signature period)
 	var k1 domain.DNSSECKey
-	for _, k := range keys { if k.ID == "k1" { k1 = k } }
+	for _, k := range keys {
+		if k.ID == "k1" {
+			k1 = k
+		}
+	}
 	if !k1.Active {
 		t.Errorf("Old ZSK deactivated too early, should be active during overlap")
 	}
 
 	// 5. Simulate time passing past overlap
 	k1.CreatedAt = time.Now().Add(-50 * 24 * time.Hour)
-	for i, k := range repo.keys { if k.ID == "k1" { repo.keys[i] = k1 } }
+	for i, k := range repo.keys {
+		if k.ID == "k1" {
+			repo.keys[i] = k1
+		}
+	}
 
 	if err := svc.AutomateLifecycle(ctx, "z1"); err != nil {
 		t.Fatalf("Second automation failed: %v", err)

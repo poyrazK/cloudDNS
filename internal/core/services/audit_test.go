@@ -10,7 +10,7 @@ import (
 // Mock repository that captures audit logs
 type auditMockRepo struct {
 	mockRepo // Inherit from existing mock
-	logs []domain.AuditLog
+	logs     []domain.AuditLog
 }
 
 func (m *auditMockRepo) GetRecords(ctx context.Context, name string, qType domain.RecordType, clientIP string) ([]domain.Record, error) {
@@ -44,6 +44,22 @@ func (m *auditMockRepo) ListKeysForZone(ctx context.Context, zoneID string) ([]d
 
 func (m *auditMockRepo) UpdateKey(ctx context.Context, key *domain.DNSSECKey) error {
 	return m.mockRepo.UpdateKey(ctx, key)
+}
+
+func (m *auditMockRepo) GetAPIKeyByHash(ctx context.Context, keyHash string) (*domain.APIKey, error) {
+	return m.mockRepo.GetAPIKeyByHash(ctx, keyHash)
+}
+
+func (m *auditMockRepo) CreateAPIKey(ctx context.Context, key *domain.APIKey) error {
+	return m.mockRepo.CreateAPIKey(ctx, key)
+}
+
+func (m *auditMockRepo) ListAPIKeys(ctx context.Context, tenantID string) ([]domain.APIKey, error) {
+	return m.mockRepo.ListAPIKeys(ctx, tenantID)
+}
+
+func (m *auditMockRepo) DeleteAPIKey(ctx context.Context, id string) error {
+	return m.mockRepo.DeleteAPIKey(ctx, id)
 }
 
 func TestAuditLogCreation(t *testing.T) {

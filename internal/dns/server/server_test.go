@@ -1,9 +1,9 @@
 package server
 
 import (
-	"errors"
 	"bytes"
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"strings"
@@ -21,7 +21,52 @@ type mockServerRepo struct {
 	zones   []domain.Zone
 	changes []domain.ZoneChange
 	keys    []domain.DNSSECKey
+	apiKeys []domain.APIKey
 	pingErr error
+}
+
+func (m *mockServerRepo) GetAPIKeyByHash(_ context.Context, keyHash string) (*domain.APIKey, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, k := range m.apiKeys {
+		if k.KeyHash == keyHash {
+			return &k, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *mockServerRepo) CreateAPIKey(_ context.Context, key *domain.APIKey) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.apiKeys = append(m.apiKeys, *key)
+	return nil
+}
+
+func (m *mockServerRepo) ListAPIKeys(_ context.Context, tenantID string) ([]domain.APIKey, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var res []domain.APIKey
+	for _, k := range m.apiKeys {
+		if tenantID == "" || k.TenantID == tenantID {
+			res = append(res, k)
+		}
+	}
+	return res, nil
+}
+
+func (m *mockServerRepo) DeleteAPIKey(_ context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var next []domain.APIKey
+	for _, k := range m.apiKeys {
+		if k.ID == id {
+			continue
+		}
+		next = append(next, k)
+	}
+	m.apiKeys = next
+	return nil
 }
 
 func (m *mockServerRepo) GetRecords(_ context.Context, name string, qType domain.RecordType, clientIP string) ([]domain.Record, error) {
@@ -131,11 +176,13 @@ func (m *mockServerRepo) ListZones(ctx context.Context, tenantID string) ([]doma
 func (m *mockServerRepo) DeleteZone(ctx context.Context, zoneID string, tenantID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	// 1. Delete Zone
 	var nextZones []domain.Zone
 	for _, z := range m.zones {
-		if z.ID == zoneID { continue }
+		if z.ID == zoneID {
+			continue
+		}
 		nextZones = append(nextZones, z)
 	}
 	m.zones = nextZones
@@ -143,11 +190,13 @@ func (m *mockServerRepo) DeleteZone(ctx context.Context, zoneID string, tenantID
 	// 2. Delete associated Records
 	var nextRecords []domain.Record
 	for _, r := range m.records {
-		if r.ZoneID == zoneID { continue }
+		if r.ZoneID == zoneID {
+			continue
+		}
 		nextRecords = append(nextRecords, r)
 	}
 	m.records = nextRecords
-	
+
 	return nil
 }
 func (m *mockServerRepo) DeleteRecord(ctx context.Context, recordID string, zoneID string) error {
@@ -288,7 +337,7 @@ func TestHandlePacketLocalHit(t *testing.T) {
 	req := packet.NewDNSPacket()
 	req.Header.ID = 123
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "local.test.", QType: packet.A})
-	
+
 	buffer := packet.NewBytePacketBuffer()
 	_ = req.Write(buffer)
 	data := buffer.Buf[:buffer.Position()]
@@ -317,7 +366,7 @@ func TestHandlePacketLocalHit(t *testing.T) {
 func TestHandlePacketCacheHit(t *testing.T) {
 	repo := &mockServerRepo{}
 	srv := NewServer("127.0.0.1:0", repo, nil)
-	
+
 	// Pre-populate cache
 	cacheKey := "cached.test.:1" // A record
 	cachedPacket := packet.NewDNSPacket()
@@ -374,7 +423,7 @@ func TestWorkerPoolProcessing(t *testing.T) {
 	}
 	srv := NewServer("127.0.0.1:0", repo, nil)
 	srv.WorkerCount = 1
-	
+
 	// Start one worker
 	go srv.udpWorker()
 
@@ -384,7 +433,7 @@ func TestWorkerPoolProcessing(t *testing.T) {
 	_ = req.Write(reqBuf)
 
 	dummy := &dummyPacketConn{}
-	
+
 	task := udpTask{
 		addr: &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345},
 		data: reqBuf.Buf[:reqBuf.Position()],
@@ -392,10 +441,10 @@ func TestWorkerPoolProcessing(t *testing.T) {
 	}
 
 	srv.udpQueue <- task
-	
+
 	// Wait a bit for worker to pick it up
 	time.Sleep(50 * time.Millisecond)
-	
+
 	if len(srv.udpQueue) != 0 {
 		t.Errorf("Expected task to be consumed by worker")
 	}
@@ -465,7 +514,7 @@ func TestHandlePacketEDNS(t *testing.T) {
 		Type:           packet.OPT,
 		UDPPayloadSize: 4096,
 	})
-	
+
 	reqBuf := packet.NewBytePacketBuffer()
 	_ = req.Write(reqBuf)
 
@@ -544,13 +593,13 @@ func TestHandleDoH(t *testing.T) {
 func TestSendTCPError(t *testing.T) {
 	srv := NewServer("127.0.0.1:0", nil, nil)
 	conn := &mockTCPConn{}
-	
+
 	srv.sendTCPError(conn, 1234, 4) // FORMERR
 
 	if len(conn.captured) != 1 {
 		t.Fatalf("Expected 1 error packet")
 	}
-	
+
 	p := packet.NewDNSPacket()
 	pBuf := packet.NewBytePacketBuffer()
 	pBuf.Load(conn.captured[0])
@@ -578,7 +627,9 @@ type mockResponseWriter struct {
 }
 
 func (m *mockResponseWriter) Header() http.Header {
-	if m.header == nil { m.header = make(http.Header) }
+	if m.header == nil {
+		m.header = make(http.Header)
+	}
 	return m.header
 }
 func (m *mockResponseWriter) Write(b []byte) (int, error) {
@@ -590,7 +641,7 @@ func (m *mockResponseWriter) WriteHeader(statusCode int) { m.code = statusCode }
 func TestHealthCheck_PingError(t *testing.T) {
 	repo := &mockServerRepo{pingErr: errors.New("db down")}
 	srv := NewServer("127.0.0.1:0", repo, nil)
-	
+
 	ctx := context.Background()
 	checks := srv.Repo.Ping(ctx)
 	if checks == nil || checks.Error() != "db down" {
