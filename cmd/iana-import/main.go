@@ -43,7 +43,6 @@ func main() {
 }
 
 func RunImport(ctx context.Context, repo ports.DNSRepository, url string) error {
-
 	fmt.Printf("Downloading IANA root zone from %s...\n", url)
 	// #nosec G107 -- URL is trusted IANA source
 	resp, err := http.Get(url)

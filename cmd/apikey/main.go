@@ -30,7 +30,7 @@ func main() {
 		_, _ = fmt.Fprintf(os.Stderr, "failed to open database: %v\n", err)
 		os.Exit(1)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	repo := repository.NewPostgresRepository(db)
 	if err := run(os.Args, os.Stdout, repo); err != nil {
