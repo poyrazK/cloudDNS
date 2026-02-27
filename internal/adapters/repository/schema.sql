@@ -70,3 +70,17 @@ CREATE TABLE IF NOT EXISTS dnssec_keys (
 
 CREATE INDEX idx_dns_records_name ON dns_records(name);
 CREATE INDEX idx_dns_records_network ON dns_records USING gist (network inet_ops);
+
+CREATE TABLE IF NOT EXISTS api_keys (
+    id UUID PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    key_hash TEXT NOT NULL UNIQUE,  -- SHA-256 hash
+    key_prefix TEXT NOT NULL,       -- First 8 chars for display
+    role TEXT NOT NULL DEFAULT 'admin',
+    active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMPTZ
+);
+
+CREATE INDEX idx_api_keys_hash ON api_keys(key_hash);

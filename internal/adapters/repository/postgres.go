@@ -36,7 +36,7 @@ func (r *PostgresRepository) GetRecords(ctx context.Context, name string, qType 
 	// RFC 1034: Domain name comparisons must be case-insensitive.
 	query := `SELECT id, zone_id, name, type, content, ttl, priority, weight, port, network FROM dns_records 
 	          WHERE LOWER(name) = LOWER($1) AND (network IS NULL OR $2::inet <<= network)`
-	
+
 	var rows *sql.Rows
 	var errQuery error
 
@@ -50,7 +50,11 @@ func (r *PostgresRepository) GetRecords(ctx context.Context, name string, qType 
 	if errQuery != nil {
 		return nil, errQuery
 	}
-	defer func() { if errClose := rows.Close(); errClose != nil { log.Printf("failed to close rows: %v", errClose) } }()
+	defer func() {
+		if errClose := rows.Close(); errClose != nil {
+			log.Printf("failed to close rows: %v", errClose)
+		}
+	}()
 
 	var records []domain.Record
 	for rows.Next() {
@@ -81,12 +85,16 @@ func (r *PostgresRepository) GetIPsForName(ctx context.Context, name string, cli
 	// Optimized query returning only content for Type A
 	query := `SELECT content FROM dns_records 
 	          WHERE LOWER(name) = LOWER($1) AND type = 'A' AND (network IS NULL OR $2::inet <<= network)`
-	
+
 	rows, errQuery := r.db.QueryContext(ctx, query, name, clientIP)
 	if errQuery != nil {
 		return nil, errQuery
 	}
-	defer func() { if errClose := rows.Close(); errClose != nil { log.Printf("failed to close rows: %v", errClose) } }()
+	defer func() {
+		if errClose := rows.Close(); errClose != nil {
+			log.Printf("failed to close rows: %v", errClose)
+		}
+	}()
 
 	var ips []string
 	for rows.Next() {
@@ -115,11 +123,11 @@ func (r *PostgresRepository) GetZone(ctx context.Context, name string) (*domain.
 func (r *PostgresRepository) GetRecord(ctx context.Context, id string, zoneID string) (*domain.Record, error) {
 	query := `SELECT id, zone_id, name, type, content, ttl, priority, weight, port, network FROM dns_records 
 	          WHERE id = $1 AND zone_id = $2`
-	
+
 	var rec domain.Record
 	var priority, weight, port sql.NullInt32
 	errRow := r.db.QueryRowContext(ctx, query, id, zoneID).Scan(&rec.ID, &rec.ZoneID, &rec.Name, &rec.Type, &rec.Content, &rec.TTL, &priority, &weight, &port, &rec.Network)
-	
+
 	if errors.Is(errRow, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -149,7 +157,11 @@ func (r *PostgresRepository) ListRecordsForZone(ctx context.Context, zoneID stri
 	if errQuery != nil {
 		return nil, errQuery
 	}
-	defer func() { if errClose := rows.Close(); errClose != nil { log.Printf("failed to close rows: %v", errClose) } }()
+	defer func() {
+		if errClose := rows.Close(); errClose != nil {
+			log.Printf("failed to close rows: %v", errClose)
+		}
+	}()
 
 	var records []domain.Record
 	for rows.Next() {
@@ -284,7 +296,11 @@ func (r *PostgresRepository) ListZones(ctx context.Context, tenantID string) ([]
 	if errQuery != nil {
 		return nil, errQuery
 	}
-	defer func() { if errClose := rows.Close(); errClose != nil { log.Printf("failed to close rows: %v", errClose) } }()
+	defer func() {
+		if errClose := rows.Close(); errClose != nil {
+			log.Printf("failed to close rows: %v", errClose)
+		}
+	}()
 
 	var zones []domain.Zone
 	for rows.Next() {
@@ -341,7 +357,11 @@ func (r *PostgresRepository) ListZoneChanges(ctx context.Context, zoneID string,
 	if errQuery != nil {
 		return nil, errQuery
 	}
-	defer func() { if errClose := rows.Close(); errClose != nil { log.Printf("failed to close rows: %v", errClose) } }()
+	defer func() {
+		if errClose := rows.Close(); errClose != nil {
+			log.Printf("failed to close rows: %v", errClose)
+		}
+	}()
 
 	var changes []domain.ZoneChange
 	for rows.Next() {
@@ -380,7 +400,11 @@ func (r *PostgresRepository) GetAuditLogs(ctx context.Context, tenantID string) 
 	if errQuery != nil {
 		return nil, errQuery
 	}
-	defer func() { if errClose := rows.Close(); errClose != nil { log.Printf("failed to close rows: %v", errClose) } }()
+	defer func() {
+		if errClose := rows.Close(); errClose != nil {
+			log.Printf("failed to close rows: %v", errClose)
+		}
+	}()
 
 	var logs []domain.AuditLog
 	for rows.Next() {
@@ -410,7 +434,11 @@ func (r *PostgresRepository) ListKeysForZone(ctx context.Context, zoneID string)
 	if errQuery != nil {
 		return nil, errQuery
 	}
-	defer func() { if errClose := rows.Close(); errClose != nil { log.Printf("failed to close rows: %v", errClose) } }()
+	defer func() {
+		if errClose := rows.Close(); errClose != nil {
+			log.Printf("failed to close rows: %v", errClose)
+		}
+	}()
 
 	var keys []domain.DNSSECKey
 	for rows.Next() {
@@ -426,6 +454,54 @@ func (r *PostgresRepository) ListKeysForZone(ctx context.Context, zoneID string)
 func (r *PostgresRepository) UpdateKey(ctx context.Context, key *domain.DNSSECKey) error {
 	query := `UPDATE dnssec_keys SET active = $1, updated_at = $2 WHERE id = $3`
 	_, err := r.db.ExecContext(ctx, query, key.Active, key.UpdatedAt, key.ID)
+	return err
+}
+
+func (r *PostgresRepository) GetAPIKeyByHash(ctx context.Context, keyHash string) (*domain.APIKey, error) {
+	query := `SELECT id, tenant_id, name, key_hash, key_prefix, role, active, created_at, expires_at 
+	          FROM api_keys WHERE key_hash = $1`
+	var k domain.APIKey
+	err := r.db.QueryRowContext(ctx, query, keyHash).Scan(
+		&k.ID, &k.TenantID, &k.Name, &k.KeyHash, &k.KeyPrefix, &k.Role, &k.Active, &k.CreatedAt, &k.ExpiresAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return &k, err
+}
+
+func (r *PostgresRepository) CreateAPIKey(ctx context.Context, key *domain.APIKey) error {
+	query := `INSERT INTO api_keys (id, tenant_id, name, key_hash, key_prefix, role, active, created_at, expires_at) 
+	          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
+	_, err := r.db.ExecContext(ctx, query,
+		key.ID, key.TenantID, key.Name, key.KeyHash, key.KeyPrefix, key.Role, key.Active, key.CreatedAt, key.ExpiresAt,
+	)
+	return err
+}
+
+func (r *PostgresRepository) ListAPIKeys(ctx context.Context, tenantID string) ([]domain.APIKey, error) {
+	query := `SELECT id, tenant_id, name, key_hash, key_prefix, role, active, created_at, expires_at 
+	          FROM api_keys WHERE tenant_id = $1`
+	rows, err := r.db.QueryContext(ctx, query, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var keys []domain.APIKey
+	for rows.Next() {
+		var k domain.APIKey
+		if err := rows.Scan(&k.ID, &k.TenantID, &k.Name, &k.KeyHash, &k.KeyPrefix, &k.Role, &k.Active, &k.CreatedAt, &k.ExpiresAt); err != nil {
+			return nil, err
+		}
+		keys = append(keys, k)
+	}
+	return keys, nil
+}
+
+func (r *PostgresRepository) DeleteAPIKey(ctx context.Context, id string) error {
+	query := `DELETE FROM api_keys WHERE id = $1`
+	_, err := r.db.ExecContext(ctx, query, id)
 	return err
 }
 
@@ -463,12 +539,12 @@ func ConvertPacketRecordToDomain(pRec packet.DNSRecord, zoneID string) (domain.R
 		rec.Content = pRec.Txt
 	case packet.SOA:
 		rec.Type = domain.TypeSOA
-		rec.Content = fmt.Sprintf("%s %s %d %d %d %d %d", 
+		rec.Content = fmt.Sprintf("%s %s %d %d %d %d %d",
 			pRec.MName, pRec.RName, pRec.Serial, pRec.Refresh, pRec.Retry, pRec.Expire, pRec.Minimum)
 	case packet.DNSKEY:
 		rec.Type = domain.RecordType("DNSKEY")
 		// "flags protocol algorithm public_key_base64"
-		rec.Content = fmt.Sprintf("%d %d %d %s", 
+		rec.Content = fmt.Sprintf("%d %d %d %s",
 			pRec.Flags, 3, pRec.Algorithm, base64.StdEncoding.EncodeToString(pRec.PublicKey))
 	case packet.DS:
 		rec.Type = domain.RecordType("DS")
@@ -496,11 +572,16 @@ func ConvertPacketRecordToDomain(pRec packet.DNSRecord, zoneID string) (domain.R
 
 	// Manual mapping if String() is not what we want
 	switch pRec.Type {
-	case packet.A: rec.Type = domain.TypeA
-	case packet.AAAA: rec.Type = domain.TypeAAAA
-	case packet.CNAME: rec.Type = domain.TypeCNAME
-	case packet.NS: rec.Type = domain.TypeNS
-	case packet.PTR: rec.Type = domain.TypePTR
+	case packet.A:
+		rec.Type = domain.TypeA
+	case packet.AAAA:
+		rec.Type = domain.TypeAAAA
+	case packet.CNAME:
+		rec.Type = domain.TypeCNAME
+	case packet.NS:
+		rec.Type = domain.TypeNS
+	case packet.PTR:
+		rec.Type = domain.TypePTR
 	}
 
 	return rec, nil
@@ -575,20 +656,32 @@ func ConvertDomainToPacketRecord(rec domain.Record) (packet.DNSRecord, error) {
 		pRec.Type = packet.SRV
 		if rec.Priority != nil {
 			prio := *rec.Priority
-			if prio < 0 { prio = 0 }
-			if prio > 65535 { prio = 65535 }
+			if prio < 0 {
+				prio = 0
+			}
+			if prio > 65535 {
+				prio = 65535
+			}
 			pRec.Priority = uint16(prio) // #nosec G115
 		}
 		if rec.Weight != nil {
 			w := *rec.Weight
-			if w < 0 { w = 0 }
-			if w > 65535 { w = 65535 }
+			if w < 0 {
+				w = 0
+			}
+			if w > 65535 {
+				w = 65535
+			}
 			pRec.Weight = uint16(w) // #nosec G115
 		}
 		if rec.Port != nil {
 			p := *rec.Port
-			if p < 0 { p = 0 }
-			if p > 65535 { p = 65535 }
+			if p < 0 {
+				p = 0
+			}
+			if p > 65535 {
+				p = 65535
+			}
 			pRec.Port = uint16(p) // #nosec G115
 		}
 		pRec.Host = rec.Content
@@ -601,9 +694,13 @@ func ConvertDomainToPacketRecord(rec domain.Record) (packet.DNSRecord, error) {
 		parts := strings.Fields(rec.Content)
 		if len(parts) >= 7 {
 			pRec.MName = parts[0]
-			if !strings.HasSuffix(pRec.MName, ".") { pRec.MName += "." }
+			if !strings.HasSuffix(pRec.MName, ".") {
+				pRec.MName += "."
+			}
 			pRec.RName = parts[1]
-			if !strings.HasSuffix(pRec.RName, ".") { pRec.RName += "." }
+			if !strings.HasSuffix(pRec.RName, ".") {
+				pRec.RName += "."
+			}
 			if _, err := fmt.Sscanf(parts[2], "%d", &pRec.Serial); err != nil {
 				return pRec, fmt.Errorf("failed to parse SOA serial: %w", err)
 			}
@@ -637,7 +734,7 @@ func ConvertDomainToPacketRecord(rec domain.Record) (packet.DNSRecord, error) {
 			}
 			pRec.Flags = flags
 			pRec.Algorithm = uint8(alg) // #nosec G115
-			
+
 			keyData, err := base64.StdEncoding.DecodeString(parts[3])
 			if err == nil {
 				pRec.PublicKey = keyData
@@ -659,9 +756,9 @@ func ConvertDomainToPacketRecord(rec domain.Record) (packet.DNSRecord, error) {
 				return pRec, fmt.Errorf("failed to parse DS digest type: %w", err)
 			}
 			pRec.KeyTag = keyTag
-			pRec.Algorithm = uint8(alg) // #nosec G115
+			pRec.Algorithm = uint8(alg)         // #nosec G115
 			pRec.DigestType = uint8(digestType) // #nosec G115
-			
+
 			digest, err := hex.DecodeString(parts[3])
 			if err == nil {
 				pRec.Digest = digest
@@ -674,7 +771,7 @@ func ConvertDomainToPacketRecord(rec domain.Record) (packet.DNSRecord, error) {
 		if len(parts) >= 9 {
 			var typeCovered, alg, labels, keyTag uint16
 			var origTTL, exp, inc uint32
-			
+
 			if _, err := fmt.Sscanf(parts[0], "%d", &typeCovered); err != nil {
 				return pRec, fmt.Errorf("failed to parse RRSIG type covered: %w", err)
 			}
@@ -696,7 +793,7 @@ func ConvertDomainToPacketRecord(rec domain.Record) (packet.DNSRecord, error) {
 			if _, err := fmt.Sscanf(parts[6], "%d", &keyTag); err != nil {
 				return pRec, fmt.Errorf("failed to parse RRSIG key tag: %w", err)
 			}
-			
+
 			pRec.TypeCovered = typeCovered
 			pRec.Algorithm = uint8(alg) // #nosec G115
 			pRec.Labels = uint8(labels) // #nosec G115
@@ -705,8 +802,10 @@ func ConvertDomainToPacketRecord(rec domain.Record) (packet.DNSRecord, error) {
 			pRec.Inception = inc
 			pRec.KeyTag = keyTag
 			pRec.SignerName = parts[7]
-			if !strings.HasSuffix(pRec.SignerName, ".") { pRec.SignerName += "." }
-			
+			if !strings.HasSuffix(pRec.SignerName, ".") {
+				pRec.SignerName += "."
+			}
+
 			sig, err := base64.StdEncoding.DecodeString(parts[8])
 			if err == nil {
 				pRec.Signature = sig
@@ -718,7 +817,9 @@ func ConvertDomainToPacketRecord(rec domain.Record) (packet.DNSRecord, error) {
 		parts := strings.Fields(rec.Content)
 		if len(parts) >= 1 {
 			pRec.NextName = parts[0]
-			if !strings.HasSuffix(pRec.NextName, ".") { pRec.NextName += "." }
+			if !strings.HasSuffix(pRec.NextName, ".") {
+				pRec.NextName += "."
+			}
 			if len(parts) > 1 {
 				bitmapHex := strings.Join(parts[1:], "")
 				bitmap, err := hex.DecodeString(bitmapHex)
@@ -742,18 +843,18 @@ func ConvertDomainToPacketRecord(rec domain.Record) (packet.DNSRecord, error) {
 			if _, err := fmt.Sscanf(parts[2], "%d", &iterations); err != nil {
 				return pRec, fmt.Errorf("failed to parse NSEC3 iterations: %w", err)
 			}
-			
+
 			pRec.HashAlg = uint8(hashAlg) // #nosec G115
 			pRec.Flags = flags
 			pRec.Iterations = iterations
-			
+
 			if salt, err := hex.DecodeString(parts[3]); err == nil {
 				pRec.Salt = salt
 			}
 			if nextHash, err := base32.HexEncoding.DecodeString(parts[4]); err == nil {
 				pRec.NextHash = nextHash
 			}
-			
+
 			if bitmap, err := hex.DecodeString(parts[5]); err == nil {
 				pRec.TypeBitMap = bitmap
 			}
