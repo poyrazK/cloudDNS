@@ -3,6 +3,8 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -28,7 +30,7 @@ func TestEndToEndDNS_Advanced(t *testing.T) {
 		_ = dnsSrv.Run()
 	}()
 
-	apiHandler := api.NewAPIHandler(svc)
+	apiHandler := api.NewAPIHandler(svc, repo)
 	mux := http.NewServeMux()
 	apiHandler.RegisterRoutes(mux)
 	apiSrv := &http.Server{Addr: apiAddr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
@@ -42,16 +44,36 @@ func TestEndToEndDNS_Advanced(t *testing.T) {
 		_ = apiSrv.Shutdown(context.Background())
 	}()
 
-	// 2. Setup Zone with multiple records including Wildcards
+	// 2. Setup Authentication and Zone
+	testKey := "cdns_test_key_1234567890"
+	hash := sha256.Sum256([]byte(testKey))
+	keyHash := hex.EncodeToString(hash[:])
+	_ = repo.CreateAPIKey(context.Background(), &domain.APIKey{
+		ID: "test-key-id", TenantID: "admin", Role: domain.RoleAdmin, Active: true, KeyHash: keyHash,
+	})
+
+	authHeader := "Bearer " + testKey
+
 	zoneReq := domain.Zone{Name: "advanced.test.", TenantID: "admin"}
 	body, _ := json.Marshal(zoneReq)
-	resp, err := http.Post(fmt.Sprintf("http://%s/zones", apiAddr), "application/json", bytes.NewBuffer(body))
+	req, _ := http.NewRequest("POST", fmt.Sprintf("http://%s/zones", apiAddr), bytes.NewBuffer(body))
+	req.Header.Set("Authorization", authHeader)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("Failed to create zone: %v", err)
 	}
 	var createdZone domain.Zone
-	_ = json.NewDecoder(resp.Body).Decode(&createdZone)
+	if err := json.NewDecoder(resp.Body).Decode(&createdZone); err != nil {
+		t.Fatalf("Failed to decode zone: %v", err)
+	}
 	_ = resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("Failed to create zone: expected 201, got %d", resp.StatusCode)
+	}
 
 	records := []domain.Record{
 		{Name: "a.advanced.test.", Type: domain.TypeA, Content: "1.1.1.1", TTL: 300, ZoneID: createdZone.ID},
@@ -59,7 +81,12 @@ func TestEndToEndDNS_Advanced(t *testing.T) {
 	}
 	for _, r := range records {
 		b, _ := json.Marshal(r)
-		if resp2, err2 := http.Post(fmt.Sprintf("http://%s/zones/%s/records", apiAddr, createdZone.ID), "application/json", bytes.NewBuffer(b)); err2 == nil { _ = resp2.Body.Close() }
+		req2, _ := http.NewRequest("POST", fmt.Sprintf("http://%s/zones/%s/records", apiAddr, createdZone.ID), bytes.NewBuffer(b))
+		req2.Header.Set("Authorization", authHeader)
+		req2.Header.Set("Content-Type", "application/json")
+		if resp2, err2 := client.Do(req2); err2 == nil {
+			_ = resp2.Body.Close()
+		}
 	}
 
 	// 3. Test Wildcard Resolution
@@ -75,7 +102,7 @@ func TestEndToEndDNS_Advanced(t *testing.T) {
 	_, _ = conn.Write(qBuf.Buf[:qBuf.Position()])
 	resBuf := make([]byte, 1024)
 	n, _ := conn.Read(resBuf)
-	
+
 	res := packet.NewDNSPacket()
 	pBuf := packet.NewBytePacketBuffer()
 	pBuf.Load(resBuf[:n])
@@ -107,12 +134,12 @@ func TestEndToEndDNS_Advanced(t *testing.T) {
 	axfrRLen := uint16(lenB[0])<<8 | uint16(lenB[1])
 	axfrRData := make([]byte, axfrRLen)
 	_, _ = tcpConn.Read(axfrRData)
-	
+
 	axfrRes := packet.NewDNSPacket()
 	arb := packet.NewBytePacketBuffer()
 	arb.Load(axfrRData)
 	_ = axfrRes.FromBuffer(arb)
-	
+
 	if len(axfrRes.Answers) == 0 || axfrRes.Answers[0].Type != packet.SOA {
 		t.Errorf("AXFR E2E failed to start with SOA")
 	}
@@ -128,7 +155,7 @@ func TestEndToEndDNS_Advanced(t *testing.T) {
 	qBuf2 := packet.NewBytePacketBuffer()
 	_ = query2.Write(qBuf2)
 	_, _ = conn2.Write(qBuf2.Buf[:qBuf2.Position()])
-	
+
 	n2, _ := conn2.Read(resBuf)
 	res2 := packet.NewDNSPacket()
 	pBuf2 := packet.NewBytePacketBuffer()
