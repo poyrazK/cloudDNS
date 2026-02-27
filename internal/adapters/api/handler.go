@@ -5,32 +5,40 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
 	"github.com/poyrazK/cloudDNS/internal/core/ports"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // APIHandler handles HTTP requests for zone and record management.
 type APIHandler struct {
-	svc ports.DNSService
+	svc  ports.DNSService
+	repo ports.DNSRepository
 }
 
 // NewAPIHandler creates and returns a new APIHandler instance.
-func NewAPIHandler(svc ports.DNSService) *APIHandler {
-	return &APIHandler{svc: svc}
+func NewAPIHandler(svc ports.DNSService, repo ports.DNSRepository) *APIHandler {
+	return &APIHandler{svc: svc, repo: repo}
 }
 
 // RegisterRoutes registers the API routes with the provided ServeMux.
 func (h *APIHandler) RegisterRoutes(mux *http.ServeMux) {
+	// Public Routes
 	mux.HandleFunc("GET /health", h.HealthCheck)
 	mux.HandleFunc("GET /metrics", h.Metrics)
-	mux.HandleFunc("POST /zones", h.CreateZone)
-	mux.HandleFunc("GET /zones", h.ListZones)
-	mux.HandleFunc("GET /zones/{id}/records", h.ListRecordsForZone)
-	mux.HandleFunc("DELETE /zones/{id}", h.DeleteZone)
-	mux.HandleFunc("POST /zones/{id}/records", h.CreateRecord)
-	mux.HandleFunc("DELETE /zones/{zone_id}/records/{id}", h.DeleteRecord)
-	mux.HandleFunc("GET /audit-logs", h.ListAuditLogs)
+
+	// Middleware
+	auth := AuthMiddleware(h.repo)
+	admin := RequireRole(domain.RoleAdmin)
+
+	// Protected Routes (scoped by tenant_id from auth key)
+	mux.Handle("POST /zones", auth(admin(http.HandlerFunc(h.CreateZone))))
+	mux.Handle("GET /zones", auth(http.HandlerFunc(h.ListZones)))
+	mux.Handle("GET /zones/{id}/records", auth(http.HandlerFunc(h.ListRecordsForZone)))
+	mux.Handle("DELETE /zones/{id}", auth(admin(http.HandlerFunc(h.DeleteZone))))
+	mux.Handle("POST /zones/{id}/records", auth(admin(http.HandlerFunc(h.CreateRecord))))
+	mux.Handle("DELETE /zones/{zone_id}/records/{id}", auth(admin(http.HandlerFunc(h.DeleteRecord))))
+	mux.Handle("GET /audit-logs", auth(http.HandlerFunc(h.ListAuditLogs)))
 }
 
 // Metrics handles Prometheus metrics scraping requests.
@@ -72,10 +80,7 @@ func (h *APIHandler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 
 // ListAuditLogs retrieves audit entries for a specific tenant via the management API.
 func (h *APIHandler) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
-	tenantID := r.URL.Query().Get("tenant_id")
-	if tenantID == "" {
-		tenantID = "default-tenant"
-	}
+	tenantID, _ := r.Context().Value(CtxTenantID).(string)
 
 	logs, err := h.svc.ListAuditLogs(r.Context(), tenantID)
 	if err != nil {
@@ -101,10 +106,9 @@ func (h *APIHandler) CreateZone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// In a real app, we would get TenantID from Auth context
-	if zone.TenantID == "" {
-		zone.TenantID = "default-tenant"
-	}
+	// Extract TenantID from Auth context
+	tenantID, _ := r.Context().Value(CtxTenantID).(string)
+	zone.TenantID = tenantID
 
 	if err := h.svc.CreateZone(r.Context(), &zone); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -119,10 +123,7 @@ func (h *APIHandler) CreateZone(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *APIHandler) ListZones(w http.ResponseWriter, r *http.Request) {
-	tenantID := r.URL.Query().Get("tenant_id")
-	if tenantID == "" {
-		tenantID = "default-tenant"
-	}
+	tenantID, _ := r.Context().Value(CtxTenantID).(string)
 
 	zones, err := h.svc.ListZones(r.Context(), tenantID)
 	if err != nil {
@@ -138,7 +139,7 @@ func (h *APIHandler) ListZones(w http.ResponseWriter, r *http.Request) {
 
 func (h *APIHandler) ListRecordsForZone(w http.ResponseWriter, r *http.Request) {
 	zoneID := r.PathValue("id")
-	
+
 	records, err := h.svc.ListRecordsForZone(r.Context(), zoneID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -182,10 +183,7 @@ func (h *APIHandler) CreateRecord(w http.ResponseWriter, r *http.Request) {
 
 func (h *APIHandler) DeleteZone(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	tenantID := r.URL.Query().Get("tenant_id")
-	if tenantID == "" {
-		tenantID = "default-tenant"
-	}
+	tenantID, _ := r.Context().Value(CtxTenantID).(string)
 
 	if err := h.svc.DeleteZone(r.Context(), id, tenantID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
