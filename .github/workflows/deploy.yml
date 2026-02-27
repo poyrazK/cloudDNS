@@ -69,6 +69,31 @@ jobs:
             clouddns="$IMAGE:${{ github.sha }}"
           kubectl rollout status deployment/clouddns --timeout=150s
 
+  smoke-test:
+    name: Verify Deployment
+    needs: deploy
+    runs-on: ubuntu-latest
+    env:
+      CLUSTER: clouddns-cluster
+      ZONE: europe-west3-a
+    steps:
+      - uses: actions/checkout@v4
+
+      # auth
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      # Connect to GKE
+      - uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.CLUSTER }}
+          location: ${{ env.ZONE }}
+
       # Smoke test: HTTP Health Check
       - name: Verify Health
         run: |
