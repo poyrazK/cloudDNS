@@ -25,8 +25,8 @@ func (m *auditMockRepo) GetZone(ctx context.Context, name string) (*domain.Zone,
 	return m.mockRepo.GetZone(ctx, name)
 }
 
-func (m *auditMockRepo) ListRecordsForZone(ctx context.Context, zoneID string) ([]domain.Record, error) {
-	return m.mockRepo.ListRecordsForZone(ctx, zoneID)
+func (m *auditMockRepo) ListRecordsForZone(ctx context.Context, zoneID string, tenantID string) ([]domain.Record, error) {
+	return m.mockRepo.ListRecordsForZone(ctx, zoneID, tenantID)
 }
 
 func (m *auditMockRepo) SaveAuditLog(_ context.Context, log *domain.AuditLog) error {
@@ -58,8 +58,8 @@ func (m *auditMockRepo) ListAPIKeys(ctx context.Context, tenantID string) ([]dom
 	return m.mockRepo.ListAPIKeys(ctx, tenantID)
 }
 
-func (m *auditMockRepo) DeleteAPIKey(ctx context.Context, id string) error {
-	return m.mockRepo.DeleteAPIKey(ctx, id)
+func (m *auditMockRepo) DeleteAPIKey(ctx context.Context, tenantID string, id string) error {
+	return m.mockRepo.DeleteAPIKey(ctx, tenantID, id)
 }
 
 func TestAuditLogCreation(t *testing.T) {

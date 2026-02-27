@@ -23,10 +23,10 @@ func (m *mockDNSSECRepo) GetIPsForName(_ context.Context, _ string, _ string) ([
 	return nil, nil
 }
 func (m *mockDNSSECRepo) GetZone(_ context.Context, _ string) (*domain.Zone, error) { return nil, nil }
-func (m *mockDNSSECRepo) GetRecord(_ context.Context, _ string, _ string) (*domain.Record, error) {
+func (m *mockDNSSECRepo) GetRecord(_ context.Context, _ string, _ string, _ string) (*domain.Record, error) {
 	return nil, nil
 }
-func (m *mockDNSSECRepo) ListRecordsForZone(_ context.Context, _ string) ([]domain.Record, error) {
+func (m *mockDNSSECRepo) ListRecordsForZone(_ context.Context, _ string, _ string) ([]domain.Record, error) {
 	return nil, nil
 }
 func (m *mockDNSSECRepo) CreateZone(_ context.Context, _ *domain.Zone) error { return nil }
@@ -38,8 +38,8 @@ func (m *mockDNSSECRepo) BatchCreateRecords(_ context.Context, _ []domain.Record
 func (m *mockDNSSECRepo) ListZones(_ context.Context, _ string) ([]domain.Zone, error) {
 	return nil, nil
 }
-func (m *mockDNSSECRepo) DeleteZone(_ context.Context, _, _ string) error   { return nil }
-func (m *mockDNSSECRepo) DeleteRecord(_ context.Context, _, _ string) error { return nil }
+func (m *mockDNSSECRepo) DeleteZone(_ context.Context, _, _ string) error      { return nil }
+func (m *mockDNSSECRepo) DeleteRecord(_ context.Context, _, _, _ string) error { return nil }
 func (m *mockDNSSECRepo) DeleteRecordsByNameAndType(_ context.Context, _, _ string, _ domain.RecordType) error {
 	return nil
 }
@@ -55,7 +55,8 @@ func (m *mockDNSSECRepo) SaveAuditLog(_ context.Context, _ *domain.AuditLog) err
 func (m *mockDNSSECRepo) GetAuditLogs(_ context.Context, _ string) ([]domain.AuditLog, error) {
 	return nil, nil
 }
-func (m *mockDNSSECRepo) Ping(_ context.Context) error { return nil }
+func (m *mockDNSSECRepo) DeleteAPIKey(_ context.Context, _, _ string) error { return nil }
+func (m *mockDNSSECRepo) Ping(_ context.Context) error                      { return nil }
 
 func (m *mockDNSSECRepo) CreateKey(_ context.Context, key *domain.DNSSECKey) error {
 	if m.err != nil {
@@ -98,7 +99,6 @@ func (m *mockDNSSECRepo) CreateAPIKey(_ context.Context, _ *domain.APIKey) error
 func (m *mockDNSSECRepo) ListAPIKeys(_ context.Context, _ string) ([]domain.APIKey, error) {
 	return nil, nil
 }
-func (m *mockDNSSECRepo) DeleteAPIKey(_ context.Context, _ string) error { return nil }
 
 // TestGenerateKey verifies that the service can generate valid ECDSA P-256 keys.
 func TestGenerateKey(t *testing.T) {

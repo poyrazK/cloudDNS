@@ -41,10 +41,11 @@ func (s *dnsService) CreateZone(ctx context.Context, zone *domain.Zone) error {
 	// 1. Create Default SOA Record
 	soaContent := fmt.Sprintf("ns1.clouddns.io. admin.clouddns.io. %s 3600 600 1209600 300",
 		time.Now().Format("2006010201"))
-	
+
 	soaRecord := &domain.Record{
 		ID:        uuid.New().String(),
 		ZoneID:    zone.ID,
+		TenantID:  zone.TenantID,
 		Name:      zone.Name,
 		Type:      domain.TypeSOA,
 		Content:   soaContent,
@@ -57,6 +58,7 @@ func (s *dnsService) CreateZone(ctx context.Context, zone *domain.Zone) error {
 	nsRecord := &domain.Record{
 		ID:        uuid.New().String(),
 		ZoneID:    zone.ID,
+		TenantID:  zone.TenantID,
 		Name:      zone.Name,
 		Type:      domain.TypeNS,
 		Content:   "ns1.clouddns.io.",
@@ -127,7 +129,7 @@ func (s *dnsService) Resolve(ctx context.Context, name string, qType domain.Reco
 	labels := strings.Split(strings.TrimSuffix(name, "."), ".")
 	for i := 0; i < len(labels)-1; i++ {
 		wildcardName := "*." + strings.Join(labels[i+1:], ".") + "."
-		
+
 		wildcardRecords, err := s.repo.GetRecords(ctx, wildcardName, qType, clientIP)
 		if err != nil {
 			return nil, err
@@ -148,8 +150,8 @@ func (s *dnsService) ListZones(ctx context.Context, tenantID string) ([]domain.Z
 	return s.repo.ListZones(ctx, tenantID)
 }
 
-func (s *dnsService) ListRecordsForZone(ctx context.Context, zoneID string) ([]domain.Record, error) {
-	return s.repo.ListRecordsForZone(ctx, zoneID)
+func (s *dnsService) ListRecordsForZone(ctx context.Context, zoneID string, tenantID string) ([]domain.Record, error) {
+	return s.repo.ListRecordsForZone(ctx, zoneID, tenantID)
 }
 
 func (s *dnsService) DeleteZone(ctx context.Context, zoneID string, tenantID string) error {
@@ -160,9 +162,9 @@ func (s *dnsService) DeleteZone(ctx context.Context, zoneID string, tenantID str
 	return nil
 }
 
-func (s *dnsService) DeleteRecord(ctx context.Context, recordID string, zoneID string) error {
+func (s *dnsService) DeleteRecord(ctx context.Context, recordID string, zoneID string, tenantID string) error {
 	// Fetch record details to invalidate the cache
-	record, err := s.repo.GetRecord(ctx, recordID, zoneID)
+	record, err := s.repo.GetRecord(ctx, recordID, zoneID, tenantID)
 	if err != nil {
 		return fmt.Errorf("failed to fetch record before deletion: %w", err)
 	}
@@ -173,7 +175,7 @@ func (s *dnsService) DeleteRecord(ctx context.Context, recordID string, zoneID s
 		}
 	}
 
-	if err := s.repo.DeleteRecord(ctx, recordID, zoneID); err != nil {
+	if err := s.repo.DeleteRecord(ctx, recordID, zoneID, tenantID); err != nil {
 		return err
 	}
 
@@ -181,7 +183,7 @@ func (s *dnsService) DeleteRecord(ctx context.Context, recordID string, zoneID s
 	if record != nil {
 		subject = record.Name
 	}
-	s.audit(ctx, "unknown", "DELETE_RECORD", "RECORD", recordID, fmt.Sprintf("Deleted record for %s", subject))
+	s.audit(ctx, tenantID, "DELETE_RECORD", "RECORD", recordID, fmt.Sprintf("Deleted record for %s", subject))
 	return nil
 }
 

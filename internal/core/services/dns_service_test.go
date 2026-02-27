@@ -53,7 +53,7 @@ func (m *mockRepo) GetZone(_ context.Context, name string) (*domain.Zone, error)
 	return nil, nil
 }
 
-func (m *mockRepo) GetRecord(_ context.Context, id string, zoneID string) (*domain.Record, error) {
+func (m *mockRepo) GetRecord(_ context.Context, id string, zoneID string, tenantID string) (*domain.Record, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -65,7 +65,7 @@ func (m *mockRepo) GetRecord(_ context.Context, id string, zoneID string) (*doma
 	return nil, nil
 }
 
-func (m *mockRepo) ListRecordsForZone(_ context.Context, zoneID string) ([]domain.Record, error) {
+func (m *mockRepo) ListRecordsForZone(_ context.Context, zoneID string, tenantID string) ([]domain.Record, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -118,8 +118,8 @@ func (m *mockRepo) ListZones(_ context.Context, _ string) ([]domain.Zone, error)
 	return m.zones, nil
 }
 
-func (m *mockRepo) DeleteZone(_ context.Context, _, _ string) error   { return m.err }
-func (m *mockRepo) DeleteRecord(_ context.Context, _, _ string) error { return m.err }
+func (m *mockRepo) DeleteZone(_ context.Context, _, _ string) error      { return m.err }
+func (m *mockRepo) DeleteRecord(_ context.Context, _, _, _ string) error { return m.err }
 
 func (m *mockRepo) DeleteRecordsByNameAndType(_ context.Context, _, _ string, _ domain.RecordType) error {
 	return m.err
@@ -160,7 +160,7 @@ func (m *mockRepo) CreateAPIKey(_ context.Context, _ *domain.APIKey) error { ret
 func (m *mockRepo) ListAPIKeys(_ context.Context, _ string) ([]domain.APIKey, error) {
 	return nil, m.err
 }
-func (m *mockRepo) DeleteAPIKey(_ context.Context, _ string) error { return m.err }
+func (m *mockRepo) DeleteAPIKey(_ context.Context, _ string, _ string) error { return m.err }
 
 func TestCreateZone(t *testing.T) {
 	repo := &mockRepo{}
@@ -212,7 +212,7 @@ func TestDeleteRecord(t *testing.T) {
 	repo := &auditMockRepo{}
 	svc := NewDNSService(repo, nil)
 
-	err := svc.DeleteRecord(context.Background(), "r1", "z1")
+	err := svc.DeleteRecord(context.Background(), "r1", "z1", "t1")
 	if err != nil {
 		t.Fatalf("DeleteRecord failed: %v", err)
 	}
@@ -322,7 +322,7 @@ func TestListRecordsForZone(t *testing.T) {
 	}
 	svc := NewDNSService(repo, nil)
 
-	recs, err := svc.ListRecordsForZone(context.Background(), "z1")
+	recs, err := svc.ListRecordsForZone(context.Background(), "z1", "")
 	if err != nil {
 		t.Fatalf("ListRecordsForZone failed: %v", err)
 	}
@@ -351,7 +351,7 @@ func TestServiceErrorPaths(t *testing.T) {
 	if err := svc.DeleteZone(ctx, "z1", ""); err == nil {
 		t.Errorf("Expected error in DeleteZone")
 	}
-	if err := svc.DeleteRecord(ctx, "r1", ""); err == nil {
+	if err := svc.DeleteRecord(ctx, "r1", "", ""); err == nil {
 		t.Errorf("Expected error in DeleteRecord")
 	}
 	if _, err := svc.ImportZone(ctx, "", strings.NewReader("")); err == nil {
