@@ -26,7 +26,7 @@ func TestRFC8914_EDE(t *testing.T) {
 	_ = srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 53}, func(resp []byte) error {
 		capturedResp = resp
 		return nil
-	})
+	}, "udp")
 
 	res := packet.NewDNSPacket()
 	resBuf := packet.NewBytePacketBuffer()

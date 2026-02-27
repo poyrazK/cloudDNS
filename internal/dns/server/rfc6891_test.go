@@ -38,7 +38,7 @@ func TestRFC6891_EDNS0(t *testing.T) {
 	_ = srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 53}, func(resp []byte) error {
 		capturedResp = resp
 		return nil
-	})
+	}, "udp")
 
 	resPacket := packet.NewDNSPacket()
 	resBuf := packet.NewBytePacketBuffer()
@@ -93,7 +93,7 @@ func TestRFC6891_LargePayload(t *testing.T) {
 	_ = srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 53}, func(resp []byte) error {
 		capturedResp = resp
 		return nil
-	})
+	}, "udp")
 
 	resPacket := packet.NewDNSPacket()
 	resBuf := packet.NewBytePacketBuffer()

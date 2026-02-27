@@ -45,7 +45,7 @@ func TestHandleUpdateAddRecord(t *testing.T) {
 	err := srv.handlePacket(data, "127.0.0.1:12345", func(resp []byte) error {
 		capturedResp = resp
 		return nil
-	})
+	}, "udp")
 
 	if err != nil {
 		t.Fatalf("HandlePacket failed: %v", err)
@@ -102,7 +102,7 @@ func TestHandleUpdateDeleteRRSet(t *testing.T) {
 	_ = req.Write(buffer)
 	data := buffer.Buf[:buffer.Position()]
 
-	if err := srv.handlePacket(data, "127.0.0.1:12345", func(_ []byte) error { return nil }); err != nil {
+	if err := srv.handlePacket(data, "127.0.0.1:12345", func(_ []byte) error { return nil }, "udp"); err != nil {
 		t.Errorf("handlePacket failed: %v", err)
 	}
 
@@ -151,7 +151,7 @@ func TestHandleUpdatePrerequisiteFail(t *testing.T) {
 	if err := srv.handlePacket(data, "127.0.0.1:12345", func(resp []byte) error {
 		capturedResp = resp
 		return nil
-	}); err != nil {
+	}, "udp"); err != nil {
 		t.Fatalf("handlePacket failed: %v", err)
 	}
 
@@ -188,7 +188,7 @@ func TestHandleUpdateMorePrereqs(t *testing.T) {
 	_ = req.Write(buf)
 	if err := srv.handlePacket(buf.Buf[:buf.Position()], "127.0.0.1:1", func(_ []byte) error {
 		return nil
-	}); err != nil {
+	}, "udp"); err != nil {
 		t.Errorf("handlePacket failed: %v", err)
 	}
 
@@ -210,7 +210,7 @@ func TestHandleUpdateMorePrereqs(t *testing.T) {
 			t.Errorf("Expected YXDOMAIN for existing name check, got %d", p.Header.ResCode)
 		}
 		return nil
-	}); err != nil {
+	}, "udp"); err != nil {
 		t.Errorf("handlePacket failed: %v", err)
 	}
 }
@@ -237,7 +237,7 @@ func TestHandleUpdateDeleteSpecific(t *testing.T) {
 
 	buf := packet.NewBytePacketBuffer()
 	_ = req.Write(buf)
-	if err := srv.handlePacket(buf.Buf[:buf.Position()], "127.0.0.1:1", func(_ []byte) error { return nil }); err != nil {
+	if err := srv.handlePacket(buf.Buf[:buf.Position()], "127.0.0.1:1", func(_ []byte) error { return nil }, "udp"); err != nil {
 		t.Errorf("handlePacket failed: %v", err)
 	}
 
@@ -300,7 +300,7 @@ func TestHandleUpdateTSIG(t *testing.T) {
 			t.Errorf("Expected NOERROR for valid TSIG, got %d", resPacket.Header.ResCode)
 		}
 		return nil
-	}); err != nil {
+	}, "udp"); err != nil {
 		t.Fatalf("handlePacket failed: %v", err)
 	}
 
@@ -338,7 +338,7 @@ func TestHandleUpdate_ErrorCases(t *testing.T) {
 			t.Errorf("Expected FORMERR for ZOCOUNT=0, got %d", p.Header.ResCode)
 		}
 		return nil
-	}); err != nil {
+	}, "udp"); err != nil {
 		t.Errorf("handlePacket failed: %v", err)
 	}
 
@@ -358,7 +358,7 @@ func TestHandleUpdate_ErrorCases(t *testing.T) {
 			t.Errorf("Expected NOTAUTH for unknown TSIG, got %d", p.Header.ResCode)
 		}
 		return nil
-	}); err != nil {
+	}, "udp"); err != nil {
 		t.Errorf("handlePacket failed: %v", err)
 	}
 
@@ -377,7 +377,7 @@ func TestHandleUpdate_ErrorCases(t *testing.T) {
 			t.Errorf("Expected NOTAUTH for non-existent zone, got %d", p.Header.ResCode)
 		}
 		return nil
-	}); err != nil {
+	}, "udp"); err != nil {
 		t.Errorf("handlePacket failed: %v", err)
 	}
 }
