@@ -17,6 +17,7 @@ import (
 const (
 	testTenantID = "t1"
 	zonesPath    = "/zones"
+	recordsPath  = "/zones/z1/records"
 	status200Err = "Expected status 200, got %d"
 	status500Err = "Expected status 500, got %d"
 )
@@ -129,7 +130,7 @@ func TestHealthCheck(t *testing.T) {
 	}
 }
 
-func TestHealthCheck_Degraded(t *testing.T) {
+func TestHealthCheckDegraded(t *testing.T) {
 	svc := &testutil.MockDNSService{}
 	repo := &testutil.MockRepo{}
 	handler := NewAPIHandler(svc, repo)
@@ -146,13 +147,13 @@ func TestHealthCheck_Degraded(t *testing.T) {
 	}
 }
 
-func TestCreateZone_BadRequest(t *testing.T) {
+func TestCreateZoneBadRequest(t *testing.T) {
 	svc := &mockDNSService{}
 	repo := &testutil.MockRepo{}
 	handler := NewAPIHandler(svc, repo)
 
-	req := httptest.NewRequest("POST", "/zones", bytes.NewBuffer([]byte("invalid json")))
-	req = withTenant(req, "t1")
+	req := httptest.NewRequest("POST", zonesPath, bytes.NewBuffer([]byte("invalid json")))
+	req = withTenant(req, testTenantID)
 	w := httptest.NewRecorder()
 
 	handler.CreateZone(w, req)
@@ -162,34 +163,34 @@ func TestCreateZone_BadRequest(t *testing.T) {
 	}
 }
 
-func TestCreateZone_InternalError(t *testing.T) {
+func TestCreateZoneInternalError(t *testing.T) {
 	svc := &mockDNSService{err: errors.New("db error")}
 	repo := &testutil.MockRepo{}
 	handler := NewAPIHandler(svc, repo)
 
 	zoneReq := domain.Zone{Name: "test.com."}
 	body, _ := json.Marshal(zoneReq)
-	req := httptest.NewRequest("POST", "/zones", bytes.NewBuffer(body))
-	req = withTenant(req, "t1")
+	req := httptest.NewRequest("POST", zonesPath, bytes.NewBuffer(body))
+	req = withTenant(req, testTenantID)
 	w := httptest.NewRecorder()
 
 	handler.CreateZone(w, req)
 
 	if w.Code != http.StatusInternalServerError {
-		t.Errorf("Expected status 500, got %d", w.Code)
+		t.Errorf(status500Err, w.Code)
 	}
 }
 
-func TestCreateZone(t *testing.T) {
+func TestCreateZoneSuccess(t *testing.T) {
 	svc := &mockDNSService{}
 	repo := &testutil.MockRepo{}
 	handler := NewAPIHandler(svc, repo)
 
-	zoneReq := domain.Zone{Name: "test.com.", TenantID: "t1"}
+	zoneReq := domain.Zone{Name: "test.com.", TenantID: testTenantID}
 	body, _ := json.Marshal(zoneReq)
 
-	req := httptest.NewRequest("POST", "/zones", bytes.NewBuffer(body))
-	req = withTenant(req, "t1")
+	req := httptest.NewRequest("POST", zonesPath, bytes.NewBuffer(body))
+	req = withTenant(req, testTenantID)
 	w := httptest.NewRecorder()
 
 	handler.CreateZone(w, req)
@@ -199,7 +200,7 @@ func TestCreateZone(t *testing.T) {
 	}
 }
 
-func TestCreateZone_Validation(t *testing.T) {
+func TestCreateZoneValidation(t *testing.T) {
 	svc := &mockDNSService{}
 	repo := &testutil.MockRepo{}
 	handler := NewAPIHandler(svc, repo)
@@ -222,8 +223,8 @@ func TestCreateZone_Validation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest("POST", "/zones", bytes.NewBuffer([]byte(tt.payload)))
-			req = withTenant(req, "t1")
+			req := httptest.NewRequest("POST", zonesPath, bytes.NewBuffer([]byte(tt.payload)))
+			req = withTenant(req, testTenantID)
 			w := httptest.NewRecorder()
 			handler.CreateZone(w, req)
 			if w.Code != tt.want {
@@ -233,47 +234,47 @@ func TestCreateZone_Validation(t *testing.T) {
 	}
 }
 
-func TestListZones_InternalError(t *testing.T) {
+func TestListZonesInternalError(t *testing.T) {
 	svc := &mockDNSService{err: errors.New("db error")}
 	repo := &testutil.MockRepo{}
 	handler := NewAPIHandler(svc, repo)
 
-	req := httptest.NewRequest("GET", "/zones", nil)
-	req = withTenant(req, "t1")
+	req := httptest.NewRequest("GET", zonesPath, nil)
+	req = withTenant(req, testTenantID)
 	w := httptest.NewRecorder()
 
 	handler.ListZones(w, req)
 
 	if w.Code != http.StatusInternalServerError {
-		t.Errorf("Expected status 500, got %d", w.Code)
+		t.Errorf(status500Err, w.Code)
 	}
 }
 
-func TestListZones(t *testing.T) {
+func TestListZonesSuccess(t *testing.T) {
 	svc := &mockDNSService{
-		zones: []domain.Zone{{ID: "1", Name: "z1.com", TenantID: "t1"}},
+		zones: []domain.Zone{{ID: "1", Name: "z1.com", TenantID: testTenantID}},
 	}
 	repo := &testutil.MockRepo{}
 	handler := NewAPIHandler(svc, repo)
 
-	req := httptest.NewRequest("GET", "/zones", nil)
-	req = withTenant(req, "t1")
+	req := httptest.NewRequest("GET", zonesPath, nil)
+	req = withTenant(req, testTenantID)
 	w := httptest.NewRecorder()
 
 	handler.ListZones(w, req)
 
 	if w.Code != http.StatusOK {
-		t.Errorf("Expected status 200, got %d", w.Code)
+		t.Errorf(status200Err, w.Code)
 	}
 }
 
-func TestCreateRecord_BadRequest(t *testing.T) {
+func TestCreateRecordBadRequest(t *testing.T) {
 	svc := &mockDNSService{}
 	repo := &testutil.MockRepo{}
 	handler := NewAPIHandler(svc, repo)
 
-	req := httptest.NewRequest("POST", "/zones/z1/records", bytes.NewBuffer([]byte("!!")))
-	req = withTenant(req, "t1")
+	req := httptest.NewRequest("POST", recordsPath, bytes.NewBuffer([]byte("!!")))
+	req = withTenant(req, testTenantID)
 	w := httptest.NewRecorder()
 
 	handler.CreateRecord(w, req)
@@ -283,86 +284,86 @@ func TestCreateRecord_BadRequest(t *testing.T) {
 	}
 }
 
-func TestCreateRecord_InternalError(t *testing.T) {
+func TestCreateRecordInternalError(t *testing.T) {
 	svc := &mockDNSService{err: errors.New("fail")}
 	repo := &testutil.MockRepo{}
 	handler := NewAPIHandler(svc, repo)
 
 	rec := domain.Record{Name: "www"}
 	body, _ := json.Marshal(rec)
-	req := httptest.NewRequest("POST", "/zones/z1/records", bytes.NewBuffer(body))
-	req = withTenant(req, "t1")
+	req := httptest.NewRequest("POST", recordsPath, bytes.NewBuffer(body))
+	req = withTenant(req, testTenantID)
 	w := httptest.NewRecorder()
 
 	handler.CreateRecord(w, req)
 
 	if w.Code != http.StatusInternalServerError {
-		t.Errorf("Expected status 500, got %d", w.Code)
+		t.Errorf(status500Err, w.Code)
 	}
 }
 
-func TestListRecordsForZone(t *testing.T) {
+func TestListRecordsForZoneSuccess(t *testing.T) {
 	svc := &mockDNSService{
 		records: []domain.Record{{ID: "r1", Name: "www"}},
 	}
 	repo := &testutil.MockRepo{}
 	handler := NewAPIHandler(svc, repo)
 
-	req := httptest.NewRequest("GET", "/zones/z1/records", nil)
-	req = withTenant(req, "t1")
+	req := httptest.NewRequest("GET", recordsPath, nil)
+	req = withTenant(req, testTenantID)
 	w := httptest.NewRecorder()
 
 	handler.ListRecordsForZone(w, req)
 
 	if w.Code != http.StatusOK {
-		t.Errorf("Expected status 200, got %d", w.Code)
+		t.Errorf(status200Err, w.Code)
 	}
 }
 
-func TestListRecordsForZone_InternalError(t *testing.T) {
+func TestListRecordsForZoneInternalError(t *testing.T) {
 	svc := &mockDNSService{err: errors.New("fail")}
 	repo := &testutil.MockRepo{}
 	handler := NewAPIHandler(svc, repo)
 
-	req := httptest.NewRequest("GET", "/zones/z1/records", nil)
-	req = withTenant(req, "t1")
+	req := httptest.NewRequest("GET", recordsPath, nil)
+	req = withTenant(req, testTenantID)
 	w := httptest.NewRecorder()
 
 	handler.ListRecordsForZone(w, req)
 
 	if w.Code != http.StatusInternalServerError {
-		t.Errorf("Expected status 500, got %d", w.Code)
+		t.Errorf(status500Err, w.Code)
 	}
 }
 
-func TestDeleteZone_InternalError(t *testing.T) {
+func TestDeleteZoneInternalError(t *testing.T) {
 	svc := &mockDNSService{err: errors.New("fail")}
 	repo := &testutil.MockRepo{}
 	handler := NewAPIHandler(svc, repo)
 
 	req := httptest.NewRequest("DELETE", "/zones/z1", nil)
-	req = withTenant(req, "t1")
+	req = withTenant(req, testTenantID)
 	w := httptest.NewRecorder()
 
 	handler.DeleteZone(w, req)
 
 	if w.Code != http.StatusInternalServerError {
-		t.Errorf("Expected status 500, got %d", w.Code)
+		t.Errorf(status500Err, w.Code)
 	}
 }
 
-func TestDeleteRecord_InternalError(t *testing.T) {
+func TestDeleteRecordInternalError(t *testing.T) {
 	svc := &mockDNSService{err: errors.New("fail")}
 	repo := &testutil.MockRepo{}
 	handler := NewAPIHandler(svc, repo)
 
 	req := httptest.NewRequest("DELETE", "/zones/z1/records/r1", nil)
-	req = withTenant(req, "t1")
+	req = withTenant(req, testTenantID)
 	w := httptest.NewRecorder()
 
 	handler.DeleteRecord(w, req)
 
 	if w.Code != http.StatusInternalServerError {
-		t.Errorf("Expected status 500, got %d", w.Code)
+		t.Errorf(status500Err, w.Code)
 	}
 }

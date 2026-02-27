@@ -486,7 +486,11 @@ func (r *PostgresRepository) ListAPIKeys(ctx context.Context, tenantID string) (
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		if errClose := rows.Close(); errClose != nil {
+			log.Printf("failed to close rows: %v", errClose)
+		}
+	}()
 
 	var keys []domain.APIKey
 	for rows.Next() {

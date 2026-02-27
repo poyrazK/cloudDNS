@@ -52,10 +52,10 @@ func (h *APIHandler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 	details := make(map[string]string)
 	checks := h.svc.HealthCheck(r.Context())
 
-	for name, err := range checks {
-		if err != nil {
+	for name, checkErr := range checks {
+		if checkErr != nil {
 			status = "DEGRADED"
-			details[name] = err.Error()
+			details[name] = checkErr.Error()
 		} else {
 			details[name] = "OK"
 		}

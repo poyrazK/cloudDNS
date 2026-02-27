@@ -45,19 +45,29 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to open database: %v", err)
 	}
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			log.Printf("failed to close database: %v", err)
+		}
+	}()
 
 	repo := repository.NewPostgresRepository(db)
 
 	switch os.Args[1] {
 	case "create":
-		createCmd.Parse(os.Args[2:])
+		if err := createCmd.Parse(os.Args[2:]); err != nil {
+			log.Fatalf("failed to parse create commands: %v", err)
+		}
 		generateKey(repo, *tenantID, *role, *name, *days)
 	case "list":
-		listCmd.Parse(os.Args[2:])
+		if err := listCmd.Parse(os.Args[2:]); err != nil {
+			log.Fatalf("failed to parse list commands: %v", err)
+		}
 		listKeys(repo, *listTenant)
 	case "revoke":
-		revokeCmd.Parse(os.Args[2:])
+		if err := revokeCmd.Parse(os.Args[2:]); err != nil {
+			log.Fatalf("failed to parse revoke commands: %v", err)
+		}
 		revokeKey(repo, *revokeID)
 	default:
 		fmt.Println("expected 'create', 'list' or 'revoke' subcommands")
