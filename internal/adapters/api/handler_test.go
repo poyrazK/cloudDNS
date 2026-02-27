@@ -367,3 +367,18 @@ func TestDeleteRecordInternalError(t *testing.T) {
 		t.Errorf(status500Err, w.Code)
 	}
 }
+
+func TestMetrics(t *testing.T) {
+	svc := &mockDNSService{}
+	repo := &testutil.MockRepo{}
+	handler := NewAPIHandler(svc, repo)
+
+	req := httptest.NewRequest("GET", "/metrics", nil)
+	w := httptest.NewRecorder()
+
+	handler.Metrics(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf(status200Err, w.Code)
+	}
+}
