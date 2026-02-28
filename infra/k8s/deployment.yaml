@@ -77,15 +77,6 @@ spec:
             port: 8080
           initialDelaySeconds: 5
           periodSeconds: 10
-        resources:
-          requests:
-            cpu: "1m"
-            memory: "16Mi"
-            ephemeral-storage: "50Mi"
-          limits:
-            cpu: "100m"
-            memory: "64Mi"
-            ephemeral-storage: "200Mi"
 ---
 # DNS over UDP (port 53) — needs a separate LB service for GKE
 apiVersion: v1
