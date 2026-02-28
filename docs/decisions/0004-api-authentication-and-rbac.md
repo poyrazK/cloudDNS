@@ -33,8 +33,14 @@ We have implemented a Bearer token-based authentication system with Role-Based A
     *   A dedicated CLI tool (`cmd/apikey`) is provided for bootstrapping and ongoing key management.
     *   Supports `create`, `list`, and `revoke` operations.
 
+5.  **TLS Support**:
+    *   To prevent Bearer tokens from being intercepted in transit, the Management API supports native TLS (HTTPS).
+    *   Operators can provide a certificate and private key via environment variables (`API_TLS_CERT` and `API_TLS_KEY`).
+    *   If configured, the server will serve requests over HTTPS; otherwise, it defaults to plain HTTP.
+    *   It is **strongly recommended** to enable TLS in production environments to protect API secrets and administrative operations.
+
 ## Consequences
-*   **Security**: Raw API keys are never stored, minimizing the impact of a database compromise.
+*   **Security**: Raw API keys are never stored, and in-transit protection is available via TLS.
 *   **Isolation**: All API requests are strictly scoped to the `tenant_id` associated with the API key.
 *   **Complexity**: Adding a new endpoint now requires explicit role assignment in `handler.go`.
 *   **Performance**: Each API request now requires a database lookup for the API key. This can be optimized with an L1 cache in the future if needed.

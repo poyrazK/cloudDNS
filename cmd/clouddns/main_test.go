@@ -91,6 +91,22 @@ func TestRunRedisConnectionFailure(t *testing.T) {
 	}
 }
 
+func TestRunAPIServerTLS(t *testing.T) {
+	os.Setenv("DATABASE_URL", "none")
+	os.Setenv("API_ADDR", "test-exit") // Exit after initialization
+	os.Setenv("API_TLS_CERT", "test.crt")
+	os.Setenv("API_TLS_KEY", "test.key")
+	defer os.Unsetenv("DATABASE_URL")
+	defer os.Unsetenv("API_ADDR")
+	defer os.Unsetenv("API_TLS_CERT")
+	defer os.Unsetenv("API_TLS_KEY")
+
+	// This should run and return nil because API_ADDR="test-exit"
+	if err := run(context.Background()); err != nil {
+		t.Errorf("expected nil error, got %v", err)
+	}
+}
+
 func TestRunFullLifecycle(t *testing.T) {
 	os.Setenv("DATABASE_URL", "none")
 	os.Setenv("API_ADDR", ":0") // Use random port for testing

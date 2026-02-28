@@ -77,6 +77,8 @@ The server is configured via environment variables:
 |----------|-------------|---------|
 | `DNS_ADDR` | Address for DNS listener | `:53` |
 | `API_ADDR` | Address for REST API | `:8080` |
+| `API_TLS_CERT` | TLS certificate path for API | - |
+| `API_TLS_KEY` | TLS private key path for API | - |
 | `DATABASE_URL` | PostgreSQL connection string | - |
 | `REDIS_URL` | Redis connection string | - |
 | `ANYCAST_ENABLED` | Enable BGP Anycast support | `false` |

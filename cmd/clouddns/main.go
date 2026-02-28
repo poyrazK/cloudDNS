@@ -185,8 +185,18 @@ func run(ctx context.Context) error {
 		IdleTimeout:       120 * time.Second,
 	}
 
+	certFile := os.Getenv("API_TLS_CERT")
+	keyFile := os.Getenv("API_TLS_KEY")
+
 	go func() {
-		if err := s.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		var err error
+		if certFile != "" && keyFile != "" {
+			logger.Info("starting API server with TLS", "cert", certFile, "key", keyFile)
+			err = s.ListenAndServeTLS(certFile, keyFile)
+		} else {
+			err = s.ListenAndServe()
+		}
+		if err != nil && err != http.ErrServerClosed {
 			logger.Error("API server failed", "error", err)
 		}
 	}()
