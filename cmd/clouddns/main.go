@@ -194,6 +194,7 @@ func run(ctx context.Context) error {
 			logger.Info("starting API server with TLS", "cert", certFile, "key", keyFile)
 			err = s.ListenAndServeTLS(certFile, keyFile)
 		} else {
+			logger.Info("starting API server without TLS")
 			err = s.ListenAndServe()
 		}
 		if err != nil && err != http.ErrServerClosed {

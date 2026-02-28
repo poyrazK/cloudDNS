@@ -67,7 +67,13 @@ jobs:
         run: |
           kubectl set image deployment/clouddns \
             clouddns="$IMAGE:${{ github.sha }}"
-          kubectl rollout status deployment/clouddns --timeout=150s
+          if ! kubectl rollout status deployment/clouddns --timeout=300s; then
+            echo "❌ Deployment failed! Gathering debug info..."
+            kubectl get pods -l app=clouddns
+            kubectl describe pods -l app=clouddns
+            kubectl logs -l app=clouddns --tail=100
+            exit 1
+          fi
 
   smoke-test:
     name: Verify Deployment
