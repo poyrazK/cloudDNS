@@ -69,14 +69,16 @@ spec:
           httpGet:
             path: /health
             port: 8080
-          initialDelaySeconds: 15
-          periodSeconds: 20
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10
         readinessProbe:
           httpGet:
             path: /health
             port: 8080
-          initialDelaySeconds: 5
-          periodSeconds: 10
+          initialDelaySeconds: 15
+          periodSeconds: 15
+          timeoutSeconds: 10
 ---
 # DNS over UDP (port 53) — needs a separate LB service for GKE
 apiVersion: v1
