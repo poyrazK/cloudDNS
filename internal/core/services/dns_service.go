@@ -223,7 +223,24 @@ func (s *dnsService) ListAuditLogs(ctx context.Context, tenantID string) ([]doma
 
 func (s *dnsService) HealthCheck(ctx context.Context) map[string]error {
 	res := make(map[string]error)
-	// For now, we return empty success to ensure probes don't time out on constrained nodes.
-	// We can add more granular checks (ready vs live) later.
+
+	// Check if we have enough time to perform pings (at least 500ms)
+	// This prevents Kubernetes probes from timing out the whole request
+	// if the node is under heavy CPU pressure.
+	if deadline, ok := ctx.Deadline(); ok {
+		if time.Until(deadline) < 500*time.Millisecond {
+			s.logger.Warn("skipping health check pings due to tight deadline")
+			return res
+		}
+	}
+
+	if s.repo != nil {
+		res["postgres"] = s.repo.Ping(ctx)
+	} else {
+		res["postgres"] = nil // Considered healthy if no repo required (test mode)
+	}
+	if s.cache != nil {
+		res["redis"] = s.cache.Ping(ctx)
+	}
 	return res
 }
