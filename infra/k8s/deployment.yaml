@@ -79,12 +79,12 @@ spec:
           periodSeconds: 10
         resources:
           requests:
-            cpu: "50m"
-            memory: "64Mi"
+            cpu: "10m"
+            memory: "32Mi"
             ephemeral-storage: "100Mi"
           limits:
-            cpu: "250m"
-            memory: "256Mi"
+            cpu: "200m"
+            memory: "128Mi"
             ephemeral-storage: "500Mi"
 ---
 # DNS over UDP (port 53) — needs a separate LB service for GKE
