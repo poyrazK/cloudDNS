@@ -65,35 +65,13 @@ spec:
               fieldPath: metadata.name
         - name: RECURSION_ENABLED
           value: "true"
-        startupProbe:
-          httpGet:
-            path: /health
-            port: 8080
-          initialDelaySeconds: 15
-          failureThreshold: 60
-          periodSeconds: 20
-          timeoutSeconds: 30
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: 8080
-          initialDelaySeconds: 5
-          periodSeconds: 30
-          timeoutSeconds: 30
         readinessProbe:
           httpGet:
             path: /health
             port: 8080
-          initialDelaySeconds: 5
-          periodSeconds: 15
+          initialDelaySeconds: 15
+          periodSeconds: 30
           timeoutSeconds: 30
-        resources:
-          requests:
-            cpu: "10m"
-            memory: "32Mi"
-          limits:
-            cpu: "200m"
-            memory: "128Mi"
 ---
 # DNS over UDP (port 53) — needs a separate LB service for GKE
 apiVersion: v1
