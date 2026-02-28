@@ -65,8 +65,13 @@ jobs:
       # Deploy with the exact commit SHA (to ensure traceability)
       - name: Deploy
         run: |
+          # Apply manifest to update resource requests/limits and other config
+          kubectl apply -f infra/k8s/deployment.yaml
+          
+          # Set the new image
           kubectl set image deployment/clouddns \
             clouddns="$IMAGE:${{ github.sha }}"
+          
           if ! kubectl rollout status deployment/clouddns --timeout=300s; then
             echo "❌ Deployment failed! Gathering debug info..."
             kubectl get pods -l app=clouddns
