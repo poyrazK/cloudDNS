@@ -188,6 +188,7 @@ func run(ctx context.Context) error {
 	certFile := os.Getenv("API_TLS_CERT")
 	keyFile := os.Getenv("API_TLS_KEY")
 
+	apiErrChan := make(chan error, 1)
 	go func() {
 		var err error
 		if certFile != "" && keyFile != "" {
@@ -198,12 +199,17 @@ func run(ctx context.Context) error {
 			err = s.ListenAndServe()
 		}
 		if err != nil && err != http.ErrServerClosed {
-			logger.Error("API server failed", "error", err)
+			apiErrChan <- fmt.Errorf("API server failed: %w", err)
 		}
 	}()
 
-	<-ctx.Done()
-	logger.Info("shutting down services...")
+	// Wait for termination signal or API server error
+	select {
+	case err := <-apiErrChan:
+		return err
+	case <-ctx.Done():
+		logger.Info("shutting down services...")
+	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond) // Fast timeout for tests
 	defer cancel()
