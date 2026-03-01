@@ -70,26 +70,26 @@ spec:
             path: /health
             port: 8080
             scheme: HTTP
-          initialDelaySeconds: 30
-          failureThreshold: 60
-          periodSeconds: 20
-          timeoutSeconds: 30
+          initialDelaySeconds: 15
+          failureThreshold: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
         livenessProbe:
           httpGet:
             path: /health
             port: 8080
             scheme: HTTP
           initialDelaySeconds: 10
-          periodSeconds: 60
-          timeoutSeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 5
         readinessProbe:
           httpGet:
             path: /health
             port: 8080
             scheme: HTTP
-          initialDelaySeconds: 10
-          periodSeconds: 30
-          timeoutSeconds: 30
+          initialDelaySeconds: 5
+          periodSeconds: 15
+          timeoutSeconds: 5
         resources:
           requests:
             cpu: "20m"
