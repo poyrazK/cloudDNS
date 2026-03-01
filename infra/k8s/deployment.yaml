@@ -65,28 +65,6 @@ spec:
               fieldPath: metadata.name
         - name: RECURSION_ENABLED
           value: "true"
-        startupProbe:
-          httpGet:
-            path: /health
-            port: 8080
-          initialDelaySeconds: 30
-          failureThreshold: 100
-          periodSeconds: 20
-          timeoutSeconds: 30
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: 8080
-          initialDelaySeconds: 60
-          periodSeconds: 60
-          timeoutSeconds: 30
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: 8080
-          initialDelaySeconds: 30
-          periodSeconds: 30
-          timeoutSeconds: 30
         resources:
           requests:
             cpu: "20m"
