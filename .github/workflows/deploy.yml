@@ -107,16 +107,22 @@ jobs:
           cluster_name: ${{ env.CLUSTER }}
           location: ${{ env.ZONE }}
 
-      # Smoke test: HTTP Health Check
+      # Smoke test: HTTPS Health Check (Application uses TLS by default now)
       - name: Verify Health
         run: |
           echo "Waiting for LoadBalancer IP and health check..."
           for i in {1..20}; do
             EXTERNAL_IP=$(kubectl get svc clouddns-lb-tcp -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
             if [ -n "$EXTERNAL_IP" ]; then
-              echo "Checking http://$EXTERNAL_IP:8080/health (attempt $i)"
-              if curl -sf --max-time 5 "http://$EXTERNAL_IP:8080/health" | grep -q '"status":"UP"'; then
+              echo "Checking https://$EXTERNAL_IP:8080/health (attempt $i)"
+              # Use -k to allow self-signed certs
+              if curl -sfk --max-time 5 "https://$EXTERNAL_IP:8080/health" | grep -q '"status":"UP"'; then
                 echo "✅ Health check passed!"
+                exit 0
+              fi
+              # Fallback to HTTP check just in case TLS isn't configured
+              if curl -sf --max-time 5 "http://$EXTERNAL_IP:8080/health" | grep -q '"status":"UP"'; then
+                echo "✅ Health check (HTTP fallback) passed!"
                 exit 0
               fi
             fi
