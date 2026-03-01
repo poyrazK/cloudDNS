@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strconv"
@@ -42,6 +43,14 @@ func run(ctx context.Context) error {
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		dbURL = "postgres://postgres:postgres@localhost:5432/clouddns?sslmode=disable"
+	}
+
+	if dbURL != "none" {
+		parsedURL, err := url.Parse(dbURL)
+		if err == nil {
+			redactedURL := fmt.Sprintf("%s://%s@%s%s", parsedURL.Scheme, "***", parsedURL.Host, parsedURL.Path)
+			logger.Info("database configuration", "url", redactedURL)
+		}
 	}
 
 	var db *sql.DB
