@@ -223,13 +223,28 @@ func (s *dnsService) ListAuditLogs(ctx context.Context, tenantID string) ([]doma
 
 func (s *dnsService) HealthCheck(ctx context.Context) map[string]error {
 	res := make(map[string]error)
+
+	// Check if we have enough time to perform pings (at least 2s)
+	// This prevents Kubernetes probes from timing out the whole request
+	// if the node is under heavy CPU pressure.
+	if deadline, ok := ctx.Deadline(); ok {
+		if time.Until(deadline) < 2*time.Second {
+			s.logger.Warn("skipping health check pings due to tight deadline")
+			return res
+		}
+	}
+
+	// Use a short sub-context for pings to avoid blocking
+	pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
 	if s.repo != nil {
-		res["postgres"] = s.repo.Ping(ctx)
+		res["postgres"] = s.repo.Ping(pingCtx)
 	} else {
 		res["postgres"] = nil // Considered healthy if no repo required (test mode)
 	}
 	if s.cache != nil {
-		res["redis"] = s.cache.Ping(ctx)
+		res["redis"] = s.cache.Ping(pingCtx)
 	}
 	return res
 }
