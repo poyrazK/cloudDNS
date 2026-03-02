@@ -19,7 +19,7 @@ type HealthMonitor struct {
 	client *http.Client
 }
 
-// NewHealthMonitor creates a new HealthMonitor.
+// NewHealthMonitor creates a new HealthMonitor with a default HTTP client.
 func NewHealthMonitor(repo ports.DNSRepository, logger *slog.Logger) *HealthMonitor {
 	return &HealthMonitor{
 		repo:   repo,
@@ -30,7 +30,7 @@ func NewHealthMonitor(repo ports.DNSRepository, logger *slog.Logger) *HealthMoni
 	}
 }
 
-// Start runs the health monitoring loop.
+// Start runs the health monitoring loop at the specified interval until the context is cancelled.
 func (m *HealthMonitor) Start(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -83,7 +83,7 @@ func (m *HealthMonitor) probeHTTP(target string) (domain.HealthStatus, string) {
 	if err != nil {
 		return domain.HealthStatusUnhealthy, err.Error()
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 400 {
 		return domain.HealthStatusHealthy, ""
@@ -97,7 +97,7 @@ func (m *HealthMonitor) probeTCP(target string) (domain.HealthStatus, string) {
 	if err != nil {
 		return domain.HealthStatusUnhealthy, err.Error()
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	return domain.HealthStatusHealthy, ""
 }

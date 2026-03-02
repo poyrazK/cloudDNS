@@ -237,14 +237,17 @@ func (s *dnsService) ListAuditLogs(ctx context.Context, tenantID string) ([]doma
 	return s.repo.GetAuditLogs(ctx, tenantID)
 }
 
+// GetRecordsToProbe fetches all records that have a health check configured.
 func (s *dnsService) GetRecordsToProbe(ctx context.Context) ([]domain.Record, error) {
 	return s.repo.GetRecordsToProbe(ctx)
 }
 
+// UpdateRecordHealth updates the health status and error message for a specific record.
 func (s *dnsService) UpdateRecordHealth(ctx context.Context, recordID string, status domain.HealthStatus, errMsg string) error {
 	return s.repo.UpdateRecordHealth(ctx, recordID, status, errMsg)
 }
 
+// HealthCheck performs dependency health checks (DB, Redis) and returns a map of errors.
 func (s *dnsService) HealthCheck(ctx context.Context) map[string]error {
 	res := make(map[string]error)
 	if s.repo != nil {
