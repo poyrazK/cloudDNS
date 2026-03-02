@@ -58,6 +58,14 @@ func (m *mockDNSSECRepo) GetAuditLogs(_ context.Context, _ string) ([]domain.Aud
 func (m *mockDNSSECRepo) DeleteAPIKey(_ context.Context, _, _ string) error { return nil }
 func (m *mockDNSSECRepo) Ping(_ context.Context) error                      { return nil }
 
+func (m *mockDNSSECRepo) UpdateRecordHealth(_ context.Context, _ string, _ domain.HealthStatus, _ string) error {
+	return nil
+}
+
+func (m *mockDNSSECRepo) GetRecordsToProbe(_ context.Context) ([]domain.Record, error) {
+	return nil, nil
+}
+
 func (m *mockDNSSECRepo) CreateKey(_ context.Context, key *domain.DNSSECKey) error {
 	if m.err != nil {
 		return m.err
