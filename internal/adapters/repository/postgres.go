@@ -298,7 +298,11 @@ func (r *PostgresRepository) GetRecordsToProbe(ctx context.Context) ([]domain.Re
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		if errClose := rows.Close(); errClose != nil {
+			log.Printf("failed to close rows: %v", errClose)
+		}
+	}()
 
 	var records []domain.Record
 	for rows.Next() {

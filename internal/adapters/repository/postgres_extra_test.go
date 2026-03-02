@@ -22,7 +22,7 @@ func TestPostgresRepository_GetRecord_Mock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create sqlmock: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	repo := NewPostgresRepository(db)
 	ctx := context.Background()
