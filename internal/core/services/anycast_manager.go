@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/poyrazK/cloudDNS/internal/core/ports"
+	"github.com/poyrazK/cloudDNS/internal/infrastructure/metrics"
 )
 
 type AnycastManager struct {
@@ -57,6 +58,7 @@ func (m *AnycastManager) Start(ctx context.Context) {
 			if err := m.routing.Withdraw(context.Background(), m.vip); err != nil {
 				m.logger.Error("failed to withdraw BGP on shutdown", "error", err, "vip", m.vip)
 			}
+			metrics.BGPAnnounced.Set(0)
 			return
 		case <-ticker.C:
 			m.TriggerCheck(ctx)
@@ -103,6 +105,7 @@ func (m *AnycastManager) announce(ctx context.Context) {
 	}
 
 	m.isAnnounced.Store(true)
+	metrics.BGPAnnounced.Set(1)
 }
 
 func (m *AnycastManager) withdraw(ctx context.Context) {
@@ -114,5 +117,6 @@ func (m *AnycastManager) withdraw(ctx context.Context) {
 	}
 
 	m.isAnnounced.Store(false)
+	metrics.BGPAnnounced.Set(0)
 	// We keep the VIP bound to the interface for local connectivity/checks
 }
