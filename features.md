@@ -3,51 +3,43 @@
 A high-performance, authoritative and recursive DNS server built from scratch in Go, designed for modern cloud environments.
 
 ## 1. Core DNS Engine (Manual RFC 1035)
-Unlike standard implementations that use libraries, cloudDNS implements the binary wire format manually for maximum control and performance.
-*   **Manual Binary Parsing**: Custom bit-masking and byte-buffer management for DNS headers, questions, and records.
-*   **Multi-Transport Support**: Parallel listeners for high-speed **UDP** and framed **TCP** transport.
-*   **Label Compression**: Full support for domain name pointers (offsets) during packet deserialization.
-*   **Supported Record Types**: `A`, `AAAA`, `CNAME`, `NS`, `MX`, `SOA`, `TXT`, `SRV`, `DS`, `DNSKEY`, `RRSIG`, `NSEC`, `NSEC3`, `OPT` (EDNS), and `TSIG`.
+Unlike standard implementations that rely on generic libraries, cloudDNS uses a custom-built packet parser and serializer for maximum control and efficiency.
+*   **Wire Format Mastery**: Full support for A, AAAA, CNAME, MX, TXT, NS, SOA, SRV, and PTR record types.
+*   **EDNS(0) Support**: Handles extended DNS payloads and flags.
+*   **CHAOS Class**: Support for `id.server.` and `hostname.bind.` queries for node identification.
 
-## 2. Advanced Resolution Logic
-*   **Recursive Resolver**: A "serious" iterative resolver that walks the global internet hierarchy starting from root hints (`a.root-servers.net`) when a local record is missing.
-*   **Split-Horizon DNS**: Context-aware resolution. The server detects the client's source IP and filters records based on CIDR blocks (Private vs. Public views) using the PostgreSQL `<<=` operator.
-*   **Wildcard Matching**: Full support for `*.domain.com` patterns with iterative label stripping and response name rewriting.
-*   **EDNS(0) & Truncation**:
-    *   Negotiates UDP payload sizes up to 65,535 bytes.
-    *   Automatically enforces truncation (`TC` bit) if a response exceeds the negotiated limit, forcing safe TCP fallback.
-    *   **Extended DNS Errors (RFC 8914)**: Support for granular error codes in OPT records.
-*   **Node Identity (CHAOS Class)**: Support for `id.server.` and `hostname.bind.` queries to identify specific nodes in a cluster.
+## 2. Distributed Caching & Invalidation
+A sharded, multi-layer caching architecture ensures sub-millisecond response times at scale.
+*   **L1 In-Memory Cache**: High-speed, thread-safe sharded cache with Transaction ID rewriting.
+*   **L2 Redis Integration**: Shared distributed cache for cross-node performance consistency.
+*   **Global Invalidation**: Uses Redis Pub/Sub to trigger real-time cache purges across all replicas when records change.
 
 ## 3. High Availability & Anycast
-*   **Anycast BGP Orchestration**: Native integration with **GoBGP v4**. The server automatically announces its Virtual IP (VIP) to the network core when healthy and withdraws it upon failure.
-*   **Automated VIP Management**: Built-in management of local interface IP aliases, ensuring the VIP is bound only when the local node is operational.
-*   **Health-Aware Routing**: Intelligent monitoring of Database, Cache, and DNS ports to drive BGP state.
+Built-in orchestration for global Anycast networks using BGP.
+*   **Native BGP Speaker**: Integration with GoBGP for route announcements.
+*   **VIP Management**: Automated aliasing of Anycast VIPs on local network interfaces.
+*   **Health-Aware Routing**: Real-time route announcement and withdrawal based on service health.
 
-## 4. DNSSEC (RFC 4034/4035/5155)
-*   **Automated Key Management**: Background orchestration of KSK (Key Signing Key) and ZSK (Zone Signing Key) generation using ECDSA P-256.
-*   **Double-Signature Rollover**: Fully automated, zero-downtime key rotation mechanism.
-*   **Dynamic Signing**: Real-time RRSIG generation for authoritative responses.
-*   **Authenticated Denial of Existence**: Support for both `NSEC` and `NSEC3` (with salt and iterations) to prevent zone walking.
+## 4. Smart Engine (GSLB)
+*   **Active Health Monitoring**: Periodically probes record endpoints via HTTP or TCP handshake.
+*   **Automated Failover**: Dynamically removes unhealthy records from DNS responses.
+*   **Zero-Blackout Fallback**: If all endpoints are unhealthy, the engine returns all records to avoid total service outage.
+*   **Historical Tracking**: Maintains a record of health check results and error messages for debugging.
 
-## 5. Caching & Global Consistency
-*   **Distributed Caching**: Shared L2 cache via Redis to reduce backend load across nodes.
-*   **Real-Time Invalidation**: Global cache invalidation using Redis Pub/Sub. Administrative changes (API/Dynamic Updates) are broadcast instantly to clear stale L1 entries on all nodes.
-*   **Sharded L1 Cache**: High-concurrency sharded memory cache with Transaction ID rewriting for sub-millisecond response times.
+## 5. Advanced DNS Standards
+*   **DNSSEC**: Automated Key (KSK/ZSK) management, signing, and Double-Signature rollover.
+*   **DoH (DNS over HTTPS)**: Privacy-focused resolution over HTTP/2 using both `GET` and `POST`.
+*   **Dynamic Updates (RFC 2136)**: Standardized dynamic record management.
+*   **IXFR (Incremental Zone Transfer)**: Efficient synchronization between primary and secondary nodes.
 
-## 6. Security & Protection
-*   **Rate Limiting**: Built-in **Token Bucket** limiter. Protects the server from UDP floods and DDoS by enforcing per-IP query limits (Default: 200,000 burst / 100,000 sustain).
-*   **TSIG (Transaction Signatures)**: HMAC-authenticated DNS transactions for secure Dynamic Updates and Zone Transfers.
-*   **DNS over HTTPS (DoH)**: RFC 8484 compliant transport for secure, encrypted resolution over HTTP/2.
+## 6. Management & Security
+*   **Hexagonal Architecture**: Strict separation between core logic and infrastructure adapters.
+*   **RESTful Management API**: Multi-tenant API for zone and record orchestration.
+*   **RBAC & Auth**: Role-based access control with SHA-256 hashed API keys.
+*   **Audit Logging**: Comprehensive trail of all administrative actions per tenant.
+*   **Rate Limiting**: Built-in protection against DoS and abuse.
 
-## 7. Architecture & Management
-*   **Hexagonal Architecture**: Strict separation between Domain logic, Ports (Interfaces), and Adapters (PostgreSQL, Redis, BGP, API).
-*   **RESTful Management API**: Multi-tenant CRUD endpoints for Zone and Record management.
-*   **API Authentication & RBAC**: Secure access control via SHA-256 hashed API keys and granular roles (`admin`, `reader`), ensuring strict tenant isolation.
-*   **Incremental Zone Transfer (IXFR)**: Efficient replication that transfers only serialized changes between masters and slaves.
-*   **Audit Trails**: Persistent change logging for every administrative action.
-
-## 8. Stability & Verification
-*   **Integration Testing**: Verified against real PostgreSQL and Redis instances.
+## 7. Quality & Compliance
+*   **End-to-End Testing**: Validated against real PostgreSQL and Redis instances.
 *   **High Test Coverage**: Maintains **84%+** statement coverage across the entire codebase.
 *   **RFC Compliance**: Rigorous verification against RFC 1034, 1035, 1995, 1996, 2136, 4034, 4035, and 5155.

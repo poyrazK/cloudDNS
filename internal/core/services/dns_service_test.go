@@ -162,6 +162,14 @@ func (m *mockRepo) ListAPIKeys(_ context.Context, _ string) ([]domain.APIKey, er
 }
 func (m *mockRepo) DeleteAPIKey(_ context.Context, _ string, _ string) error { return m.err }
 
+func (m *mockRepo) GetRecordsToProbe(_ context.Context) ([]domain.Record, error) {
+	return nil, m.err
+}
+
+func (m *mockRepo) UpdateRecordHealth(_ context.Context, _ string, _ domain.HealthStatus, _ string) error {
+	return m.err
+}
+
 func TestCreateZone(t *testing.T) {
 	repo := &mockRepo{}
 	svc := NewDNSService(repo, nil)
@@ -358,3 +366,42 @@ func TestServiceErrorPaths(t *testing.T) {
 		t.Errorf("Expected error in ImportZone")
 	}
 }
+
+func TestResolve_SmartEngine(t *testing.T) {
+	repo := &mockRepo{
+		records: []domain.Record{
+			{ID: "r1", Name: "www.test.", Type: domain.TypeA, Content: "1.1.1.1", HealthStatus: domain.HealthStatusHealthy},
+			{ID: "r2", Name: "www.test.", Type: domain.TypeA, Content: "2.2.2.2", HealthStatus: domain.HealthStatusUnhealthy},
+			{ID: "r3", Name: "www.test.", Type: domain.TypeA, Content: "3.3.3.3", HealthStatus: domain.HealthStatusUnknown},
+		},
+	}
+	svc := NewDNSService(repo, nil)
+
+	// Case 1: Filter out Unhealthy, keep Healthy and Unknown
+	recs, err := svc.Resolve(context.Background(), "www.test.", domain.TypeA, "8.8.8.8")
+	if err != nil {
+		t.Fatalf("Resolve failed: %v", err)
+	}
+	if len(recs) != 2 {
+		t.Errorf("Expected 2 records (healthy + unknown), got %d", len(recs))
+	}
+	for _, r := range recs {
+		if r.Content == "2.2.2.2" {
+			t.Errorf("Unhealthy record was not filtered out")
+		}
+	}
+
+	// Case 2: Fallback - All are unhealthy
+	repo.records = []domain.Record{
+		{ID: "r1", Name: "fail.test.", Type: domain.TypeA, Content: "1.1.1.1", HealthStatus: domain.HealthStatusUnhealthy},
+		{ID: "r2", Name: "fail.test.", Type: domain.TypeA, Content: "2.2.2.2", HealthStatus: domain.HealthStatusUnhealthy},
+	}
+	recs, err = svc.Resolve(context.Background(), "fail.test.", domain.TypeA, "8.8.8.8")
+	if err != nil {
+		t.Fatalf("Resolve failed in fallback: %v", err)
+	}
+	if len(recs) != 2 {
+		t.Errorf("Expected fallback to return all 2 records, got %d", len(recs))
+	}
+	}
+

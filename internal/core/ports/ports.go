@@ -41,6 +41,10 @@ type DNSRepository interface {
 	CreateAPIKey(ctx context.Context, key *domain.APIKey) error
 	ListAPIKeys(ctx context.Context, tenantID string) ([]domain.APIKey, error)
 	DeleteAPIKey(ctx context.Context, tenantID string, id string) error
+
+	// Smart Engine (GSLB) Support
+	UpdateRecordHealth(ctx context.Context, recordID string, status domain.HealthStatus, errMsg string) error
+	GetRecordsToProbe(ctx context.Context) ([]domain.Record, error)
 }
 
 // DNSService defines the interface for core DNS business logic.
@@ -48,6 +52,8 @@ type DNSService interface {
 	CreateZone(ctx context.Context, zone *domain.Zone) error
 	CreateRecord(ctx context.Context, record *domain.Record) error
 	Resolve(ctx context.Context, name string, qType domain.RecordType, clientIP string) ([]domain.Record, error)
+	GetRecordsToProbe(ctx context.Context) ([]domain.Record, error) // Added for Smart Engine
+	UpdateRecordHealth(ctx context.Context, recordID string, status domain.HealthStatus, errMsg string) error // Added for Smart Engine
 	ListZones(ctx context.Context, tenantID string) ([]domain.Zone, error)
 	ListRecordsForZone(ctx context.Context, zoneID string, tenantID string) ([]domain.Record, error)
 	DeleteZone(ctx context.Context, zoneID string, tenantID string) error

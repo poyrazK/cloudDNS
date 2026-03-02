@@ -148,6 +148,30 @@ func (m *mockServerRepo) CreateZoneWithRecords(ctx context.Context, zone *domain
 	return nil
 }
 
+func (m *mockServerRepo) UpdateRecordHealth(ctx context.Context, recordID string, status domain.HealthStatus, errMsg string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i, r := range m.records {
+		if r.ID == recordID {
+			m.records[i].HealthStatus = status
+			return nil
+		}
+	}
+	return nil
+}
+
+func (m *mockServerRepo) GetRecordsToProbe(ctx context.Context) ([]domain.Record, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var res []domain.Record
+	for _, r := range m.records {
+		if r.HealthCheckType != domain.HealthCheckNone {
+			res = append(res, r)
+		}
+	}
+	return res, nil
+}
+
 func (m *mockServerRepo) CreateRecord(ctx context.Context, record *domain.Record) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
