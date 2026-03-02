@@ -108,14 +108,21 @@ func (r *PostgresRepository) GetIPsForName(ctx context.Context, name string, cli
 }
 
 func (r *PostgresRepository) GetZone(ctx context.Context, name string) (*domain.Zone, error) {
-	query := `SELECT id, tenant_id, name, vpc_id, description, created_at, updated_at FROM dns_zones WHERE LOWER(name) = LOWER($1)`
+	query := `SELECT id, tenant_id, name, vpc_id, description, role, master_server, created_at, updated_at FROM dns_zones WHERE LOWER(name) = LOWER($1)`
 	var z domain.Zone
-	errRow := r.db.QueryRowContext(ctx, query, name).Scan(&z.ID, &z.TenantID, &z.Name, &z.VPCID, &z.Description, &z.CreatedAt, &z.UpdatedAt)
+	var role, masterServer sql.NullString
+	errRow := r.db.QueryRowContext(ctx, query, name).Scan(&z.ID, &z.TenantID, &z.Name, &z.VPCID, &z.Description, &role, &masterServer, &z.CreatedAt, &z.UpdatedAt)
 	if errors.Is(errRow, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if errRow != nil {
 		return nil, errRow
+	}
+	if role.Valid {
+		z.Role = role.String
+	}
+	if masterServer.Valid {
+		z.MasterServer = masterServer.String
 	}
 	return &z, nil
 }
@@ -192,9 +199,9 @@ func (r *PostgresRepository) ListRecordsForZone(ctx context.Context, zoneID stri
 }
 
 func (r *PostgresRepository) CreateZone(ctx context.Context, zone *domain.Zone) error {
-	query := `INSERT INTO dns_zones (id, tenant_id, name, vpc_id, description, created_at, updated_at) 
-			  VALUES ($1, $2, $3, $4, $5, $6, $7)`
-	_, err := r.db.ExecContext(ctx, query, zone.ID, zone.TenantID, zone.Name, zone.VPCID, zone.Description, zone.CreatedAt, zone.UpdatedAt)
+	query := `INSERT INTO dns_zones (id, tenant_id, name, vpc_id, description, role, master_server, created_at, updated_at) 
+			  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
+	_, err := r.db.ExecContext(ctx, query, zone.ID, zone.TenantID, zone.Name, zone.VPCID, zone.Description, zone.Role, zone.MasterServer, zone.CreatedAt, zone.UpdatedAt)
 	return err
 }
 
@@ -210,9 +217,9 @@ func (r *PostgresRepository) CreateZoneWithRecords(ctx context.Context, zone *do
 	}()
 
 	// 1. Insert Zone
-	zoneQuery := `INSERT INTO dns_zones (id, tenant_id, name, vpc_id, description, created_at, updated_at) 
-			      VALUES ($1, $2, $3, $4, $5, $6, $7)`
-	_, errExec := tx.ExecContext(ctx, zoneQuery, zone.ID, zone.TenantID, zone.Name, zone.VPCID, zone.Description, zone.CreatedAt, zone.UpdatedAt)
+	zoneQuery := `INSERT INTO dns_zones (id, tenant_id, name, vpc_id, description, role, master_server, created_at, updated_at) 
+			      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
+	_, errExec := tx.ExecContext(ctx, zoneQuery, zone.ID, zone.TenantID, zone.Name, zone.VPCID, zone.Description, zone.Role, zone.MasterServer, zone.CreatedAt, zone.UpdatedAt)
 	if errExec != nil {
 		return errExec
 	}
@@ -286,7 +293,7 @@ func (r *PostgresRepository) BatchCreateRecords(ctx context.Context, records []d
 }
 
 func (r *PostgresRepository) ListZones(ctx context.Context, tenantID string) ([]domain.Zone, error) {
-	query := `SELECT id, tenant_id, name, vpc_id, description, created_at, updated_at FROM dns_zones`
+	query := `SELECT id, tenant_id, name, vpc_id, description, role, master_server, created_at, updated_at FROM dns_zones`
 	var rows *sql.Rows
 	var errQuery error
 
@@ -309,8 +316,15 @@ func (r *PostgresRepository) ListZones(ctx context.Context, tenantID string) ([]
 	var zones []domain.Zone
 	for rows.Next() {
 		var z domain.Zone
-		if errScan := rows.Scan(&z.ID, &z.TenantID, &z.Name, &z.VPCID, &z.Description, &z.CreatedAt, &z.UpdatedAt); errScan != nil {
+		var role, masterServer sql.NullString
+		if errScan := rows.Scan(&z.ID, &z.TenantID, &z.Name, &z.VPCID, &z.Description, &role, &masterServer, &z.CreatedAt, &z.UpdatedAt); errScan != nil {
 			return nil, errScan
+		}
+		if role.Valid {
+			z.Role = role.String
+		}
+		if masterServer.Valid {
+			z.MasterServer = masterServer.String
 		}
 		zones = append(zones, z)
 	}
