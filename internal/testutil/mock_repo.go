@@ -159,6 +159,16 @@ func (m *MockRepo) DeleteAPIKey(ctx context.Context, tenantID string, id string)
 	return args.Error(0)
 }
 
+func (m *MockRepo) UpdateRecordHealth(ctx context.Context, recordID string, status domain.HealthStatus, errMsg string) error {
+	args := m.Called(ctx, recordID, status, errMsg)
+	return args.Error(0)
+}
+
+func (m *MockRepo) GetRecordsToProbe(ctx context.Context) ([]domain.Record, error) {
+	args := m.Called(ctx)
+	return args.Get(0).([]domain.Record), args.Error(1)
+}
+
 type MockDNSService struct {
 	mock.Mock
 }
@@ -176,6 +186,16 @@ func (m *MockDNSService) CreateRecord(ctx context.Context, record *domain.Record
 func (m *MockDNSService) Resolve(ctx context.Context, name string, qType domain.RecordType, clientIP string) ([]domain.Record, error) {
 	args := m.Called(name, qType, clientIP)
 	return args.Get(0).([]domain.Record), args.Error(1)
+}
+
+func (m *MockDNSService) GetRecordsToProbe(ctx context.Context) ([]domain.Record, error) {
+	args := m.Called()
+	return args.Get(0).([]domain.Record), args.Error(1)
+}
+
+func (m *MockDNSService) UpdateRecordHealth(ctx context.Context, recordID string, status domain.HealthStatus, errMsg string) error {
+	args := m.Called(recordID, status, errMsg)
+	return args.Error(0)
 }
 
 func (m *MockDNSService) ListZones(ctx context.Context, tenantID string) ([]domain.Zone, error) {
