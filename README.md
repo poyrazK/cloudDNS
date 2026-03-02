@@ -24,6 +24,7 @@ cloudDNS is a high-performance, authoritative, and recursive DNS server built fr
 *   **Health-Aware Routing**: Real-time route announcement and withdrawal based on service health.
 
 ### Advanced DNS Standards
+*   **Smart Engine (GSLB)**: Active health monitoring (HTTP/TCP) for endpoints with automated failover and fallback resolution.
 *   **Dynamic Updates (RFC 2136)**: Secure, atomic updates to zone records at runtime.
 *   **Incremental Zone Transfer (IXFR - RFC 1995)**: Efficient replication that transfers only changes, not the entire zone.
 *   **DNS NOTIFY (RFC 1996)**: Real-time notification to secondary servers upon zone changes.
