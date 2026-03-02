@@ -165,6 +165,10 @@ func run(ctx context.Context) error {
 	mux := http.NewServeMux()
 	apiHandler.RegisterRoutes(mux)
 
+	// 5. Start Health Monitor (Smart Engine)
+	healthMonitor := services.NewHealthMonitor(repo, logger)
+	go healthMonitor.Start(ctx, 30*time.Second)
+
 	logger.Info("cloudDNS services starting",
 		"dns_addr", dnsAddr,
 		"api_addr", apiAddr,
