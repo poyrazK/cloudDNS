@@ -48,7 +48,9 @@ func (s *Server) refreshZone(zone *domain.Zone) {
 		// Parse serial from SOA content
 		parts := strings.Fields(records[0].Content)
 		if len(parts) >= 3 {
-			fmt.Sscanf(parts[2], "%d", &localSerial)
+			if _, err := fmt.Sscanf(parts[2], "%d", &localSerial); err != nil {
+				s.Logger.Warn("failed to parse local SOA serial", "content", records[0].Content, "error", err)
+			}
 		}
 	}
 
@@ -73,7 +75,11 @@ func (s *Server) performAXFR(zone *domain.Zone, masterAddr string) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func() {
+		if errClose := conn.Close(); errClose != nil {
+			s.Logger.Warn("failed to close AXFR connection", "error", errClose)
+		}
+	}()
 
 	// Construct AXFR query
 	req := packet.NewDNSPacket()
