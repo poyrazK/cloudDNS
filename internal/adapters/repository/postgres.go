@@ -34,14 +34,17 @@ func (r *PostgresRepository) GetRecords(ctx context.Context, name string, qType 
 	// 2. The clientIP is within the record's network CIDR OR the network is NULL (global).
 	// In Postgres, '$2::inet <<= network' checks if the network CIDR contains the client IP.
 	// RFC 1034: Domain name comparisons must be case-insensitive.
-	query := `SELECT id, zone_id, name, type, content, ttl, priority, weight, port, network FROM dns_records 
-	          WHERE LOWER(name) = LOWER($1) AND (network IS NULL OR $2::inet <<= network)`
+	query := `SELECT r.id, r.zone_id, r.name, r.type, r.content, r.ttl, r.priority, r.weight, r.port, r.network, 
+	                 r.health_check_type, r.health_check_target, COALESCE(h.status, 'UNKNOWN')
+	          FROM dns_records r
+	          LEFT JOIN record_health h ON r.id = h.record_id
+	          WHERE LOWER(r.name) = LOWER($1) AND (r.network IS NULL OR $2::inet <<= r.network)`
 
 	var rows *sql.Rows
 	var errQuery error
 
 	if qType != "" {
-		query += " AND type = $3"
+		query += " AND r.type = $3"
 		rows, errQuery = r.db.QueryContext(ctx, query, name, clientIP, string(qType))
 	} else {
 		rows, errQuery = r.db.QueryContext(ctx, query, name, clientIP)
@@ -60,7 +63,8 @@ func (r *PostgresRepository) GetRecords(ctx context.Context, name string, qType 
 	for rows.Next() {
 		var rec domain.Record
 		var priority, weight, port sql.NullInt32
-		if errScan := rows.Scan(&rec.ID, &rec.ZoneID, &rec.Name, &rec.Type, &rec.Content, &rec.TTL, &priority, &weight, &port, &rec.Network); errScan != nil {
+		var hcType, hcTarget, hStatus sql.NullString
+		if errScan := rows.Scan(&rec.ID, &rec.ZoneID, &rec.Name, &rec.Type, &rec.Content, &rec.TTL, &priority, &weight, &port, &rec.Network, &hcType, &hcTarget, &hStatus); errScan != nil {
 			return nil, errScan
 		}
 		if priority.Valid {
@@ -74,6 +78,15 @@ func (r *PostgresRepository) GetRecords(ctx context.Context, name string, qType 
 		if port.Valid {
 			p := int(port.Int32)
 			rec.Port = &p
+		}
+		if hcType.Valid {
+			rec.HealthCheckType = domain.HealthCheckType(hcType.String)
+		}
+		if hcTarget.Valid {
+			rec.HealthCheckTarget = hcTarget.String
+		}
+		if hStatus.Valid {
+			rec.HealthStatus = domain.HealthStatus(hStatus.String)
 		}
 		records = append(records, rec)
 	}
@@ -122,13 +135,19 @@ func (r *PostgresRepository) GetZone(ctx context.Context, name string) (*domain.
 
 func (r *PostgresRepository) GetRecord(ctx context.Context, id string, zoneID string, tenantID string) (*domain.Record, error) {
 	query := `
-		SELECT r.id, r.zone_id, r.name, r.type, r.content, r.ttl, r.priority, r.weight, r.port, r.network 
+		SELECT r.id, r.zone_id, r.name, r.type, r.content, r.ttl, r.priority, r.weight, r.port, r.network,
+		       r.health_check_type, r.health_check_target, COALESCE(h.status, 'UNKNOWN')
 		FROM dns_records r
 		JOIN dns_zones z ON r.zone_id = z.id
+		LEFT JOIN record_health h ON r.id = h.record_id
 		WHERE r.id = $1 AND r.zone_id = $2 AND z.tenant_id = $3`
 	var rec domain.Record
 	var priority, weight, port sql.NullInt32
-	errRow := r.db.QueryRowContext(ctx, query, id, zoneID, tenantID).Scan(&rec.ID, &rec.ZoneID, &rec.Name, &rec.Type, &rec.Content, &rec.TTL, &priority, &weight, &port, &rec.Network)
+	var hcType, hcTarget, hStatus sql.NullString
+	errRow := r.db.QueryRowContext(ctx, query, id, zoneID, tenantID).Scan(
+		&rec.ID, &rec.ZoneID, &rec.Name, &rec.Type, &rec.Content, &rec.TTL, &priority, &weight, &port, &rec.Network,
+		&hcType, &hcTarget, &hStatus,
+	)
 	if errors.Is(errRow, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -147,15 +166,26 @@ func (r *PostgresRepository) GetRecord(ctx context.Context, id string, zoneID st
 		p := int(port.Int32)
 		rec.Port = &p
 	}
+	if hcType.Valid {
+		rec.HealthCheckType = domain.HealthCheckType(hcType.String)
+	}
+	if hcTarget.Valid {
+		rec.HealthCheckTarget = hcTarget.String
+	}
+	if hStatus.Valid {
+		rec.HealthStatus = domain.HealthStatus(hStatus.String)
+	}
 
 	return &rec, nil
 }
 
 func (r *PostgresRepository) ListRecordsForZone(ctx context.Context, zoneID string, tenantID string) ([]domain.Record, error) {
 	query := `
-		SELECT r.id, r.zone_id, r.name, r.type, r.content, r.ttl, r.priority, r.weight, r.port, r.network 
+		SELECT r.id, r.zone_id, r.name, r.type, r.content, r.ttl, r.priority, r.weight, r.port, r.network,
+		       r.health_check_type, r.health_check_target, COALESCE(h.status, 'UNKNOWN')
 		FROM dns_records r
 		JOIN dns_zones z ON r.zone_id = z.id
+		LEFT JOIN record_health h ON r.id = h.record_id
 		WHERE r.zone_id = $1 AND z.tenant_id = $2`
 	rows, errQuery := r.db.QueryContext(ctx, query, zoneID, tenantID)
 	if errQuery != nil {
@@ -171,7 +201,11 @@ func (r *PostgresRepository) ListRecordsForZone(ctx context.Context, zoneID stri
 	for rows.Next() {
 		var rec domain.Record
 		var priority, weight, port sql.NullInt32
-		if errScan := rows.Scan(&rec.ID, &rec.ZoneID, &rec.Name, &rec.Type, &rec.Content, &rec.TTL, &priority, &weight, &port, &rec.Network); errScan != nil {
+		var hcType, hcTarget, hStatus sql.NullString
+		if errScan := rows.Scan(
+			&rec.ID, &rec.ZoneID, &rec.Name, &rec.Type, &rec.Content, &rec.TTL, &priority, &weight, &port, &rec.Network,
+			&hcType, &hcTarget, &hStatus,
+		); errScan != nil {
 			return nil, errScan
 		}
 		if priority.Valid {
@@ -185,6 +219,15 @@ func (r *PostgresRepository) ListRecordsForZone(ctx context.Context, zoneID stri
 		if port.Valid {
 			p := int(port.Int32)
 			rec.Port = &p
+		}
+		if hcType.Valid {
+			rec.HealthCheckType = domain.HealthCheckType(hcType.String)
+		}
+		if hcTarget.Valid {
+			rec.HealthCheckTarget = hcTarget.String
+		}
+		if hStatus.Valid {
+			rec.HealthStatus = domain.HealthStatus(hStatus.String)
 		}
 		records = append(records, rec)
 	}
@@ -231,10 +274,54 @@ func (r *PostgresRepository) CreateZoneWithRecords(ctx context.Context, zone *do
 }
 
 func (r *PostgresRepository) CreateRecord(ctx context.Context, record *domain.Record) error {
-	query := `INSERT INTO dns_records (id, zone_id, name, type, content, ttl, priority, weight, port, network, created_at, updated_at) 
-			  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
-	_, err := r.db.ExecContext(ctx, query, record.ID, record.ZoneID, record.Name, record.Type, record.Content, record.TTL, record.Priority, record.Weight, record.Port, record.Network, record.CreatedAt, record.UpdatedAt)
+	query := `INSERT INTO dns_records (id, zone_id, name, type, content, ttl, priority, weight, port, network, health_check_type, health_check_target, created_at, updated_at) 
+			  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`
+	_, err := r.db.ExecContext(ctx, query, record.ID, record.ZoneID, record.Name, record.Type, record.Content, record.TTL, record.Priority, record.Weight, record.Port, record.Network, record.HealthCheckType, record.HealthCheckTarget, record.CreatedAt, record.UpdatedAt)
 	return err
+}
+
+func (r *PostgresRepository) UpdateRecordHealth(ctx context.Context, recordID string, status domain.HealthStatus, errMsg string) error {
+	query := `
+		INSERT INTO record_health (record_id, status, last_check, error_message)
+		VALUES ($1, $2, NOW(), $3)
+		ON CONFLICT (record_id) DO UPDATE 
+		SET status = EXCLUDED.status, last_check = EXCLUDED.last_check, error_message = EXCLUDED.error_message`
+	_, err := r.db.ExecContext(ctx, query, recordID, string(status), errMsg)
+	return err
+}
+
+func (r *PostgresRepository) GetRecordsToProbe(ctx context.Context) ([]domain.Record, error) {
+	query := `SELECT id, zone_id, name, type, content, ttl, priority, weight, port, network, health_check_type, health_check_target 
+	          FROM dns_records 
+	          WHERE health_check_type != 'NONE' AND health_check_type IS NOT NULL`
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var records []domain.Record
+	for rows.Next() {
+		var rec domain.Record
+		var priority, weight, port sql.NullInt32
+		if errScan := rows.Scan(&rec.ID, &rec.ZoneID, &rec.Name, &rec.Type, &rec.Content, &rec.TTL, &priority, &weight, &port, &rec.Network, &rec.HealthCheckType, &rec.HealthCheckTarget); errScan != nil {
+			return nil, errScan
+		}
+		if priority.Valid {
+			p := int(priority.Int32)
+			rec.Priority = &p
+		}
+		if weight.Valid {
+			w := int(weight.Int32)
+			rec.Weight = &w
+		}
+		if port.Valid {
+			p := int(port.Int32)
+			rec.Port = &p
+		}
+		records = append(records, rec)
+	}
+	return records, nil
 }
 
 func (r *PostgresRepository) BatchCreateRecords(ctx context.Context, records []domain.Record) error {
