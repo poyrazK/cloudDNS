@@ -19,6 +19,8 @@ CREATE TABLE IF NOT EXISTS dns_records (
     weight INTEGER,
     port INTEGER,
     network CIDR,
+    health_check_type TEXT DEFAULT 'NONE',
+    health_check_target TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -26,6 +28,15 @@ CREATE TABLE IF NOT EXISTS dns_records (
 -- Migration for existing tables
 ALTER TABLE dns_records ADD COLUMN IF NOT EXISTS weight INTEGER;
 ALTER TABLE dns_records ADD COLUMN IF NOT EXISTS port INTEGER;
+ALTER TABLE dns_records ADD COLUMN IF NOT EXISTS health_check_type TEXT DEFAULT 'NONE';
+ALTER TABLE dns_records ADD COLUMN IF NOT EXISTS health_check_target TEXT;
+
+CREATE TABLE IF NOT EXISTS record_health (
+    record_id UUID PRIMARY KEY REFERENCES dns_records(id) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'UNKNOWN',
+    last_check TIMESTAMPTZ,
+    error_message TEXT
+);
 
 CREATE TABLE IF NOT EXISTS audit_logs (
     id UUID PRIMARY KEY,
