@@ -342,7 +342,7 @@ func TestPostgresRepository_Unit(t *testing.T) {
 			t.Errorf("Expected Scan error in ListRecordsForZone")
 		}
 
-		mock.ExpectQuery(`SELECT content FROM dns_records .*`).WillReturnRows(sqlmock.NewRows([]string{"content"}).AddRow([]byte{0xff}))
+		mock.ExpectQuery(`SELECT content FROM dns_records .*`).WillReturnRows(sqlmock.NewRows([]string{"content"}).AddRow(time.Now()))
 		if _, err := repo.GetIPsForName(ctx, "test", ""); err == nil {
 			t.Errorf("Expected Scan error in GetIPsForName")
 		}
