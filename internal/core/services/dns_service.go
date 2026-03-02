@@ -119,8 +119,9 @@ func (s *dnsService) Resolve(ctx context.Context, name string, qType domain.Reco
 	if err != nil {
 		return nil, err
 	}
+
 	if len(records) > 0 {
-		return records, nil
+		return s.filterHealthy(records), nil
 	}
 
 	// 2. Wildcard Matching (*.domain.com)
@@ -139,11 +140,26 @@ func (s *dnsService) Resolve(ctx context.Context, name string, qType domain.Reco
 			for j := range wildcardRecords {
 				wildcardRecords[j].Name = name
 			}
-			return wildcardRecords, nil
+			return s.filterHealthy(wildcardRecords), nil
 		}
 	}
 
 	return nil, nil
+}
+
+func (s *dnsService) filterHealthy(records []domain.Record) []domain.Record {
+	var healthy []domain.Record
+	for _, rec := range records {
+		if rec.HealthStatus != domain.HealthStatusUnhealthy {
+			healthy = append(healthy, rec)
+		}
+	}
+
+	// Fallback: If ALL records are unhealthy, return all of them to avoid total blackout.
+	if len(healthy) == 0 {
+		return records
+	}
+	return healthy
 }
 
 func (s *dnsService) ListZones(ctx context.Context, tenantID string) ([]domain.Zone, error) {
@@ -219,6 +235,14 @@ func (s *dnsService) ImportZone(ctx context.Context, tenantID string, r io.Reade
 // ListAuditLogs retrieves audit trail entries for a specific tenant.
 func (s *dnsService) ListAuditLogs(ctx context.Context, tenantID string) ([]domain.AuditLog, error) {
 	return s.repo.GetAuditLogs(ctx, tenantID)
+}
+
+func (s *dnsService) GetRecordsToProbe(ctx context.Context) ([]domain.Record, error) {
+	return s.repo.GetRecordsToProbe(ctx)
+}
+
+func (s *dnsService) UpdateRecordHealth(ctx context.Context, recordID string, status domain.HealthStatus, errMsg string) error {
+	return s.repo.UpdateRecordHealth(ctx, recordID, status, errMsg)
 }
 
 func (s *dnsService) HealthCheck(ctx context.Context) map[string]error {
