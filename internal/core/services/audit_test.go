@@ -62,6 +62,14 @@ func (m *auditMockRepo) DeleteAPIKey(ctx context.Context, tenantID string, id st
 	return m.mockRepo.DeleteAPIKey(ctx, tenantID, id)
 }
 
+func (m *auditMockRepo) GetRecordsToProbe(ctx context.Context) ([]domain.Record, error) {
+	return m.mockRepo.GetRecordsToProbe(ctx)
+}
+
+func (m *auditMockRepo) UpdateRecordHealth(ctx context.Context, recordID string, status domain.HealthStatus, errMsg string) error {
+	return m.mockRepo.UpdateRecordHealth(ctx, recordID, status, errMsg)
+}
+
 func TestAuditLogCreation(t *testing.T) {
 	repo := &auditMockRepo{}
 	svc := NewDNSService(repo, nil)

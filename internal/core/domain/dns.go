@@ -1,4 +1,3 @@
-// Package domain contains the core business logic and entities for cloudDNS.
 package domain
 
 import (
@@ -29,6 +28,24 @@ const (
 	TypeSRV RecordType = "SRV"
 )
 
+// HealthCheckType represents the method used to verify endpoint health.
+type HealthCheckType string
+
+const (
+	HealthCheckNone HealthCheckType = "NONE"
+	HealthCheckHTTP HealthCheckType = "HTTP"
+	HealthCheckTCP  HealthCheckType = "TCP"
+)
+
+// HealthStatus represents the current health state of a record endpoint.
+type HealthStatus string
+
+const (
+	HealthStatusHealthy   HealthStatus = "HEALTHY"
+	HealthStatusUnhealthy HealthStatus = "UNHEALTHY"
+	HealthStatusUnknown   HealthStatus = "UNKNOWN"
+)
+
 // Zone represents a DNS zone.
 type Zone struct {
 	ID           string    `json:"id"`
@@ -57,6 +74,11 @@ type Record struct {
 	Network   *string    `json:"network,omitempty"`  // CIDR or Scope (e.g., "10.0.0.0/8" or "public")
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
+
+	// Smart Engine (GSLB) fields
+	HealthCheckType   HealthCheckType `json:"health_check_type,omitempty"`
+	HealthCheckTarget string          `json:"health_check_target,omitempty"`
+	HealthStatus      HealthStatus    `json:"health_status,omitempty"`
 }
 
 // ZoneChange represents a historical change to a DNS zone, used for IXFR and auditing.

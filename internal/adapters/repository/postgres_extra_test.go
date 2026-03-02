@@ -22,7 +22,7 @@ func TestPostgresRepository_GetRecord_Mock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create sqlmock: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	repo := NewPostgresRepository(db)
 	ctx := context.Background()
@@ -30,8 +30,8 @@ func TestPostgresRepository_GetRecord_Mock(t *testing.T) {
 	zoneID := uuid.New().String()
 
 	// 1. Success case
-	rows := sqlmock.NewRows([]string{"id", "zone_id", "name", "type", "content", "ttl", "priority", "weight", "port", "network"}).
-		AddRow(id, zoneID, "test.com.", "A", "1.1.1.1", 300, nil, nil, nil, nil)
+	rows := sqlmock.NewRows([]string{"id", "zone_id", "name", "type", "content", "ttl", "priority", "weight", "port", "network", "health_check_type", "health_check_target", "status"}).
+		AddRow(id, zoneID, "test.com.", "A", "1.1.1.1", 300, nil, nil, nil, nil, "NONE", nil, "UNKNOWN")
 	mock.ExpectQuery("SELECT .* FROM dns_records").WithArgs(id, zoneID, "").WillReturnRows(rows)
 
 	rec, err := repo.GetRecord(ctx, id, zoneID, "")

@@ -25,7 +25,7 @@ func TestPostgresRepository_Unit(t *testing.T) {
 		rows := sqlmock.NewRows([]string{"id", "zone_id", "name", "type", "content", "ttl", "priority", "weight", "port", "network"}).
 			AddRow("r1", "z1", "www.test.", "A", "1.2.3.4", 300, nil, nil, nil, nil)
 
-		mock.ExpectQuery(`SELECT (.+) FROM dns_records WHERE LOWER\(name\) = LOWER\(\$1\) AND \(network IS NULL OR \$2::inet <<= network\) AND type = \$3`).
+		mock.ExpectQuery(`SELECT .* FROM dns_records WHERE LOWER\(name\) = LOWER\(\$1\) AND \(network IS NULL OR \$2::inet <<= network\) AND type = \$3`).
 			WithArgs("www.test.", "8.8.8.8", "A").
 			WillReturnRows(rows)
 
@@ -43,7 +43,7 @@ func TestPostgresRepository_Unit(t *testing.T) {
 		rows := sqlmock.NewRows([]string{"id", "tenant_id", "name", "vpc_id", "description", "role", "master_server", "created_at", "updated_at"}).
 			AddRow("z1", "t1", "test.com.", "", "", "master", "", time.Now(), time.Now())
 
-		mock.ExpectQuery(`SELECT (.+) FROM dns_zones WHERE LOWER\(name\) = LOWER\(\$1\)`).
+		mock.ExpectQuery(`SELECT .* FROM dns_zones WHERE LOWER\(name\) = LOWER\(\$1\)`).
 			WithArgs("test.com.").
 			WillReturnRows(rows)
 
@@ -112,12 +112,12 @@ func TestPostgresRepository_Unit(t *testing.T) {
 		}
 	})
 
-	// 7. Test ListZones (with and without tenantID)
+	// 7. Test ListZones
 	t.Run("ListZones", func(t *testing.T) {
 		rows := sqlmock.NewRows([]string{"id", "tenant_id", "name", "vpc_id", "description", "role", "master_server", "created_at", "updated_at"}).
 			AddRow("z1", "t1", "test.com.", "", "", "master", "", time.Now(), time.Now())
 
-		mock.ExpectQuery(`SELECT (.+) FROM dns_zones WHERE tenant_id = \$1`).
+		mock.ExpectQuery(`SELECT .* FROM dns_zones WHERE tenant_id = \$1`).
 			WithArgs("t1").
 			WillReturnRows(rows)
 
@@ -126,7 +126,7 @@ func TestPostgresRepository_Unit(t *testing.T) {
 			t.Errorf("ListZones with tenant failed: %v", err)
 		}
 
-		mock.ExpectQuery(`SELECT (.+) FROM dns_zones`).
+		mock.ExpectQuery(`SELECT .* FROM dns_zones`).
 			WillReturnRows(sqlmock.NewRows([]string{"id", "tenant_id", "name", "vpc_id", "description", "role", "master_server", "created_at", "updated_at"}).
 				AddRow("z1", "t1", "test.com.", "", "", "master", "", time.Now(), time.Now()))
 
@@ -154,7 +154,7 @@ func TestPostgresRepository_Unit(t *testing.T) {
 		rows := sqlmock.NewRows([]string{"id", "zone_id", "serial", "action", "name", "type", "content", "ttl", "priority", "weight", "port", "created_at"}).
 			AddRow("c1", "z1", 1, "ADD", "test.", "A", "1.1.1.1", 60, nil, nil, nil, time.Now())
 
-		mock.ExpectQuery(`SELECT (.+) FROM dns_zone_changes WHERE zone_id = \$1 AND serial > \$2`).
+		mock.ExpectQuery(`SELECT .* FROM dns_zone_changes WHERE zone_id = \$1 AND serial > \$2`).
 			WithArgs("z1", 0).
 			WillReturnRows(rows)
 
@@ -175,7 +175,7 @@ func TestPostgresRepository_Unit(t *testing.T) {
 			t.Errorf("SaveAuditLog failed: %v", err)
 		}
 
-		mock.ExpectQuery(`SELECT (.+) FROM audit_logs WHERE tenant_id = \$1`).
+		mock.ExpectQuery(`SELECT .* FROM audit_logs WHERE tenant_id = \$1`).
 			WithArgs("t1").
 			WillReturnRows(sqlmock.NewRows([]string{"id", "tenant_id", "action", "resource_type", "resource_id", "details", "created_at"}).
 				AddRow("a1", "t1", "ACT", "RES", "rid", "det", time.Now()))
@@ -198,7 +198,7 @@ func TestPostgresRepository_Unit(t *testing.T) {
 			t.Errorf("CreateKey failed: %v", err)
 		}
 
-		mock.ExpectQuery(`SELECT (.+) FROM dnssec_keys WHERE zone_id = \$1`).
+		mock.ExpectQuery(`SELECT .* FROM dnssec_keys WHERE zone_id = \$1`).
 			WithArgs("z1").
 			WillReturnRows(sqlmock.NewRows([]string{"id", "zone_id", "key_type", "algorithm", "private_key", "public_key", "active", "created_at", "updated_at"}).
 				AddRow("k1", "z1", "ZSK", 13, []byte{}, []byte{}, true, time.Now(), time.Now()))
