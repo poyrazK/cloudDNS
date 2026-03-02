@@ -82,3 +82,17 @@ func ValidateSRVFields(priority, weight, port *int, target string) error {
 	}
 	return nil
 }
+
+// ValidateZoneRole checks if the role is valid and master_server is provided for slave zones.
+func ValidateZoneRole(role, masterServer string) error {
+	if role == "" {
+		return nil
+	}
+	if role != "master" && role != "slave" {
+		return fmt.Errorf("invalid zone role: must be master or slave")
+	}
+	if role == "slave" && masterServer == "" {
+		return fmt.Errorf("master server is required for slave zones")
+	}
+	return nil
+}

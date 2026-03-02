@@ -4,6 +4,8 @@ CREATE TABLE IF NOT EXISTS dns_zones (
     name TEXT NOT NULL,
     vpc_id UUID,
     description TEXT,
+    role TEXT DEFAULT 'master',
+    master_server TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -30,6 +32,9 @@ ALTER TABLE dns_records ADD COLUMN IF NOT EXISTS weight INTEGER;
 ALTER TABLE dns_records ADD COLUMN IF NOT EXISTS port INTEGER;
 ALTER TABLE dns_records ADD COLUMN IF NOT EXISTS health_check_type TEXT DEFAULT 'NONE';
 ALTER TABLE dns_records ADD COLUMN IF NOT EXISTS health_check_target TEXT;
+
+ALTER TABLE dns_zones ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'master';
+ALTER TABLE dns_zones ADD COLUMN IF NOT EXISTS master_server TEXT;
 
 CREATE TABLE IF NOT EXISTS record_health (
     record_id UUID PRIMARY KEY REFERENCES dns_records(id) ON DELETE CASCADE,
