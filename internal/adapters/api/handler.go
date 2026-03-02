@@ -120,6 +120,14 @@ func (h *APIHandler) CreateZone(w http.ResponseWriter, r *http.Request) {
 	}
 	zone.TenantID = tenantID
 
+	if err := domain.ValidateZoneRole(zone.Role, zone.MasterServer); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if zone.Role == "" {
+		zone.Role = "master"
+	}
+
 	if err := h.svc.CreateZone(r.Context(), &zone); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

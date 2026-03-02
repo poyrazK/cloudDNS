@@ -48,13 +48,15 @@ const (
 
 // Zone represents a DNS zone.
 type Zone struct {
-	ID          string    `json:"id"`
-	TenantID    string    `json:"tenant_id"`
-	Name        string    `json:"name"` // e.g., example.com.
-	VPCID       *string   `json:"vpc_id,omitempty"`
-	Description string    `json:"description"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID           string    `json:"id"`
+	TenantID     string    `json:"tenant_id"`
+	Name         string    `json:"name"` // e.g., example.com.
+	VPCID        *string   `json:"vpc_id,omitempty"`
+	Description  string    `json:"description"`
+	Role         string    `json:"role,omitempty"`          // "master" or "slave"
+	MasterServer string    `json:"master_server,omitempty"` // IP/hostname of master (for slaves)
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 // Record represents a DNS resource record within a zone.

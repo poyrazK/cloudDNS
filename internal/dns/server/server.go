@@ -884,10 +884,20 @@ func (s *Server) handleNotify(request *packet.DNSPacket, clientIP string, sendFn
 	response.Header.AuthoritativeAnswer = true
 	if len(request.Questions) > 0 {
 		response.Questions = append(response.Questions, request.Questions[0])
+		
+		// Trigger async refresh if it's a slave zone
+		go func(zoneName string) {
+			ctx := context.Background()
+			zone, err := s.Repo.GetZone(ctx, zoneName)
+			if err != nil {
+				s.Logger.Error("failed to fetch zone for notify refresh", "zone", zoneName, "error", err)
+				return
+			}
+			if zone != nil && zone.Role == "slave" {
+				s.refreshZone(zone)
+			}
+		}(request.Questions[0].Name)
 	}
-
-	// TODO: If we are a slave, trigger refresh/IXFR here.
-	// For now, we just acknowledge.
 
 	response.Header.ResCode = packet.RcodeNoError
 	return s.sendUpdateResponse(response, sendFn)
