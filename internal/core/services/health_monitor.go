@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
@@ -30,8 +31,13 @@ func NewHealthMonitor(repo ports.DNSRepository, logger *slog.Logger) *HealthMoni
 	}
 }
 
+const maxProbeWorkers = 10
+
 // Start runs the health monitoring loop at the specified interval until the context is cancelled.
 func (m *HealthMonitor) Start(ctx context.Context, interval time.Duration) {
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -55,9 +61,19 @@ func (m *HealthMonitor) runChecks(ctx context.Context) {
 		return
 	}
 
+	var wg sync.WaitGroup
+	semaphore := make(chan struct{}, maxProbeWorkers)
+
 	for _, rec := range records {
-		go m.probeRecord(ctx, rec)
+		wg.Add(1)
+		go func(r domain.Record) {
+			defer wg.Done()
+			semaphore <- struct{}{}        // Acquire
+			defer func() { <-semaphore }() // Release
+			m.probeRecord(ctx, r)
+		}(rec)
 	}
+	wg.Wait()
 }
 
 func (m *HealthMonitor) probeRecord(ctx context.Context, rec domain.Record) {

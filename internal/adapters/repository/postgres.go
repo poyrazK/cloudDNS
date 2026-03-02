@@ -91,6 +91,10 @@ func (r *PostgresRepository) GetRecords(ctx context.Context, name string, qType 
 		records = append(records, rec)
 	}
 
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
 	return records, nil
 }
 
@@ -117,6 +121,11 @@ func (r *PostgresRepository) GetIPsForName(ctx context.Context, name string, cli
 		}
 		ips = append(ips, ip)
 	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
 	return ips, nil
 }
 
@@ -231,6 +240,11 @@ func (r *PostgresRepository) ListRecordsForZone(ctx context.Context, zoneID stri
 		}
 		records = append(records, rec)
 	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
 	return records, nil
 }
 
@@ -274,9 +288,13 @@ func (r *PostgresRepository) CreateZoneWithRecords(ctx context.Context, zone *do
 }
 
 func (r *PostgresRepository) CreateRecord(ctx context.Context, record *domain.Record) error {
+	healthType := record.HealthCheckType
+	if healthType == "" {
+		healthType = domain.HealthCheckNone
+	}
 	query := `INSERT INTO dns_records (id, zone_id, name, type, content, ttl, priority, weight, port, network, health_check_type, health_check_target, created_at, updated_at) 
 			  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`
-	_, err := r.db.ExecContext(ctx, query, record.ID, record.ZoneID, record.Name, record.Type, record.Content, record.TTL, record.Priority, record.Weight, record.Port, record.Network, record.HealthCheckType, record.HealthCheckTarget, record.CreatedAt, record.UpdatedAt)
+	_, err := r.db.ExecContext(ctx, query, record.ID, record.ZoneID, record.Name, record.Type, record.Content, record.TTL, record.Priority, record.Weight, record.Port, record.Network, string(healthType), record.HealthCheckTarget, record.CreatedAt, record.UpdatedAt)
 	return err
 }
 
@@ -293,7 +311,8 @@ func (r *PostgresRepository) UpdateRecordHealth(ctx context.Context, recordID st
 func (r *PostgresRepository) GetRecordsToProbe(ctx context.Context) ([]domain.Record, error) {
 	query := `SELECT id, zone_id, name, type, content, ttl, priority, weight, port, network, health_check_type, health_check_target 
 	          FROM dns_records 
-	          WHERE health_check_type != 'NONE' AND health_check_type IS NOT NULL`
+	          WHERE health_check_type IN ('HTTP', 'TCP')
+	          AND health_check_target IS NOT NULL AND health_check_target <> ''`
 	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
@@ -325,6 +344,11 @@ func (r *PostgresRepository) GetRecordsToProbe(ctx context.Context) ([]domain.Re
 		}
 		records = append(records, rec)
 	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
 	return records, nil
 }
 
@@ -405,6 +429,11 @@ func (r *PostgresRepository) ListZones(ctx context.Context, tenantID string) ([]
 		}
 		zones = append(zones, z)
 	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
 	return zones, nil
 }
 
@@ -483,6 +512,11 @@ func (r *PostgresRepository) ListZoneChanges(ctx context.Context, zoneID string,
 		}
 		changes = append(changes, c)
 	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
 	return changes, nil
 }
 
@@ -513,6 +547,11 @@ func (r *PostgresRepository) GetAuditLogs(ctx context.Context, tenantID string) 
 		}
 		logs = append(logs, l)
 	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
 	return logs, nil
 }
 
@@ -547,6 +586,11 @@ func (r *PostgresRepository) ListKeysForZone(ctx context.Context, zoneID string)
 		}
 		keys = append(keys, k)
 	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
 	return keys, nil
 }
 
@@ -585,10 +629,9 @@ func (r *PostgresRepository) ListAPIKeys(ctx context.Context, tenantID string) (
 	if errQuery != nil {
 		return nil, errQuery
 	}
-	var retErr error
 	defer func() {
-		if cerr := rows.Close(); cerr != nil && retErr == nil {
-			retErr = cerr
+		if cerr := rows.Close(); cerr != nil {
+			log.Printf("failed to close rows: %v", cerr)
 		}
 	}()
 
@@ -600,10 +643,10 @@ func (r *PostgresRepository) ListAPIKeys(ctx context.Context, tenantID string) (
 		}
 		keys = append(keys, k)
 	}
-	if serr := rows.Err(); serr != nil && retErr == nil {
-		retErr = serr
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
-	return keys, retErr
+	return keys, nil
 }
 
 func (r *PostgresRepository) DeleteAPIKey(ctx context.Context, tenantID string, id string) error {

@@ -165,20 +165,22 @@ func run(ctx context.Context) error {
 	mux := http.NewServeMux()
 	apiHandler.RegisterRoutes(mux)
 
+	// For testing the full initialization path
+	if apiAddr == "test-exit" || dbURL == "none" {
+		return nil
+	}
+
 	// 5. Start Health Monitor (Smart Engine)
-	healthMonitor := services.NewHealthMonitor(repo, logger)
-	go healthMonitor.Start(ctx, 30*time.Second)
+	if repo != nil {
+		healthMonitor := services.NewHealthMonitor(repo, logger)
+		go healthMonitor.Start(ctx, 30*time.Second)
+	}
 
 	logger.Info("cloudDNS services starting",
 		"dns_addr", dnsAddr,
 		"api_addr", apiAddr,
 		"node_id", dnsServer.NodeID,
 	)
-
-	// For testing the full initialization path
-	if apiAddr == "test-exit" || dbURL == "none" {
-		return nil
-	}
 
 	s := &http.Server{
 		Addr:              apiAddr,

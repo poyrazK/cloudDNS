@@ -396,8 +396,12 @@ func TestResolve_SmartEngine(t *testing.T) {
 		{ID: "r1", Name: "fail.test.", Type: domain.TypeA, Content: "1.1.1.1", HealthStatus: domain.HealthStatusUnhealthy},
 		{ID: "r2", Name: "fail.test.", Type: domain.TypeA, Content: "2.2.2.2", HealthStatus: domain.HealthStatusUnhealthy},
 	}
-	recs, _ = svc.Resolve(context.Background(), "fail.test.", domain.TypeA, "8.8.8.8")
+	recs, err = svc.Resolve(context.Background(), "fail.test.", domain.TypeA, "8.8.8.8")
+	if err != nil {
+		t.Fatalf("Resolve failed in fallback: %v", err)
+	}
 	if len(recs) != 2 {
 		t.Errorf("Expected fallback to return all 2 records, got %d", len(recs))
 	}
-}
+	}
+

@@ -80,12 +80,25 @@ func TestHealthMonitor_RunChecks(t *testing.T) {
 		},
 	}
 
-	repo.On("GetRecordsToProbe", mock.Anything).Return(records, nil).Once()
-	repo.On("UpdateRecordHealth", mock.Anything, "r1", domain.HealthStatusHealthy, "").Return(nil).Once()
+	done := make(chan bool, 1)
 
-	// Run checks and wait briefly for goroutine to finish
+	repo.On("GetRecordsToProbe", mock.Anything).Return(records, nil).Once()
+	repo.On("UpdateRecordHealth", mock.Anything, "r1", domain.HealthStatusHealthy, "").
+		Return(nil).
+		Once().
+		Run(func(args mock.Arguments) {
+			done <- true
+		})
+
+	// Run checks and wait deterministically for the update to happen
 	m.runChecks(context.Background())
-	time.Sleep(100 * time.Millisecond)
+
+	select {
+	case <-done:
+		// Success
+	case <-time.After(2 * time.Second):
+		t.Fatal("Timed out waiting for UpdateRecordHealth to be called")
+	}
 
 	repo.AssertExpectations(t)
 }

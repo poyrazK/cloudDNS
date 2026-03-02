@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS dns_records (
     weight INTEGER,
     port INTEGER,
     network CIDR,
-    health_check_type TEXT DEFAULT 'NONE',
+    health_check_type TEXT DEFAULT 'NONE' CHECK (health_check_type IN ('NONE', 'HTTP', 'TCP')),
     health_check_target TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -33,7 +33,7 @@ ALTER TABLE dns_records ADD COLUMN IF NOT EXISTS health_check_target TEXT;
 
 CREATE TABLE IF NOT EXISTS record_health (
     record_id UUID PRIMARY KEY REFERENCES dns_records(id) ON DELETE CASCADE,
-    status TEXT NOT NULL DEFAULT 'UNKNOWN',
+    status TEXT NOT NULL DEFAULT 'UNKNOWN' CHECK (status IN ('HEALTHY', 'UNHEALTHY', 'UNKNOWN')),
     last_check TIMESTAMPTZ,
     error_message TEXT
 );

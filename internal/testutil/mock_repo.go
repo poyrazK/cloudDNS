@@ -166,6 +166,9 @@ func (m *MockRepo) UpdateRecordHealth(ctx context.Context, recordID string, stat
 
 func (m *MockRepo) GetRecordsToProbe(ctx context.Context) ([]domain.Record, error) {
 	args := m.Called(ctx)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
 	return args.Get(0).([]domain.Record), args.Error(1)
 }
 
@@ -190,6 +193,9 @@ func (m *MockDNSService) Resolve(ctx context.Context, name string, qType domain.
 
 func (m *MockDNSService) GetRecordsToProbe(ctx context.Context) ([]domain.Record, error) {
 	args := m.Called()
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
 	return args.Get(0).([]domain.Record), args.Error(1)
 }
 
