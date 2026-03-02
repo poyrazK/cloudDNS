@@ -40,8 +40,8 @@ func TestPostgresRepository_Unit(t *testing.T) {
 
 	// 2. Test GetZone
 	t.Run("GetZone", func(t *testing.T) {
-		rows := sqlmock.NewRows([]string{"id", "tenant_id", "name", "vpc_id", "description", "created_at", "updated_at"}).
-			AddRow("z1", "t1", "test.com.", "", "", time.Now(), time.Now())
+		rows := sqlmock.NewRows([]string{"id", "tenant_id", "name", "vpc_id", "description", "role", "master_server", "created_at", "updated_at"}).
+			AddRow("z1", "t1", "test.com.", "", "", "master", "", time.Now(), time.Now())
 
 		mock.ExpectQuery(`SELECT (.+) FROM dns_zones WHERE LOWER\(name\) = LOWER\(\$1\)`).
 			WithArgs("test.com.").
@@ -58,9 +58,9 @@ func TestPostgresRepository_Unit(t *testing.T) {
 
 	// 3. Test CreateZone
 	t.Run("CreateZone", func(t *testing.T) {
-		zone := &domain.Zone{ID: "z2", Name: "new.test.", TenantID: "t1"}
+		zone := &domain.Zone{ID: "z2", Name: "new.test.", TenantID: "t1", Role: "master"}
 		mock.ExpectExec(`INSERT INTO dns_zones`).
-			WithArgs(zone.ID, zone.TenantID, zone.Name, zone.VPCID, zone.Description, sqlmock.AnyArg(), sqlmock.AnyArg()).
+			WithArgs(zone.ID, zone.TenantID, zone.Name, zone.VPCID, zone.Description, zone.Role, zone.MasterServer, sqlmock.AnyArg(), sqlmock.AnyArg()).
 			WillReturnResult(sqlmock.NewResult(1, 1))
 
 		err := repo.CreateZone(ctx, zone)
@@ -114,8 +114,8 @@ func TestPostgresRepository_Unit(t *testing.T) {
 
 	// 7. Test ListZones (with and without tenantID)
 	t.Run("ListZones", func(t *testing.T) {
-		rows := sqlmock.NewRows([]string{"id", "tenant_id", "name", "vpc_id", "description", "created_at", "updated_at"}).
-			AddRow("z1", "t1", "test.com.", "", "", time.Now(), time.Now())
+		rows := sqlmock.NewRows([]string{"id", "tenant_id", "name", "vpc_id", "description", "role", "master_server", "created_at", "updated_at"}).
+			AddRow("z1", "t1", "test.com.", "", "", "master", "", time.Now(), time.Now())
 
 		mock.ExpectQuery(`SELECT (.+) FROM dns_zones WHERE tenant_id = \$1`).
 			WithArgs("t1").
@@ -127,8 +127,8 @@ func TestPostgresRepository_Unit(t *testing.T) {
 		}
 
 		mock.ExpectQuery(`SELECT (.+) FROM dns_zones`).
-			WillReturnRows(sqlmock.NewRows([]string{"id", "tenant_id", "name", "vpc_id", "description", "created_at", "updated_at"}).
-				AddRow("z1", "t1", "test.com.", "", "", time.Now(), time.Now()))
+			WillReturnRows(sqlmock.NewRows([]string{"id", "tenant_id", "name", "vpc_id", "description", "role", "master_server", "created_at", "updated_at"}).
+				AddRow("z1", "t1", "test.com.", "", "", "master", "", time.Now(), time.Now()))
 
 		zones, err = repo.ListZones(ctx, "")
 		if err != nil || len(zones) != 1 {
