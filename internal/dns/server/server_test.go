@@ -77,7 +77,7 @@ func (m *mockServerRepo) GetRecords(_ context.Context, name string, qType domain
 	qName := strings.TrimSuffix(strings.ToLower(name), ".")
 	for _, r := range m.records {
 		rName := strings.TrimSuffix(strings.ToLower(r.Name), ".")
-		if rName == qName && (qType == "" || strings.ToUpper(string(r.Type)) == strings.ToUpper(string(qType))) {
+		if rName == qName && (qType == "" || strings.EqualFold(string(r.Type), string(qType))) {
 			res = append(res, r)
 		}
 	}

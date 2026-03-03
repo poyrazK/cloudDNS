@@ -1268,37 +1268,6 @@ func (s *Server) sendSingleRecordResponse(conn net.Conn, id uint16, q packet.DNS
 	packet.PutBuffer(resBuffer)
 }
 
-func (s *Server) sendIXFRDiff(conn net.Conn, id uint16, soa packet.DNSRecord, deletions, additions []packet.DNSRecord) {
-	// 1. Send Old SOA + Deletions
-	resp := packet.NewDNSPacket()
-	resp.Header.ID = id
-	resp.Header.Response = true
-	resp.Answers = append(resp.Answers, soa)
-	resp.Answers = append(resp.Answers, deletions...)
-
-	resBuffer := packet.GetBuffer()
-	_ = resp.Write(resBuffer)
-	resData := resBuffer.Buf[:resBuffer.Position()]
-	fullLen1 := uint16(len(resData)) // #nosec G115
-	_, _ = conn.Write(append([]byte{byte(fullLen1 >> 8), byte(fullLen1 & 0xFF)}, resData...))
-	packet.PutBuffer(resBuffer)
-
-	// 2. Send New SOA + Additions
-	resp = packet.NewDNSPacket()
-	resp.Header.ID = id
-	resp.Header.Response = true
-	resp.Answers = append(resp.Answers, soa)
-	resp.Answers[0].Serial++
-	resp.Answers = append(resp.Answers, additions...)
-
-	resBuffer = packet.GetBuffer()
-	_ = resp.Write(resBuffer)
-	resData = resBuffer.Buf[:resBuffer.Position()]
-	fullLen2 := uint16(len(resData)) // #nosec G115
-	_, _ = conn.Write(append([]byte{byte(fullLen2 >> 8), byte(fullLen2 & 0xFF)}, resData...))
-	packet.PutBuffer(resBuffer)
-}
-
 func (s *Server) sendUpdateResponse(resp *packet.DNSPacket, sendFn func([]byte) error) error {
 	resBuffer := packet.GetBuffer()
 	defer packet.PutBuffer(resBuffer)

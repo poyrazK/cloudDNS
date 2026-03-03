@@ -61,7 +61,7 @@ func TestIXFR_Success(t *testing.T) {
 			go masterSrv.handleTCPConnection(conn)
 		}
 	}()
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 
 	// Setup Slave
 	slaveRepo := &mockServerRepo{}
@@ -141,7 +141,7 @@ func TestIXFR_FallbackToAXFR(t *testing.T) {
 			go masterSrv.handleTCPConnection(conn)
 		}
 	}()
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 
 	// Slave starts at Serial 1
 	slaveRepo := &mockServerRepo{}
