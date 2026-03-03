@@ -232,7 +232,6 @@ func (s *Server) performIXFR(zone *domain.Zone, masterAddr string, localSerial u
 
 	return nil
 }
-}
 
 func (s *Server) performAXFR(zone *domain.Zone, masterAddr string) error {
 	s.Logger.Info("starting AXFR", "zone", zone.Name, "master", masterAddr)
