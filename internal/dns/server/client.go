@@ -61,11 +61,173 @@ func (s *Server) refreshZone(zone *domain.Zone) {
 		return
 	}
 
-	// 3. Initiate transfer (Try IXFR, fall back to AXFR)
-	// For now, let's implement AXFR first as it's simpler and always works
+	// 3. Initiate transfer: Try IXFR first, then fall back to AXFR
+	if localSerial != 0 {
+		s.Logger.Info("attempting IXFR", "zone", zone.Name, "from", localSerial)
+		if err := s.performIXFR(zone, masterAddr, localSerial); err == nil {
+			s.Logger.Info("IXFR successful", "zone", zone.Name)
+			return
+		} else {
+			s.Logger.Warn("IXFR failed, falling back to AXFR", "zone", zone.Name, "error", err)
+		}
+	}
+
 	if err := s.performAXFR(zone, masterAddr); err != nil {
 		s.Logger.Error("AXFR failed", "zone", zone.Name, "error", err)
 	}
+}
+
+func (s *Server) performIXFR(zone *domain.Zone, masterAddr string, localSerial uint32) error {
+	conn, err := net.DialTimeout("tcp", masterAddr, 10*time.Second)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = conn.Close() }()
+
+	// Construct IXFR query
+	req := packet.NewDNSPacket()
+	req.Header.ID = generateTransactionID()
+	req.Questions = append(req.Questions, packet.DNSQuestion{
+		Name:   zone.Name,
+		QType:  packet.IXFR,
+		QClass: 1,
+	})
+
+	// Add client's current SOA to Authority section
+	localSOARecords, _ := s.Repo.GetRecords(context.Background(), zone.Name, domain.TypeSOA, "")
+	if len(localSOARecords) > 0 {
+		pSOA, _ := repository.ConvertDomainToPacketRecord(localSOARecords[0])
+		req.Authorities = append(req.Authorities, pSOA)
+	}
+
+	buffer := packet.NewBytePacketBuffer()
+	if err := req.Write(buffer); err != nil {
+		return err
+	}
+	data := buffer.Buf[:buffer.Position()]
+	prefix := []byte{byte(len(data) >> 8), byte(len(data) & 0xFF)}
+	if _, err := conn.Write(append(prefix, data...)); err != nil {
+		return err
+	}
+
+	// State machine for IXFR
+	var allRecords []packet.DNSRecord
+	first := true
+	isIncremental := false
+	soaCount := 0
+	var masterSerial uint32
+
+	for {
+		lenBuf := make([]byte, 2)
+		if _, err := io.ReadFull(conn, lenBuf); err != nil {
+			return err
+		}
+		pLen := int(lenBuf[0])<<8 | int(lenBuf[1])
+		pData := make([]byte, pLen)
+		if _, err := io.ReadFull(conn, pData); err != nil {
+			return err
+		}
+
+		resBuffer := packet.NewBytePacketBuffer()
+		resBuffer.Load(pData)
+		resp := packet.NewDNSPacket()
+		if err := resp.FromBuffer(resBuffer); err != nil {
+			return err
+		}
+
+		if resp.Header.ResCode != packet.RcodeNoError {
+			return fmt.Errorf("master returned error: %d", resp.Header.ResCode)
+		}
+
+		done := false
+		for _, ans := range resp.Answers {
+			if first {
+				if ans.Type != packet.SOA {
+					return fmt.Errorf("first record must be SOA")
+				}
+				masterSerial = ans.Serial
+				if ans.Serial <= localSerial {
+					return nil // Already up to date
+				}
+				first = false
+				// Initial Current SOA skipped for counting/allRecords
+				continue
+			}
+
+			if ans.Type == packet.SOA {
+				soaCount++
+				if soaCount == 1 {
+					// RFC 1995: The first record after the initial SOA MUST be the 
+					// version the client requested (localSerial) for it to be incremental.
+					// If it's anything else (like masterSerial again), it's AXFR fallback.
+					if ans.Serial == localSerial {
+						isIncremental = true
+					} else {
+						isIncremental = false
+					}
+				}
+				
+				// Termination check: 
+				// Incremental: ODD SOA count (>1) matching master serial marks end
+				if isIncremental && soaCount > 1 && soaCount%2 == 1 && ans.Serial == masterSerial {
+					done = true
+					break
+				}
+				// AXFR Fallback check: second SOA (soaCount == 1 since we skip first) marks end
+				if !isIncremental && soaCount >= 1 {
+					done = true
+					// Don't break yet, we might want to include this SOA if it's AXFR
+				}
+			}
+			allRecords = append(allRecords, ans)
+			if done {
+				break
+			}
+		}
+		if done {
+			break
+		}
+	}
+
+	ctx := context.Background()
+	if !isIncremental {
+		// AXFR Fallback
+		var newRecords []domain.Record
+		for _, r := range allRecords {
+			dRec, _ := repository.ConvertPacketRecordToDomain(r, zone.ID)
+			dRec.TenantID = zone.TenantID
+			newRecords = append(newRecords, dRec)
+		}
+		_ = s.Repo.DeleteRecordsForZone(ctx, zone.ID)
+		return s.Repo.BatchCreateRecords(ctx, newRecords)
+	}
+
+	// Incremental logic: Apply Deletions then Additions
+	// The sequence is [SOA(old), deleted..., SOA(new), added...]
+	deleting := false
+	for _, r := range allRecords {
+		dRec, _ := repository.ConvertPacketRecordToDomain(r, zone.ID)
+		if r.Type == packet.SOA {
+			deleting = !deleting
+			if !deleting {
+				// This is SOA(new), save it to update local serial
+				dRec.TenantID = zone.TenantID
+				_ = s.Repo.CreateRecord(ctx, &dRec)
+			} else {
+				// This is SOA(old), delete it
+				_ = s.Repo.DeleteRecordSpecific(ctx, zone.ID, dRec.Name, dRec.Type, dRec.Content)
+			}
+			continue
+		}
+		if deleting {
+			_ = s.Repo.DeleteRecordSpecific(ctx, zone.ID, dRec.Name, dRec.Type, dRec.Content)
+		} else {
+			dRec.TenantID = zone.TenantID
+			_ = s.Repo.CreateRecord(ctx, &dRec)
+		}
+	}
+
+	return nil
 }
 
 func (s *Server) performAXFR(zone *domain.Zone, masterAddr string) error {
@@ -156,9 +318,7 @@ func (s *Server) performAXFR(zone *domain.Zone, masterAddr string) error {
 
 	// Atomic-ish update: delete all and batch create
 	ctx := context.Background()
-	// We need a way to delete all records for a zone.
-	// I'll add DeleteRecordsForZone to the repository.
-	if err := s.Repo.DeleteRecordsByName(ctx, zone.ID, ""); err != nil {
+	if err := s.Repo.DeleteRecordsForZone(ctx, zone.ID); err != nil {
 		return fmt.Errorf("failed to clear old records: %w", err)
 	}
 
