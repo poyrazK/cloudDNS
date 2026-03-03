@@ -12,15 +12,15 @@ func TestDNSRecord_Read_WKS_Manual(t *testing.T) {
 	_ = buf.WriteRange(buf.Position(), []byte{127, 0, 0, 1, 6, 0x80})
 	curr := buf.Position()
 	_ = buf.Seek(start - 2)
-	_ = buf.Writeu16(uint16(curr - start))
+	_ = buf.Writeu16(uint16(uint32(curr - start)))
 	_ = buf.Seek(curr)
 	
 	// Prepend name, type, class, ttl
 	finalBuf := NewBytePacketBuffer()
 	_ = finalBuf.WriteName("wks.test.")
 	_ = finalBuf.Writeu16(uint16(WKS))
-	_ = finalBuf.Writeu16(1)
-	_ = finalBuf.Writeu32(300)
+	_ = finalBuf.Writeu16(uint16(1))
+	_ = finalBuf.Writeu32(uint32(300))
 	_ = finalBuf.WriteRange(finalBuf.Position(), buf.Buf[:buf.Position()])
 	
 	finalBuf.Len = finalBuf.Pos
@@ -43,8 +43,8 @@ func TestDNSRecord_Read_MINFO_Manual(t *testing.T) {
 	finalBuf := NewBytePacketBuffer()
 	_ = finalBuf.WriteName("minfo.test.")
 	_ = finalBuf.Writeu16(uint16(MINFO))
-	_ = finalBuf.Writeu16(1)
-	_ = finalBuf.Writeu32(300)
+	_ = finalBuf.Writeu16(uint16(1))
+	_ = finalBuf.Writeu32(uint32(300))
 	_ = finalBuf.Writeu16(uint16(len(data)))
 	_ = finalBuf.WriteRange(finalBuf.Position(), data)
 	
@@ -65,8 +65,8 @@ func TestDNSRecord_Read_DNSKEY_Manual(t *testing.T) {
 	finalBuf := NewBytePacketBuffer()
 	_ = finalBuf.WriteName("dnskey.test.")
 	_ = finalBuf.Writeu16(uint16(DNSKEY))
-	_ = finalBuf.Writeu16(1)
-	_ = finalBuf.Writeu32(300)
+	_ = finalBuf.Writeu16(uint16(1))
+	_ = finalBuf.Writeu32(uint32(300))
 	_ = finalBuf.Writeu16(uint16(len(data)))
 	_ = finalBuf.WriteRange(finalBuf.Position(), data)
 	
@@ -94,8 +94,8 @@ func TestDNSRecord_Read_RRSIG_Manual(t *testing.T) {
 	finalBuf := NewBytePacketBuffer()
 	_ = finalBuf.WriteName("rrsig.test.")
 	_ = finalBuf.Writeu16(uint16(RRSIG))
-	_ = finalBuf.Writeu16(1)
-	_ = finalBuf.Writeu32(300)
+	_ = finalBuf.Writeu16(uint16(1))
+	_ = finalBuf.Writeu32(uint32(300))
 	_ = finalBuf.Writeu16(uint16(len(payload)))
 	_ = finalBuf.WriteRange(finalBuf.Position(), payload)
 	
@@ -119,8 +119,8 @@ func TestDNSRecord_Read_NSEC_Manual(t *testing.T) {
 	finalBuf := NewBytePacketBuffer()
 	_ = finalBuf.WriteName("nsec.test.")
 	_ = finalBuf.Writeu16(uint16(NSEC))
-	_ = finalBuf.Writeu16(1)
-	_ = finalBuf.Writeu32(300)
+	_ = finalBuf.Writeu16(uint16(1))
+	_ = finalBuf.Writeu32(uint32(300))
 	_ = finalBuf.Writeu16(uint16(len(payload)))
 	_ = finalBuf.WriteRange(finalBuf.Position(), payload)
 	
@@ -142,8 +142,8 @@ func TestDNSRecord_Read_NSEC3_Manual(t *testing.T) {
 	finalBuf := NewBytePacketBuffer()
 	_ = finalBuf.WriteName("nsec3.test.")
 	_ = finalBuf.Writeu16(uint16(NSEC3))
-	_ = finalBuf.Writeu16(1)
-	_ = finalBuf.Writeu32(300)
+	_ = finalBuf.Writeu16(uint16(1))
+	_ = finalBuf.Writeu32(uint32(300))
 	_ = finalBuf.Writeu16(uint16(len(data)))
 	_ = finalBuf.WriteRange(finalBuf.Position(), data)
 	
@@ -164,8 +164,8 @@ func TestDNSRecord_Read_NSEC3PARAM_Manual(t *testing.T) {
 	finalBuf := NewBytePacketBuffer()
 	_ = finalBuf.WriteName("nsec3p.test.")
 	_ = finalBuf.Writeu16(uint16(NSEC3PARAM))
-	_ = finalBuf.Writeu16(1)
-	_ = finalBuf.Writeu32(300)
+	_ = finalBuf.Writeu16(uint16(1))
+	_ = finalBuf.Writeu32(uint32(300))
 	_ = finalBuf.Writeu16(uint16(len(data)))
 	_ = finalBuf.WriteRange(finalBuf.Position(), data)
 	
