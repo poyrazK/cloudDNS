@@ -1002,19 +1002,45 @@ func (s *Server) handleUpdate(request *packet.DNSPacket, rawData []byte, clientI
 	if len(changes) > 0 {
 		soaRecords, _ := s.Repo.GetRecords(ctx, dbZone.Name, domain.TypeSOA, "")
 		if len(soaRecords) > 0 {
-			soa := soaRecords[0]
-			parts := strings.Fields(soa.Content)
+			oldSOA := soaRecords[0]
+			parts := strings.Fields(oldSOA.Content)
 			if len(parts) >= 3 {
 				_, _ = fmt.Sscanf(parts[2], "%d", &newSerial)
+
+				// Log Old SOA as DELETE
+				changes = append([]domain.ZoneChange{{
+					ID:        fmt.Sprintf("%d-soa-old", time.Now().UnixNano()),
+					ZoneID:    dbZone.ID,
+					Action:    "DELETE",
+					Name:      oldSOA.Name,
+					Type:      domain.TypeSOA,
+					Content:   oldSOA.Content,
+					TTL:       oldSOA.TTL,
+					CreatedAt: time.Now(),
+				}}, changes...)
+
 				newSerial++
 				parts[2] = fmt.Sprintf("%d", newSerial)
-				soa.Content = strings.Join(parts, " ")
+				newSOAContent := strings.Join(parts, " ")
+				oldSOA.Content = newSOAContent
 
 				// Delete old SOA and create new one (simplified update)
-				_ = s.Repo.DeleteRecord(ctx, soa.ID, dbZone.ID, dbZone.TenantID)
-				_ = s.Repo.CreateRecord(ctx, &soa)
+				_ = s.Repo.DeleteRecord(ctx, oldSOA.ID, dbZone.ID, dbZone.TenantID)
+				_ = s.Repo.CreateRecord(ctx, &oldSOA)
 
-				// Persist changes with the new serial
+				// Log New SOA as ADD
+				changes = append(changes, domain.ZoneChange{
+					ID:        fmt.Sprintf("%d-soa-new", time.Now().UnixNano()),
+					ZoneID:    dbZone.ID,
+					Action:    "ADD",
+					Name:      oldSOA.Name,
+					Type:      domain.TypeSOA,
+					Content:   newSOAContent,
+					TTL:       oldSOA.TTL,
+					CreatedAt: time.Now(),
+				})
+
+				// Persist all changes with the new serial
 				for i := range changes {
 					changes[i].Serial = newSerial
 					_ = s.Repo.RecordZoneChange(ctx, &changes[i])
@@ -1076,63 +1102,83 @@ func (s *Server) handleIXFR(conn net.Conn, request *packet.DNSPacket) {
 		return
 	}
 
-	// Fetch changes since clientSerial
-	changes, errChanges := s.Repo.ListZoneChanges(ctx, zone.ID, clientSerial)
-	if errChanges != nil || len(changes) == 0 {
-		s.Logger.Info("IXFR history not found, falling back to AXFR", "zone", zone.Name, "client_serial", clientSerial)
-		s.handleAXFR(conn, request)
+	// Fetch changes since clientSerial using IXFR chain logic
+	chunks, err := s.Repo.GetIXFRChain(ctx, zone.ID, clientSerial, currentSerial)
+	
+	// RFC 1995: Verify history starts at the requested version.
+	// If the first chunk's serial is not clientSerial + 1, we have a gap.
+	historyValid := len(chunks) > 0 && chunks[0].Serial == clientSerial+1
+
+	if err != nil || !historyValid {
+		s.Logger.Info("IXFR history not found or gap detected, falling back to AXFR sequence", 
+			"zone", zone.Name, "client_serial", clientSerial)
+		
+		// RFC 1995: If IXFR is not possible, fall back to AXFR sequence.
+		// A sequence of [Current SOA, Full Zone Records, Current SOA] is interpreted as AXFR by the client.
+		
+		// 1. Send Current SOA (start)
+		pSOA, _ := repository.ConvertDomainToPacketRecord(currentSOA)
+		s.sendSingleRecordResponse(conn, request.Header.ID, q, pSOA)
+
+		// 2. Send all records in the zone
+		records, errList := s.Repo.ListRecordsForZone(ctx, zone.ID, zone.TenantID)
+		if errList == nil {
+			for _, rec := range records {
+				if rec.Type == domain.TypeSOA { continue } // skip SOA, we send it as bounds
+				pRec, errConv := repository.ConvertDomainToPacketRecord(rec)
+				if errConv == nil {
+					s.sendSingleRecordResponse(conn, request.Header.ID, q, pRec)
+				}
+			}
+		}
+
+		// 3. Send Current SOA (end)
+		s.sendSingleRecordResponse(conn, request.Header.ID, q, pSOA)
 		return
 	}
 
-	s.Logger.Info("IXFR starting", "zone", zone.Name, "from", clientSerial, "to", currentSerial)
+	s.Logger.Info("IXFR starting", "zone", zone.Name, "from", clientSerial, "to", currentSerial, "chunks", len(chunks))
 
 	// Send Current SOA (marks start of IXFR)
 	pCurrentSOA, _ := repository.ConvertDomainToPacketRecord(currentSOA)
 	s.sendSingleRecordResponse(conn, request.Header.ID, q, pCurrentSOA)
 
-	// Send diffs: [Old SOA, Deleted RRs, New SOA, Added RRs]
-	currentDiffSerial := clientSerial
-	var deletions, additions []packet.DNSRecord
+	// Send each chunk
+	for _, chunk := range chunks {
+		// 1. Send Old SOA (matches client's serial for first chunk, previous chunk's serial for others)
+		pOldSOA, _ := repository.ConvertDomainToPacketRecord(currentSOA) // copy base
+		pOldSOA.Serial = clientSerial
+		s.sendSingleRecordResponse(conn, request.Header.ID, q, pOldSOA)
 
-	for _, c := range changes {
-		if c.Serial > currentDiffSerial {
-			// We moved to a new version. If we have accumulated diffs, send them.
-			if len(deletions) > 0 || len(additions) > 0 {
-				tempSOA := pCurrentSOA
-				tempSOA.Serial = currentDiffSerial
-
-				s.sendIXFRDiff(conn, request.Header.ID, tempSOA, deletions, additions)
-				deletions = nil
-				additions = nil
+		// 2. Send Deletions
+		for _, rec := range chunk.Deleted {
+			if rec.Type == domain.TypeSOA {
+				continue
+			} // skip SOA, we sent it manually
+			pRec, errConv := repository.ConvertDomainToPacketRecord(rec)
+			if errConv == nil {
+				s.sendSingleRecordResponse(conn, request.Header.ID, q, pRec)
 			}
-			currentDiffSerial = c.Serial
 		}
 
-		var ttl uint32
-		// Explicit range check for G115
-		if c.TTL >= 0 && int64(c.TTL) <= math.MaxUint32 {
-			ttl = uint32(c.TTL) // #nosec G115
+		// 3. Send New SOA (chunk resulting serial)
+		pNewSOA, _ := repository.ConvertDomainToPacketRecord(currentSOA) // copy base
+		pNewSOA.Serial = chunk.Serial
+		s.sendSingleRecordResponse(conn, request.Header.ID, q, pNewSOA)
+
+		// 4. Send Additions
+		for _, rec := range chunk.Added {
+			if rec.Type == domain.TypeSOA {
+				continue
+			} // skip SOA, we sent it manually
+			pRec, errConv := repository.ConvertDomainToPacketRecord(rec)
+			if errConv == nil {
+				s.sendSingleRecordResponse(conn, request.Header.ID, q, pRec)
+			}
 		}
 
-		pRec := packet.DNSRecord{
-			Name:  c.Name,
-			Type:  packet.QueryType(master.RecordTypeToQueryType(c.Type)),
-			TTL:   ttl,
-			Class: 1,
-		}
-
-		if c.Action == "DELETE" {
-			deletions = append(deletions, pRec)
-		} else {
-			additions = append(additions, pRec)
-		}
-	}
-
-	// Send last diff if any
-	if len(deletions) > 0 || len(additions) > 0 {
-		tempSOA := pCurrentSOA
-		tempSOA.Serial = currentDiffSerial
-		s.sendIXFRDiff(conn, request.Header.ID, tempSOA, deletions, additions)
+		// For the next chunk, clientSerial is now this chunk's Serial
+		clientSerial = chunk.Serial
 	}
 
 	// Send Current SOA (marks end of IXFR)
