@@ -94,10 +94,12 @@ func (s *Server) performIXFR(zone *domain.Zone, masterAddr string, localSerial u
 	})
 
 	// Add client's current SOA to Authority section
-	localSOARecords, _ := s.Repo.GetRecords(context.Background(), zone.Name, domain.TypeSOA, "")
-	if len(localSOARecords) > 0 {
-		pSOA, _ := repository.ConvertDomainToPacketRecord(localSOARecords[0])
-		req.Authorities = append(req.Authorities, pSOA)
+	localSOARecords, err := s.Repo.GetRecords(context.Background(), zone.Name, domain.TypeSOA, "")
+	if err == nil && len(localSOARecords) > 0 {
+		pSOA, errConv := repository.ConvertDomainToPacketRecord(localSOARecords[0])
+		if errConv == nil {
+			req.Authorities = append(req.Authorities, pSOA)
+		}
 	}
 
 	buffer := packet.NewBytePacketBuffer()
@@ -157,17 +159,13 @@ func (s *Server) performIXFR(zone *domain.Zone, masterAddr string, localSerial u
 			if ans.Type == packet.SOA {
 				soaCount++
 				if soaCount == 1 {
-					// RFC 1995: The first record after the initial SOA MUST be the 
+					// RFC 1995: The first record after the initial SOA MUST be the
 					// version the client requested (localSerial) for it to be incremental.
 					// If it's anything else (like masterSerial again), it's AXFR fallback.
-					if ans.Serial == localSerial {
-						isIncremental = true
-					} else {
-						isIncremental = false
-					}
+					isIncremental = ans.Serial == localSerial
 				}
-				
-				// Termination check: 
+
+				// Termination check:
 				// Incremental: ODD SOA count (>1) matching master serial marks end
 				if isIncremental && soaCount > 1 && soaCount%2 == 1 && ans.Serial == masterSerial {
 					done = true
@@ -194,9 +192,11 @@ func (s *Server) performIXFR(zone *domain.Zone, masterAddr string, localSerial u
 		// AXFR Fallback
 		var newRecords []domain.Record
 		for _, r := range allRecords {
-			dRec, _ := repository.ConvertPacketRecordToDomain(r, zone.ID)
-			dRec.TenantID = zone.TenantID
-			newRecords = append(newRecords, dRec)
+			dRec, errConv := repository.ConvertPacketRecordToDomain(r, zone.ID)
+			if errConv == nil {
+				dRec.TenantID = zone.TenantID
+				newRecords = append(newRecords, dRec)
+			}
 		}
 		_ = s.Repo.DeleteRecordsForZone(ctx, zone.ID)
 		return s.Repo.BatchCreateRecords(ctx, newRecords)
@@ -206,7 +206,10 @@ func (s *Server) performIXFR(zone *domain.Zone, masterAddr string, localSerial u
 	// The sequence is [SOA(old), deleted..., SOA(new), added...]
 	deleting := false
 	for _, r := range allRecords {
-		dRec, _ := repository.ConvertPacketRecordToDomain(r, zone.ID)
+		dRec, errConv := repository.ConvertPacketRecordToDomain(r, zone.ID)
+		if errConv != nil {
+			continue
+		}
 		if r.Type == packet.SOA {
 			deleting = !deleting
 			if !deleting {
@@ -228,6 +231,7 @@ func (s *Server) performIXFR(zone *domain.Zone, masterAddr string, localSerial u
 	}
 
 	return nil
+}
 }
 
 func (s *Server) performAXFR(zone *domain.Zone, masterAddr string) error {
