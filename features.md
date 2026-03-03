@@ -30,7 +30,7 @@ Built-in orchestration for global Anycast networks using BGP.
 *   **DNSSEC**: Automated Key (KSK/ZSK) management, signing, and Double-Signature rollover.
 *   **DoH (DNS over HTTPS)**: Privacy-focused resolution over HTTP/2 using both `GET` and `POST`.
 *   **Dynamic Updates (RFC 2136)**: Standardized dynamic record management.
-*   **IXFR (Incremental Zone Transfer)**: Efficient synchronization between primary and secondary nodes.
+*   **IXFR (Incremental Zone Transfer)**: RFC 1995 compliant synchronization using transactional delta logging, with intelligent AXFR fallback.
 
 ## 6. Management & Security
 *   **Hexagonal Architecture**: Strict separation between core logic and infrastructure adapters.
