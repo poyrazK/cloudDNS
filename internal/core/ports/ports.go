@@ -24,9 +24,11 @@ type DNSRepository interface {
 	DeleteRecord(ctx context.Context, recordID string, zoneID string, tenantID string) error
 	DeleteRecordsByNameAndType(ctx context.Context, zoneID string, name string, qType domain.RecordType) error
 	DeleteRecordsByName(ctx context.Context, zoneID string, name string) error
+	DeleteRecordsForZone(ctx context.Context, zoneID string) error
 	DeleteRecordSpecific(ctx context.Context, zoneID string, name string, qType domain.RecordType, content string) error
 	RecordZoneChange(ctx context.Context, change *domain.ZoneChange) error
 	ListZoneChanges(ctx context.Context, zoneID string, fromSerial uint32) ([]domain.ZoneChange, error)
+	GetIXFRChain(ctx context.Context, zoneID string, fromSerial uint32, toSerial uint32) ([]domain.IXFRChunk, error)
 	SaveAuditLog(ctx context.Context, log *domain.AuditLog) error
 	GetAuditLogs(ctx context.Context, tenantID string) ([]domain.AuditLog, error)
 	Ping(ctx context.Context) error
