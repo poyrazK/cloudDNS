@@ -1103,7 +1103,7 @@ func (s *Server) handleIXFR(conn net.Conn, request *packet.DNSPacket) {
 		s.Logger.Info("IXFR client is up to date", "zone", zone.Name, "serial", clientSerial)
 		pSOA, err := repository.ConvertDomainToPacketRecord(currentSOA)
 		if err == nil {
-			_ = s.sendSingleRecordResponse(conn, request.Header.ID, q, pSOA)
+			s.sendSingleRecordResponse(conn, request.Header.ID, q, pSOA)
 		}
 		return
 	}
@@ -1125,7 +1125,7 @@ func (s *Server) handleIXFR(conn net.Conn, request *packet.DNSPacket) {
 		// 1. Send Current SOA (start)
 		pSOA, err := repository.ConvertDomainToPacketRecord(currentSOA)
 		if err == nil {
-			_ = s.sendSingleRecordResponse(conn, request.Header.ID, q, pSOA)
+			s.sendSingleRecordResponse(conn, request.Header.ID, q, pSOA)
 		}
 
 		// 2. Send all records in the zone
@@ -1137,14 +1137,14 @@ func (s *Server) handleIXFR(conn net.Conn, request *packet.DNSPacket) {
 				} // skip SOA, we send it as bounds
 				pRec, errConv := repository.ConvertDomainToPacketRecord(rec)
 				if errConv == nil {
-					_ = s.sendSingleRecordResponse(conn, request.Header.ID, q, pRec)
+					s.sendSingleRecordResponse(conn, request.Header.ID, q, pRec)
 				}
 			}
 		}
 
 		// 3. Send Current SOA (end)
-		if pSOA != nil {
-			_ = s.sendSingleRecordResponse(conn, request.Header.ID, q, pSOA)
+		if err == nil {
+			s.sendSingleRecordResponse(conn, request.Header.ID, q, pSOA)
 		}
 		return
 	}
@@ -1154,7 +1154,7 @@ func (s *Server) handleIXFR(conn net.Conn, request *packet.DNSPacket) {
 	// Send Current SOA (marks start of IXFR)
 	pCurrentSOA, err := repository.ConvertDomainToPacketRecord(currentSOA)
 	if err == nil {
-		_ = s.sendSingleRecordResponse(conn, request.Header.ID, q, pCurrentSOA)
+		s.sendSingleRecordResponse(conn, request.Header.ID, q, pCurrentSOA)
 	}
 
 	// Send each chunk
@@ -1163,7 +1163,7 @@ func (s *Server) handleIXFR(conn net.Conn, request *packet.DNSPacket) {
 		pOldSOA, err := repository.ConvertDomainToPacketRecord(currentSOA) // copy base
 		if err == nil {
 			pOldSOA.Serial = clientSerial
-			_ = s.sendSingleRecordResponse(conn, request.Header.ID, q, pOldSOA)
+			s.sendSingleRecordResponse(conn, request.Header.ID, q, pOldSOA)
 		}
 
 		// 2. Send Deletions
@@ -1173,7 +1173,7 @@ func (s *Server) handleIXFR(conn net.Conn, request *packet.DNSPacket) {
 			} // skip SOA, we sent it manually
 			pRec, errConv := repository.ConvertDomainToPacketRecord(rec)
 			if errConv == nil {
-				_ = s.sendSingleRecordResponse(conn, request.Header.ID, q, pRec)
+				s.sendSingleRecordResponse(conn, request.Header.ID, q, pRec)
 			}
 		}
 
@@ -1181,7 +1181,7 @@ func (s *Server) handleIXFR(conn net.Conn, request *packet.DNSPacket) {
 		pNewSOA, err := repository.ConvertDomainToPacketRecord(currentSOA) // copy base
 		if err == nil {
 			pNewSOA.Serial = chunk.Serial
-			_ = s.sendSingleRecordResponse(conn, request.Header.ID, q, pNewSOA)
+			s.sendSingleRecordResponse(conn, request.Header.ID, q, pNewSOA)
 		}
 
 		// 4. Send Additions
@@ -1191,7 +1191,7 @@ func (s *Server) handleIXFR(conn net.Conn, request *packet.DNSPacket) {
 			} // skip SOA, we sent it manually
 			pRec, errConv := repository.ConvertDomainToPacketRecord(rec)
 			if errConv == nil {
-				_ = s.sendSingleRecordResponse(conn, request.Header.ID, q, pRec)
+				s.sendSingleRecordResponse(conn, request.Header.ID, q, pRec)
 			}
 		}
 
@@ -1200,8 +1200,8 @@ func (s *Server) handleIXFR(conn net.Conn, request *packet.DNSPacket) {
 	}
 
 	// Send Current SOA (marks end of IXFR)
-	if pCurrentSOA != nil {
-		_ = s.sendSingleRecordResponse(conn, request.Header.ID, q, pCurrentSOA)
+	if err == nil {
+		s.sendSingleRecordResponse(conn, request.Header.ID, q, pCurrentSOA)
 	}
 	s.Logger.Info("IXFR completed", "zone", zone.Name)
 }
