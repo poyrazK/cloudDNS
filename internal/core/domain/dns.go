@@ -97,6 +97,15 @@ type ZoneChange struct {
 	CreatedAt time.Time  `json:"created_at"`
 }
 
+// IXFRChunk represents a single transactional update in an IXFR sequence.
+// It consists of the SOA before the change (Deleted) and the SOA after (Added),
+// along with the list of deleted and added records.
+type IXFRChunk struct {
+	Serial  uint32   `json:"serial"`
+	Deleted []Record `json:"deleted"`
+	Added   []Record `json:"added"`
+}
+
 // AuditLog records administrative actions performed on the DNS system.
 type AuditLog struct {
 	ID           string    `json:"id"`
