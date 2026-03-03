@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"sort"
 	"net"
 	"strings"
 	"time"
@@ -479,6 +480,12 @@ func (r *PostgresRepository) DeleteRecordsByName(ctx context.Context, zoneID str
 	return err
 }
 
+func (r *PostgresRepository) DeleteRecordsForZone(ctx context.Context, zoneID string) error {
+	query := `DELETE FROM dns_records WHERE zone_id = $1`
+	_, err := r.db.ExecContext(ctx, query, zoneID)
+	return err
+}
+
 func (r *PostgresRepository) DeleteRecordSpecific(ctx context.Context, zoneID string, name string, qType domain.RecordType, content string) error {
 	query := `DELETE FROM dns_records WHERE zone_id = $1 AND LOWER(name) = LOWER($2) AND type = $3 AND content = $4`
 	_, err := r.db.ExecContext(ctx, query, zoneID, name, string(qType), content)
@@ -532,6 +539,57 @@ func (r *PostgresRepository) ListZoneChanges(ctx context.Context, zoneID string,
 	}
 
 	return changes, nil
+}
+
+func (r *PostgresRepository) GetIXFRChain(ctx context.Context, zoneID string, fromSerial uint32, toSerial uint32) ([]domain.IXFRChunk, error) {
+	changes, err := r.ListZoneChanges(ctx, zoneID, fromSerial)
+	if err != nil {
+		return nil, err
+	}
+
+	// Group changes by serial
+	chunksMap := make(map[uint32]*domain.IXFRChunk)
+	var serials []uint32
+
+	for _, c := range changes {
+		if c.Serial > toSerial {
+			continue
+		}
+		chunk, ok := chunksMap[c.Serial]
+		if !ok {
+			chunk = &domain.IXFRChunk{Serial: c.Serial}
+			chunksMap[c.Serial] = chunk
+			serials = append(serials, c.Serial)
+		}
+
+		rec := domain.Record{
+			Name:     c.Name,
+			Type:     c.Type,
+			Content:  c.Content,
+			TTL:      c.TTL,
+			Priority: c.Priority,
+			Weight:   c.Weight,
+			Port:     c.Port,
+		}
+
+		if c.Action == "DELETE" {
+			chunk.Deleted = append(chunk.Deleted, rec)
+		} else {
+			chunk.Added = append(chunk.Added, rec)
+		}
+	}
+
+	// Sort serials to ensure order
+	sort.Slice(serials, func(i, j int) bool {
+		return serials[i] < serials[j]
+	})
+
+	var result []domain.IXFRChunk
+	for _, s := range serials {
+		result = append(result, *chunksMap[s])
+	}
+
+	return result, nil
 }
 
 func (r *PostgresRepository) SaveAuditLog(ctx context.Context, log *domain.AuditLog) error {
