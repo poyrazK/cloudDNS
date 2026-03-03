@@ -129,6 +129,10 @@ func (m *mockRepo) DeleteRecordsByName(_ context.Context, _, _ string) error {
 	return m.err
 }
 
+func (m *mockRepo) DeleteRecordsForZone(_ context.Context, _ string) error {
+	return m.err
+}
+
 func (m *mockRepo) DeleteRecordSpecific(_ context.Context, _, _ string, _ domain.RecordType, _ string) error {
 	return m.err
 }
@@ -138,6 +142,10 @@ func (m *mockRepo) RecordZoneChange(_ context.Context, _ *domain.ZoneChange) err
 }
 
 func (m *mockRepo) ListZoneChanges(_ context.Context, _ string, _ uint32) ([]domain.ZoneChange, error) {
+	return nil, m.err
+}
+
+func (m *mockRepo) GetIXFRChain(_ context.Context, _ string, _, _ uint32) ([]domain.IXFRChunk, error) {
 	return nil, m.err
 }
 
