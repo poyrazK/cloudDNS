@@ -8,7 +8,7 @@ import (
 
 func TestRunBench_Errors(t *testing.T) {
 	db, mock, _ := sqlmock.New()
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// 1. Fetch names error
 	mock.ExpectQuery("SELECT .* FROM dns_records").WillReturnError(sqlmock.ErrCancelled)
