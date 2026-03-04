@@ -95,11 +95,17 @@ func (s *Server) performIXFR(zone *domain.Zone, masterAddr string, localSerial u
 
 	// Add client's current SOA to Authority section
 	localSOARecords, err := s.Repo.GetRecords(context.Background(), zone.Name, domain.TypeSOA, "")
-	if err == nil && len(localSOARecords) > 0 {
+	if err != nil {
+		return fmt.Errorf("failed to fetch local SOA for IXFR: %w", err)
+	}
+	if len(localSOARecords) > 0 {
 		pSOA, errConv := repository.ConvertDomainToPacketRecord(localSOARecords[0])
-		if errConv == nil {
-			req.Authorities = append(req.Authorities, pSOA)
+		if errConv != nil {
+			return fmt.Errorf("failed to convert local SOA for IXFR: %w", errConv)
 		}
+		req.Authorities = append(req.Authorities, pSOA)
+	} else {
+		return fmt.Errorf("local SOA not found for zone %s", zone.Name)
 	}
 
 	buffer := packet.NewBytePacketBuffer()
@@ -172,7 +178,7 @@ func (s *Server) performIXFR(zone *domain.Zone, masterAddr string, localSerial u
 					break
 				}
 				// AXFR Fallback check: second SOA (soaCount == 1 since we skip first) marks end
-				if !isIncremental && soaCount >= 1 {
+				if !isIncremental && soaCount == 1 {
 					done = true
 					// Don't break yet, we might want to include this SOA if it's AXFR
 				}
@@ -193,13 +199,20 @@ func (s *Server) performIXFR(zone *domain.Zone, masterAddr string, localSerial u
 		var newRecords []domain.Record
 		for _, r := range allRecords {
 			dRec, errConv := repository.ConvertPacketRecordToDomain(r, zone.ID)
-			if errConv == nil {
-				dRec.TenantID = zone.TenantID
-				newRecords = append(newRecords, dRec)
+			if errConv != nil {
+				s.Logger.Warn("failed to convert packet record in AXFR fallback", "error", errConv)
+				continue
 			}
+			dRec.TenantID = zone.TenantID
+			newRecords = append(newRecords, dRec)
 		}
-		_ = s.Repo.DeleteRecordsForZone(ctx, zone.ID)
-		return s.Repo.BatchCreateRecords(ctx, newRecords)
+		if err := s.Repo.DeleteRecordsForZone(ctx, zone.ID); err != nil {
+			return fmt.Errorf("AXFR fallback failed to clear zone: %w", err)
+		}
+		if err := s.Repo.BatchCreateRecords(ctx, newRecords); err != nil {
+			return fmt.Errorf("AXFR fallback failed to import records: %w", err)
+		}
+		return nil
 	}
 
 	// Incremental logic: Apply Deletions then Additions
@@ -208,25 +221,34 @@ func (s *Server) performIXFR(zone *domain.Zone, masterAddr string, localSerial u
 	for _, r := range allRecords {
 		dRec, errConv := repository.ConvertPacketRecordToDomain(r, zone.ID)
 		if errConv != nil {
-			continue
+			s.Logger.Warn("failed to convert record in IXFR delta", "error", errConv)
+			return errConv
 		}
 		if r.Type == packet.SOA {
 			deleting = !deleting
 			if !deleting {
 				// This is SOA(new), save it to update local serial
 				dRec.TenantID = zone.TenantID
-				_ = s.Repo.CreateRecord(ctx, &dRec)
+				if err := s.Repo.CreateRecord(ctx, &dRec); err != nil {
+					return fmt.Errorf("IXFR failed to save new SOA: %w", err)
+				}
 			} else {
 				// This is SOA(old), delete it
-				_ = s.Repo.DeleteRecordSpecific(ctx, zone.ID, dRec.Name, dRec.Type, dRec.Content)
+				if err := s.Repo.DeleteRecordSpecific(ctx, zone.ID, dRec.Name, dRec.Type, dRec.Content); err != nil {
+					return fmt.Errorf("IXFR failed to delete old SOA: %w", err)
+				}
 			}
 			continue
 		}
 		if deleting {
-			_ = s.Repo.DeleteRecordSpecific(ctx, zone.ID, dRec.Name, dRec.Type, dRec.Content)
+			if err := s.Repo.DeleteRecordSpecific(ctx, zone.ID, dRec.Name, dRec.Type, dRec.Content); err != nil {
+				return fmt.Errorf("IXFR failed to delete record: %w", err)
+			}
 		} else {
 			dRec.TenantID = zone.TenantID
-			_ = s.Repo.CreateRecord(ctx, &dRec)
+			if err := s.Repo.CreateRecord(ctx, &dRec); err != nil {
+				return fmt.Errorf("IXFR failed to create record: %w", err)
+			}
 		}
 	}
 

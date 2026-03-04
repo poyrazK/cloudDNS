@@ -542,6 +542,10 @@ func (r *PostgresRepository) ListZoneChanges(ctx context.Context, zoneID string,
 }
 
 func (r *PostgresRepository) GetIXFRChain(ctx context.Context, zoneID string, fromSerial uint32, toSerial uint32) ([]domain.IXFRChunk, error) {
+	if fromSerial >= toSerial {
+		return nil, nil // No changes needed
+	}
+
 	changes, err := r.ListZoneChanges(ctx, zoneID, fromSerial)
 	if err != nil {
 		return nil, err
@@ -584,7 +588,7 @@ func (r *PostgresRepository) GetIXFRChain(ctx context.Context, zoneID string, fr
 		return serials[i] < serials[j]
 	})
 
-	var result []domain.IXFRChunk
+	result := make([]domain.IXFRChunk, 0, len(serials))
 	for _, s := range serials {
 		result = append(result, *chunksMap[s])
 	}

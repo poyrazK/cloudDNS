@@ -1000,52 +1000,73 @@ func (s *Server) handleUpdate(request *packet.DNSPacket, rawData []byte, clientI
 
 	// 4. Increment Serial if changes occurred
 	if len(changes) > 0 {
-		soaRecords, _ := s.Repo.GetRecords(ctx, dbZone.Name, domain.TypeSOA, "")
-		if len(soaRecords) > 0 {
+		soaRecords, err := s.Repo.GetRecords(ctx, dbZone.Name, domain.TypeSOA, "")
+		if err == nil && len(soaRecords) > 0 {
 			oldSOA := soaRecords[0]
 			parts := strings.Fields(oldSOA.Content)
 			if len(parts) >= 3 {
-				_, _ = fmt.Sscanf(parts[2], "%d", &newSerial)
+				if _, errParse := fmt.Sscanf(parts[2], "%d", &newSerial); errParse == nil {
+					// Log Old SOA as DELETE using original values
+					changes = append([]domain.ZoneChange{{
+						ID:        fmt.Sprintf("%d-soa-old", time.Now().UnixNano()),
+						ZoneID:    dbZone.ID,
+						Action:    "DELETE",
+						Name:      oldSOA.Name,
+						Type:      domain.TypeSOA,
+						Content:   oldSOA.Content,
+						TTL:       oldSOA.TTL,
+						CreatedAt: time.Now(),
+					}}, changes...)
 
-				// Log Old SOA as DELETE
-				changes = append([]domain.ZoneChange{{
-					ID:        fmt.Sprintf("%d-soa-old", time.Now().UnixNano()),
-					ZoneID:    dbZone.ID,
-					Action:    "DELETE",
-					Name:      oldSOA.Name,
-					Type:      domain.TypeSOA,
-					Content:   oldSOA.Content,
-					TTL:       oldSOA.TTL,
-					CreatedAt: time.Now(),
-				}}, changes...)
+					newSerial++
+					parts[2] = fmt.Sprintf("%d", newSerial)
+					newSOAContent := strings.Join(parts, " ")
+					updatedSOA := oldSOA
+					updatedSOA.Content = newSOAContent
 
-				newSerial++
-				parts[2] = fmt.Sprintf("%d", newSerial)
-				newSOAContent := strings.Join(parts, " ")
-				oldSOA.Content = newSOAContent
+					// Delete old SOA and create new one
+					if errDel := s.Repo.DeleteRecord(ctx, oldSOA.ID, dbZone.ID, dbZone.TenantID); errDel == nil {
+						if errCreate := s.Repo.CreateRecord(ctx, &updatedSOA); errCreate == nil {
+							// Log New SOA as ADD
+							changes = append(changes, domain.ZoneChange{
+								ID:        fmt.Sprintf("%d-soa-new", time.Now().UnixNano()),
+								ZoneID:    dbZone.ID,
+								Action:    "ADD",
+								Name:      updatedSOA.Name,
+								Type:      domain.TypeSOA,
+								Content:   newSOAContent,
+								TTL:       updatedSOA.TTL,
+								CreatedAt: time.Now(),
+							})
 
-				// Delete old SOA and create new one (simplified update)
-				_ = s.Repo.DeleteRecord(ctx, oldSOA.ID, dbZone.ID, dbZone.TenantID)
-				_ = s.Repo.CreateRecord(ctx, &oldSOA)
+							// Persist all changes with the new serial
+							persistSuccess := true
+							for i := range changes {
+								changes[i].Serial = newSerial
+								if errRecord := s.Repo.RecordZoneChange(ctx, &changes[i]); errRecord != nil {
+									s.Logger.Error("failed to record zone change", "zone", dbZone.Name, "error", errRecord)
+									persistSuccess = false
+									break
+								}
+							}
 
-				// Log New SOA as ADD
-				changes = append(changes, domain.ZoneChange{
-					ID:        fmt.Sprintf("%d-soa-new", time.Now().UnixNano()),
-					ZoneID:    dbZone.ID,
-					Action:    "ADD",
-					Name:      oldSOA.Name,
-					Type:      domain.TypeSOA,
-					Content:   newSOAContent,
-					TTL:       oldSOA.TTL,
-					CreatedAt: time.Now(),
-				})
-
-				// Persist all changes with the new serial
-				for i := range changes {
-					changes[i].Serial = newSerial
-					_ = s.Repo.RecordZoneChange(ctx, &changes[i])
+							if persistSuccess {
+								s.Logger.Info("dynamic update successful", "zone", zone.Name, "new_serial", newSerial)
+								s.Cache.Flush()
+								go s.notifySlaves(zone.Name)
+							}
+						} else {
+							s.Logger.Error("failed to create new SOA during update", "zone", dbZone.Name, "error", errCreate)
+						}
+					} else {
+						s.Logger.Error("failed to delete old SOA during update", "zone", dbZone.Name, "error", errDel)
+					}
+				} else {
+					s.Logger.Error("failed to parse SOA serial during update", "zone", dbZone.Name, "error", errParse)
 				}
 			}
+		} else if err != nil {
+			s.Logger.Error("failed to fetch SOA for update", "zone", dbZone.Name, "error", err)
 		}
 	}
 

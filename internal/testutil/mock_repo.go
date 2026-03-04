@@ -113,6 +113,9 @@ func (m *MockRepo) ListZoneChanges(ctx context.Context, zoneID string, fromSeria
 
 func (m *MockRepo) GetIXFRChain(ctx context.Context, zoneID string, fromSerial uint32, toSerial uint32) ([]domain.IXFRChunk, error) {
 	args := m.Called(zoneID, fromSerial, toSerial)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
 	return args.Get(0).([]domain.IXFRChunk), args.Error(1)
 }
 

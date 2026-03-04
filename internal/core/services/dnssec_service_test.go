@@ -44,7 +44,7 @@ func (m *mockDNSSECRepo) DeleteRecordsByNameAndType(_ context.Context, _, _ stri
 	return nil
 }
 func (m *mockDNSSECRepo) DeleteRecordsByName(_ context.Context, _, _ string) error { return nil }
-func (m *mockDNSSECRepo) DeleteRecordsForZone(_ context.Context, _ string) error { return nil }
+func (m *mockDNSSECRepo) DeleteRecordsForZone(_ context.Context, _ string) error { return m.err }
 func (m *mockDNSSECRepo) DeleteRecordSpecific(_ context.Context, _, _ string, _ domain.RecordType, _ string) error {
 	return nil
 }

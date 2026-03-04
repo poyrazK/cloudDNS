@@ -24,7 +24,7 @@ We have implemented Incremental Zone Transfer (IXFR - RFC 1995) to allow CloudDN
     *   It streams the data in the standardized IXFR format: `[Current SOA, (Old SOA, Deltas, New SOA)*, Current SOA]`.
 
 4.  **Intelligent AXFR Fallback**:
-    *   If requested history is missing (gap detection) or the cumulative size of deltas exceeds the zone size, the Master automatically switches to an AXFR sequence within the IXFR stream (`[Current SOA, Full Zone, Current SOA]`).
+    *   If requested history is missing or a gap is detected in the change log, the Master automatically switches to an AXFR sequence within the IXFR stream (`[Current SOA, Full Zone, Current SOA]`).
     *   This ensures the Slave can always synchronize, even if it has been offline for a period exceeding the Master's log retention.
 
 5.  **Robust Slave State Machine**:

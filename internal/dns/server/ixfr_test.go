@@ -11,6 +11,29 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func startMasterListener(t *testing.T, srv *Server) (string, func()) {
+	t.Helper()
+	lc := net.ListenConfig{}
+	listener, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	addr := listener.Addr().String()
+
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go srv.handleTCPConnection(conn)
+		}
+	}()
+
+	cleanup := func() {
+		_ = listener.Close()
+	}
+	return addr, cleanup
+}
+
 func TestIXFR_Success(t *testing.T) {
 	// Setup Master Repo with history
 	masterRepo := &mockServerRepo{}
@@ -46,22 +69,8 @@ func TestIXFR_Success(t *testing.T) {
 	masterRepo.records[1].Content = "2.2.2.2"
 
 	masterSrv := NewServer("127.0.0.1:0", masterRepo, nil)
-	
-	// Start Master TCP Listener
-	lc := net.ListenConfig{}
-	listener, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	masterAddr := listener.Addr().String()
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				return
-			}
-			go masterSrv.handleTCPConnection(conn)
-		}
-	}()
-	defer func() { _ = listener.Close() }()
+	masterAddr, cleanup := startMasterListener(t, masterSrv)
+	defer cleanup()
 
 	// Setup Slave
 	slaveRepo := &mockServerRepo{}
@@ -76,23 +85,18 @@ func TestIXFR_Success(t *testing.T) {
 
 	slaveSrv := NewServer("127.0.0.1:0", slaveRepo, nil)
 	// Trigger Refresh on Slave
-	err = slaveSrv.performIXFR(&slaveRepo.zones[0], masterAddr, 1)
+	err := slaveSrv.performIXFR(&slaveRepo.zones[0], masterAddr, 1)
 	assert.NoError(t, err)
 
 	// Verify Slave State
 	// It should now have 2.2.2.2 and Serial 2
-	// Debugging: If Slave has 4, print them.
-	if len(slaveRepo.records) != 2 {
-		for _, r := range slaveRepo.records {
-			t.Logf("Slave Record: %s %s %s", r.Name, r.Type, r.Content)
-		}
-	}
 	assert.Equal(t, 2, len(slaveRepo.records))
 	
 	var soaFound, aFound bool
 	for _, r := range slaveRepo.records {
 		if r.Type == domain.TypeSOA {
-			if strings.Contains(r.Content, " 2 ") {
+			fields := strings.Fields(r.Content)
+			if len(fields) >= 3 && fields[2] == "2" {
 				soaFound = true
 			}
 		}
@@ -127,21 +131,8 @@ func TestIXFR_FallbackToAXFR(t *testing.T) {
 	})
 
 	masterSrv := NewServer("127.0.0.1:0", masterRepo, nil)
-	
-	lc := net.ListenConfig{}
-	listener, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	masterAddr := listener.Addr().String()
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				return
-			}
-			go masterSrv.handleTCPConnection(conn)
-		}
-	}()
-	defer func() { _ = listener.Close() }()
+	masterAddr, cleanup := startMasterListener(t, masterSrv)
+	defer cleanup()
 
 	// Slave starts at Serial 1
 	slaveRepo := &mockServerRepo{}
@@ -152,15 +143,10 @@ func TestIXFR_FallbackToAXFR(t *testing.T) {
 	slaveSrv := NewServer("127.0.0.1:0", slaveRepo, nil)
 
 	// Trigger IXFR from Serial 1 -> Master only has history from 5. Should fallback.
-	err = slaveSrv.performIXFR(&domain.Zone{ID: zoneID, Name: zoneName, TenantID: "t1"}, masterAddr, 1)
+	err := slaveSrv.performIXFR(&domain.Zone{ID: zoneID, Name: zoneName, TenantID: "t1"}, masterAddr, 1)
 	assert.NoError(t, err)
 
 	// Verify Slave State matches Master's Full State
-	if len(slaveRepo.records) != 2 {
-		for _, r := range slaveRepo.records {
-			t.Logf("Slave Record (AXFR Fallback): %s %s %s", r.Name, r.Type, r.Content)
-		}
-	}
 	assert.Equal(t, 2, len(slaveRepo.records))
 	foundWWW := false
 	for _, r := range slaveRepo.records {
