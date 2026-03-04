@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -76,7 +77,7 @@ func (m *mockServerRepo) GetRecords(_ context.Context, name string, qType domain
 	qName := strings.TrimSuffix(strings.ToLower(name), ".")
 	for _, r := range m.records {
 		rName := strings.TrimSuffix(strings.ToLower(r.Name), ".")
-		if rName == qName && (qType == "" || r.Type == qType) {
+		if rName == qName && (qType == "" || strings.EqualFold(string(r.Type), string(qType))) {
 			res = append(res, r)
 		}
 	}
@@ -175,6 +176,17 @@ func (m *mockServerRepo) GetRecordsToProbe(ctx context.Context) ([]domain.Record
 func (m *mockServerRepo) CreateRecord(ctx context.Context, record *domain.Record) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if record.Type == domain.TypeSOA {
+		// Replace existing SOA for the zone
+		var next []domain.Record
+		for _, r := range m.records {
+			if r.ZoneID == record.ZoneID && r.Type == domain.TypeSOA {
+				continue
+			}
+			next = append(next, r)
+		}
+		m.records = next
+	}
 	m.records = append(m.records, *record)
 	return nil
 }
@@ -240,6 +252,7 @@ func (m *mockServerRepo) DeleteRecord(ctx context.Context, recordID string, zone
 func (m *mockServerRepo) DeleteRecordSpecific(ctx context.Context, zoneID string, name string, qType domain.RecordType, content string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	// fmt.Printf("MOCK: DeleteRecordSpecific Zone=%s Name=%s Type=%s Content=%s\n", zoneID, name, qType, content)
 	var next []domain.Record
 	// Standardize input name
 	stdName := strings.TrimSuffix(strings.ToLower(name), ".")
@@ -287,6 +300,20 @@ func (m *mockServerRepo) DeleteRecordsByName(ctx context.Context, zoneID string,
 	return nil
 }
 
+func (m *mockServerRepo) DeleteRecordsForZone(ctx context.Context, zoneID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var next []domain.Record
+	for _, r := range m.records {
+		if r.ZoneID == zoneID {
+			continue
+		}
+		next = append(next, r)
+	}
+	m.records = next
+	return nil
+}
+
 func (m *mockServerRepo) RecordZoneChange(ctx context.Context, change *domain.ZoneChange) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -304,6 +331,55 @@ func (m *mockServerRepo) ListZoneChanges(ctx context.Context, zoneID string, fro
 		}
 	}
 	return res, nil
+}
+
+func (m *mockServerRepo) GetIXFRChain(ctx context.Context, zoneID string, fromSerial uint32, toSerial uint32) ([]domain.IXFRChunk, error) {
+	changes, err := m.ListZoneChanges(ctx, zoneID, fromSerial)
+	if err != nil {
+		return nil, err
+	}
+
+	chunksMap := make(map[uint32]*domain.IXFRChunk)
+	var serials []uint32
+
+	for _, c := range changes {
+		if c.Serial > toSerial {
+			continue
+		}
+		chunk, ok := chunksMap[c.Serial]
+		if !ok {
+			chunk = &domain.IXFRChunk{Serial: c.Serial}
+			chunksMap[c.Serial] = chunk
+			serials = append(serials, c.Serial)
+		}
+
+		rec := domain.Record{
+			Name:     c.Name,
+			Type:     c.Type,
+			Content:  c.Content,
+			TTL:      c.TTL,
+			Priority: c.Priority,
+			Weight:   c.Weight,
+			Port:     c.Port,
+		}
+
+		if c.Action == "DELETE" {
+			chunk.Deleted = append(chunk.Deleted, rec)
+		} else {
+			chunk.Added = append(chunk.Added, rec)
+		}
+	}
+
+	sort.Slice(serials, func(i, j int) bool {
+		return serials[i] < serials[j]
+	})
+
+	var result []domain.IXFRChunk
+	for _, s := range serials {
+		result = append(result, *chunksMap[s])
+	}
+
+	return result, nil
 }
 
 func (m *mockServerRepo) SaveAuditLog(ctx context.Context, log *domain.AuditLog) error {

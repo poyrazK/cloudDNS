@@ -29,6 +29,14 @@ func (m *auditMockRepo) ListRecordsForZone(ctx context.Context, zoneID string, t
 	return m.mockRepo.ListRecordsForZone(ctx, zoneID, tenantID)
 }
 
+func (m *auditMockRepo) ListZoneChanges(ctx context.Context, zoneID string, fromSerial uint32) ([]domain.ZoneChange, error) {
+	return m.mockRepo.ListZoneChanges(ctx, zoneID, fromSerial)
+}
+
+func (m *auditMockRepo) GetIXFRChain(ctx context.Context, zoneID string, fromSerial uint32, toSerial uint32) ([]domain.IXFRChunk, error) {
+	return m.mockRepo.GetIXFRChain(ctx, zoneID, fromSerial, toSerial)
+}
+
 func (m *auditMockRepo) SaveAuditLog(_ context.Context, log *domain.AuditLog) error {
 	m.logs = append(m.logs, *log)
 	return nil
@@ -68,6 +76,26 @@ func (m *auditMockRepo) GetRecordsToProbe(ctx context.Context) ([]domain.Record,
 
 func (m *auditMockRepo) UpdateRecordHealth(ctx context.Context, recordID string, status domain.HealthStatus, errMsg string) error {
 	return m.mockRepo.UpdateRecordHealth(ctx, recordID, status, errMsg)
+}
+
+func (m *auditMockRepo) DeleteRecord(ctx context.Context, recordID string, zoneID string, tenantID string) error {
+	return m.mockRepo.DeleteRecord(ctx, recordID, zoneID, tenantID)
+}
+
+func (m *auditMockRepo) DeleteRecordsByNameAndType(ctx context.Context, zoneID string, name string, qType domain.RecordType) error {
+	return m.mockRepo.DeleteRecordsByNameAndType(ctx, zoneID, name, qType)
+}
+
+func (m *auditMockRepo) DeleteRecordsByName(ctx context.Context, zoneID string, name string) error {
+	return m.mockRepo.DeleteRecordsByName(ctx, zoneID, name)
+}
+
+func (m *auditMockRepo) DeleteRecordsForZone(ctx context.Context, zoneID string) error {
+	return m.mockRepo.DeleteRecordsForZone(ctx, zoneID)
+}
+
+func (m *auditMockRepo) DeleteRecordSpecific(ctx context.Context, zoneID string, name string, qType domain.RecordType, content string) error {
+	return m.mockRepo.DeleteRecordSpecific(ctx, zoneID, name, qType, content)
 }
 
 func TestAuditLogCreation(t *testing.T) {

@@ -10,8 +10,8 @@ func TestDNSRecord_Read_NULL_Manual(t *testing.T) {
 	finalBuf := NewBytePacketBuffer()
 	_ = finalBuf.WriteName("null.test.")
 	_ = finalBuf.Writeu16(uint16(NULL))
-	_ = finalBuf.Writeu16(1)
-	_ = finalBuf.Writeu32(300)
+	_ = finalBuf.Writeu16(uint16(1))
+	_ = finalBuf.Writeu32(uint32(300))
 	_ = finalBuf.Writeu16(uint16(len(data)))
 	_ = finalBuf.WriteRange(finalBuf.Position(), data)
 	

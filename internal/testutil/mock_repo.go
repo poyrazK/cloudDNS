@@ -91,6 +91,11 @@ func (m *MockRepo) DeleteRecordsByName(ctx context.Context, zoneID string, name 
 	return args.Error(0)
 }
 
+func (m *MockRepo) DeleteRecordsForZone(ctx context.Context, zoneID string) error {
+	args := m.Called(zoneID)
+	return args.Error(0)
+}
+
 func (m *MockRepo) DeleteRecordSpecific(ctx context.Context, zoneID string, name string, qType domain.RecordType, content string) error {
 	args := m.Called(zoneID, name, qType, content)
 	return args.Error(0)
@@ -104,6 +109,14 @@ func (m *MockRepo) RecordZoneChange(ctx context.Context, change *domain.ZoneChan
 func (m *MockRepo) ListZoneChanges(ctx context.Context, zoneID string, fromSerial uint32) ([]domain.ZoneChange, error) {
 	args := m.Called(zoneID, fromSerial)
 	return args.Get(0).([]domain.ZoneChange), args.Error(1)
+}
+
+func (m *MockRepo) GetIXFRChain(ctx context.Context, zoneID string, fromSerial uint32, toSerial uint32) ([]domain.IXFRChunk, error) {
+	args := m.Called(zoneID, fromSerial, toSerial)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]domain.IXFRChunk), args.Error(1)
 }
 
 func (m *MockRepo) SaveAuditLog(ctx context.Context, log *domain.AuditLog) error {

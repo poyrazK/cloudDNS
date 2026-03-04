@@ -52,7 +52,7 @@ func TestSignAndVerifyTSIG(t *testing.T) {
 	}
 
 	// Test Time Drift
-	parsedPkg.Resources[0].TimeSigned = uint64(time.Now().Unix() - 1000)
+	parsedPkg.Resources[0].TimeSigned = uint64(uint32(time.Now().Unix() - 1000))
 	if err := parsedPkg.VerifyTSIG(buffer.Buf, parsedPkg.TSIGStart, secret); err == nil {
 		t.Errorf("VerifyTSIG should fail with huge time drift")
 	}

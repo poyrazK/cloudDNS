@@ -180,6 +180,6 @@ func TestMain_SeedMode(t *testing.T) {
 	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
 	os.Args = []string{"cmd", "-mode", "seed", "-range", "1"}
 	
-	defer func() { recover() }()
+	defer func() { _ = recover() }()
 	main()
 }

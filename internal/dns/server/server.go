@@ -1000,26 +1000,74 @@ func (s *Server) handleUpdate(request *packet.DNSPacket, rawData []byte, clientI
 
 	// 4. Increment Serial if changes occurred
 	if len(changes) > 0 {
-		soaRecords, _ := s.Repo.GetRecords(ctx, dbZone.Name, domain.TypeSOA, "")
-		if len(soaRecords) > 0 {
-			soa := soaRecords[0]
-			parts := strings.Fields(soa.Content)
+		soaRecords, err := s.Repo.GetRecords(ctx, dbZone.Name, domain.TypeSOA, "")
+		if err == nil && len(soaRecords) > 0 {
+			oldSOA := soaRecords[0]
+			parts := strings.Fields(oldSOA.Content)
 			if len(parts) >= 3 {
-				_, _ = fmt.Sscanf(parts[2], "%d", &newSerial)
-				newSerial++
-				parts[2] = fmt.Sprintf("%d", newSerial)
-				soa.Content = strings.Join(parts, " ")
+				var currentSerial uint32
+				if _, errParse := fmt.Sscanf(parts[2], "%d", &currentSerial); errParse == nil {
+					// Log Old SOA as DELETE using original values
+					changes = append([]domain.ZoneChange{{
+						ID:        fmt.Sprintf("%d-soa-old", time.Now().UnixNano()),
+						ZoneID:    dbZone.ID,
+						Action:    "DELETE",
+						Name:      oldSOA.Name,
+						Type:      domain.TypeSOA,
+						Content:   oldSOA.Content,
+						TTL:       oldSOA.TTL,
+						CreatedAt: time.Now(),
+					}}, changes...)
 
-				// Delete old SOA and create new one (simplified update)
-				_ = s.Repo.DeleteRecord(ctx, soa.ID, dbZone.ID, dbZone.TenantID)
-				_ = s.Repo.CreateRecord(ctx, &soa)
+					newSerial = currentSerial + 1
+					parts[2] = fmt.Sprintf("%d", newSerial)
+					newSOAContent := strings.Join(parts, " ")
+					updatedSOA := oldSOA
+					updatedSOA.Content = newSOAContent
 
-				// Persist changes with the new serial
-				for i := range changes {
-					changes[i].Serial = newSerial
-					_ = s.Repo.RecordZoneChange(ctx, &changes[i])
+					// Delete old SOA and create new one
+					if errDel := s.Repo.DeleteRecord(ctx, oldSOA.ID, dbZone.ID, dbZone.TenantID); errDel == nil {
+						if errCreate := s.Repo.CreateRecord(ctx, &updatedSOA); errCreate == nil {
+							// Log New SOA as ADD
+							changes = append(changes, domain.ZoneChange{
+								ID:        fmt.Sprintf("%d-soa-new", time.Now().UnixNano()),
+								ZoneID:    dbZone.ID,
+								Action:    "ADD",
+								Name:      updatedSOA.Name,
+								Type:      domain.TypeSOA,
+								Content:   newSOAContent,
+								TTL:       updatedSOA.TTL,
+								CreatedAt: time.Now(),
+							})
+
+							// Persist all changes with the new serial
+							persistSuccess := true
+							for i := range changes {
+								changes[i].Serial = newSerial
+								if errRecord := s.Repo.RecordZoneChange(ctx, &changes[i]); errRecord != nil {
+									s.Logger.Error("failed to record zone change", "zone", dbZone.Name, "error", errRecord)
+									persistSuccess = false
+									break
+								}
+							}
+
+							if persistSuccess {
+								s.Logger.Info("dynamic update successful", "zone", zone.Name, "new_serial", newSerial)
+								s.Cache.Flush()
+								go s.notifySlaves(zone.Name)
+							}
+						} else {
+							s.Logger.Error("failed to create new SOA during update", "zone", dbZone.Name, "error", errCreate)
+						}
+					} else {
+						s.Logger.Error("failed to delete old SOA during update", "zone", dbZone.Name, "error", errDel)
+					}
+				} else {
+					s.Logger.Error("failed to parse SOA serial during update", "zone", dbZone.Name, "error", errParse)
 				}
 			}
+		} else if err != nil {
+			s.Logger.Error("failed to fetch SOA for update", "zone", dbZone.Name, "error", err)
 		}
 	}
 
@@ -1050,93 +1098,189 @@ func (s *Server) handleIXFR(conn net.Conn, request *packet.DNSPacket) {
 	clientSerial := clientSOA.Serial
 
 	ctx := context.Background()
-	zone, _ := s.Repo.GetZone(ctx, q.Name)
-	if zone == nil {
-		s.Logger.Warn("IXFR requested for non-existent zone", "name", q.Name)
+	zone, err := s.Repo.GetZone(ctx, q.Name)
+	if err != nil || zone == nil {
+		s.Logger.Warn("IXFR requested for non-existent zone", "name", q.Name, "error", err)
 		s.sendTCPError(conn, request.Header.ID, 3) // NXDOMAIN
 		return
 	}
 
 	// Get current SOA
-	soaRecords, _ := s.Repo.GetRecords(ctx, zone.Name, domain.TypeSOA, "")
-	if len(soaRecords) == 0 {
-		s.Logger.Error("IXFR failed: zone has no SOA", "zone", zone.Name)
+	soaRecords, err := s.Repo.GetRecords(ctx, zone.Name, domain.TypeSOA, "")
+	if err != nil || len(soaRecords) == 0 {
+		s.Logger.Error("IXFR failed: zone has no SOA", "zone", zone.Name, "error", err)
 		s.sendTCPError(conn, request.Header.ID, 2)
 		return
 	}
 	currentSOA := soaRecords[0]
+	fields := strings.Fields(currentSOA.Content)
+	if len(fields) < 3 {
+		s.Logger.Error("IXFR failed: malformed SOA content", "zone", zone.Name, "content", currentSOA.Content)
+		s.sendTCPError(conn, request.Header.ID, 2)
+		return
+	}
+
 	var currentSerial uint32
-	_, _ = fmt.Sscanf(strings.Fields(currentSOA.Content)[2], "%d", &currentSerial)
+	if _, err := fmt.Sscanf(fields[2], "%d", &currentSerial); err != nil {
+		s.Logger.Error("IXFR failed: invalid SOA serial", "zone", zone.Name, "serial", fields[2], "error", err)
+		s.sendTCPError(conn, request.Header.ID, 2)
+		return
+	}
 
 	if clientSerial == currentSerial {
 		// Client is up to date, just send current SOA
 		s.Logger.Info("IXFR client is up to date", "zone", zone.Name, "serial", clientSerial)
-		pSOA, _ := repository.ConvertDomainToPacketRecord(currentSOA)
+		pSOA, err := repository.ConvertDomainToPacketRecord(currentSOA)
+		if err == nil {
+			s.sendSingleRecordResponse(conn, request.Header.ID, q, pSOA)
+		}
+		return
+	}
+
+	// Fetch changes since clientSerial using IXFR chain logic
+	chunks, err := s.Repo.GetIXFRChain(ctx, zone.ID, clientSerial, currentSerial)
+
+	// RFC 1995: Verify full IXFR chain continuity
+	historyValid := len(chunks) > 0 && chunks[0].Serial == clientSerial+1
+	if historyValid {
+		for i := 1; i < len(chunks); i++ {
+			if chunks[i].Serial != chunks[i-1].Serial+1 {
+				historyValid = false
+				break
+			}
+		}
+	}
+
+	if err != nil || !historyValid {
+		s.Logger.Info("IXFR history not found or gap detected, falling back to AXFR sequence",
+			"zone", zone.Name, "client_serial", clientSerial)
+
+		// RFC 1995: If IXFR is not possible, fall back to AXFR sequence.
+		// 1. Fetch all records first to ensure we don't send partial data
+		records, errList := s.Repo.ListRecordsForZone(ctx, zone.ID, zone.TenantID)
+		if errList != nil {
+			s.Logger.Error("IXFR/AXFR fallback failed to list records", "zone", zone.Name, "error", errList)
+			s.sendTCPError(conn, request.Header.ID, 2) // SERVFAIL
+			return
+		}
+
+		pSOA, errConv := repository.ConvertDomainToPacketRecord(currentSOA)
+		if errConv != nil {
+			s.Logger.Error("IXFR/AXFR fallback failed to convert SOA", "zone", zone.Name, "error", errConv)
+			s.sendTCPError(conn, request.Header.ID, 2)
+			return
+		}
+
+		// 2. Send Current SOA (start)
+		s.sendSingleRecordResponse(conn, request.Header.ID, q, pSOA)
+
+		// 3. Send all records in the zone
+		for _, rec := range records {
+			if rec.Type == domain.TypeSOA {
+				continue
+			} // skip SOA, we send it as bounds
+			pRec, errConv := repository.ConvertDomainToPacketRecord(rec)
+			if errConv == nil {
+				s.sendSingleRecordResponse(conn, request.Header.ID, q, pRec)
+			}
+		}
+
+		// 4. Send Current SOA (end)
 		s.sendSingleRecordResponse(conn, request.Header.ID, q, pSOA)
 		return
 	}
 
-	// Fetch changes since clientSerial
-	changes, errChanges := s.Repo.ListZoneChanges(ctx, zone.ID, clientSerial)
-	if errChanges != nil || len(changes) == 0 {
-		s.Logger.Info("IXFR history not found, falling back to AXFR", "zone", zone.Name, "client_serial", clientSerial)
-		s.handleAXFR(conn, request)
-		return
-	}
-
-	s.Logger.Info("IXFR starting", "zone", zone.Name, "from", clientSerial, "to", currentSerial)
+	s.Logger.Info("IXFR starting", "zone", zone.Name, "from", clientSerial, "to", currentSerial, "chunks", len(chunks))
 
 	// Send Current SOA (marks start of IXFR)
-	pCurrentSOA, _ := repository.ConvertDomainToPacketRecord(currentSOA)
-	s.sendSingleRecordResponse(conn, request.Header.ID, q, pCurrentSOA)
-
-	// Send diffs: [Old SOA, Deleted RRs, New SOA, Added RRs]
-	currentDiffSerial := clientSerial
-	var deletions, additions []packet.DNSRecord
-
-	for _, c := range changes {
-		if c.Serial > currentDiffSerial {
-			// We moved to a new version. If we have accumulated diffs, send them.
-			if len(deletions) > 0 || len(additions) > 0 {
-				tempSOA := pCurrentSOA
-				tempSOA.Serial = currentDiffSerial
-
-				s.sendIXFRDiff(conn, request.Header.ID, tempSOA, deletions, additions)
-				deletions = nil
-				additions = nil
-			}
-			currentDiffSerial = c.Serial
-		}
-
-		var ttl uint32
-		// Explicit range check for G115
-		if c.TTL >= 0 && int64(c.TTL) <= math.MaxUint32 {
-			ttl = uint32(c.TTL) // #nosec G115
-		}
-
-		pRec := packet.DNSRecord{
-			Name:  c.Name,
-			Type:  packet.QueryType(master.RecordTypeToQueryType(c.Type)),
-			TTL:   ttl,
-			Class: 1,
-		}
-
-		if c.Action == "DELETE" {
-			deletions = append(deletions, pRec)
-		} else {
-			additions = append(additions, pRec)
-		}
+	pCurrentSOA, err := repository.ConvertDomainToPacketRecord(currentSOA)
+	if err == nil {
+		s.sendSingleRecordResponse(conn, request.Header.ID, q, pCurrentSOA)
 	}
 
-	// Send last diff if any
-	if len(deletions) > 0 || len(additions) > 0 {
-		tempSOA := pCurrentSOA
-		tempSOA.Serial = currentDiffSerial
-		s.sendIXFRDiff(conn, request.Header.ID, tempSOA, deletions, additions)
+	// Send each chunk
+	for _, chunk := range chunks {
+		// RFC 1995: IXFR sequence is [SOA(new), (SOA(old), deleted..., SOA(new), added...)*, SOA(new)]
+		// Note: The outer handleIXFR sends the first and last SOA(new).
+
+		// 1. Send Old SOA (from deletions if available to preserve fields)
+		var oldSOA domain.Record
+		foundOld := false
+		for _, r := range chunk.Deleted {
+			if r.Type == domain.TypeSOA {
+				oldSOA = r
+				foundOld = true
+				break
+			}
+		}
+		if !foundOld {
+			oldSOA = currentSOA
+			// We don't have the original old SOA in the chunk, fallback to current but with old serial
+			// (This shouldn't happen with our bounded delta logger)
+			parts := strings.Fields(oldSOA.Content)
+			if len(parts) >= 3 {
+				parts[2] = fmt.Sprintf("%d", clientSerial)
+				oldSOA.Content = strings.Join(parts, " ")
+			}
+		}
+		pOldSOA, err := repository.ConvertDomainToPacketRecord(oldSOA)
+		if err == nil {
+			s.sendSingleRecordResponse(conn, request.Header.ID, q, pOldSOA)
+		}
+
+		// 2. Send Deletions
+		for _, rec := range chunk.Deleted {
+			if rec.Type == domain.TypeSOA {
+				continue
+			}
+			pRec, errConv := repository.ConvertDomainToPacketRecord(rec)
+			if errConv == nil {
+				s.sendSingleRecordResponse(conn, request.Header.ID, q, pRec)
+			}
+		}
+
+		// 3. Send New SOA (from additions)
+		var newSOA domain.Record
+		foundNew := false
+		for _, r := range chunk.Added {
+			if r.Type == domain.TypeSOA {
+				newSOA = r
+				foundNew = true
+				break
+			}
+		}
+		if !foundNew {
+			newSOA = currentSOA
+			parts := strings.Fields(newSOA.Content)
+			if len(parts) >= 3 {
+				parts[2] = fmt.Sprintf("%d", chunk.Serial)
+				newSOA.Content = strings.Join(parts, " ")
+			}
+		}
+		pNewSOA, err := repository.ConvertDomainToPacketRecord(newSOA)
+		if err == nil {
+			s.sendSingleRecordResponse(conn, request.Header.ID, q, pNewSOA)
+		}
+
+		// 4. Send Additions
+		for _, rec := range chunk.Added {
+			if rec.Type == domain.TypeSOA {
+				continue
+			}
+			pRec, errConv := repository.ConvertDomainToPacketRecord(rec)
+			if errConv == nil {
+				s.sendSingleRecordResponse(conn, request.Header.ID, q, pRec)
+			}
+		}
+
+		// For the next chunk, clientSerial is now this chunk's Serial
+		clientSerial = chunk.Serial
 	}
 
 	// Send Current SOA (marks end of IXFR)
-	s.sendSingleRecordResponse(conn, request.Header.ID, q, pCurrentSOA)
+	if err == nil {
+		s.sendSingleRecordResponse(conn, request.Header.ID, q, pCurrentSOA)
+	}
 	s.Logger.Info("IXFR completed", "zone", zone.Name)
 }
 
@@ -1199,37 +1343,6 @@ func (s *Server) sendSingleRecordResponse(conn net.Conn, id uint16, q packet.DNS
 	fullLen := uint16(len(resData)) // #nosec G115
 	fullResp := append([]byte{byte(fullLen >> 8), byte(fullLen & 0xFF)}, resData...)
 	_, _ = conn.Write(fullResp)
-	packet.PutBuffer(resBuffer)
-}
-
-func (s *Server) sendIXFRDiff(conn net.Conn, id uint16, soa packet.DNSRecord, deletions, additions []packet.DNSRecord) {
-	// 1. Send Old SOA + Deletions
-	resp := packet.NewDNSPacket()
-	resp.Header.ID = id
-	resp.Header.Response = true
-	resp.Answers = append(resp.Answers, soa)
-	resp.Answers = append(resp.Answers, deletions...)
-
-	resBuffer := packet.GetBuffer()
-	_ = resp.Write(resBuffer)
-	resData := resBuffer.Buf[:resBuffer.Position()]
-	fullLen1 := uint16(len(resData)) // #nosec G115
-	_, _ = conn.Write(append([]byte{byte(fullLen1 >> 8), byte(fullLen1 & 0xFF)}, resData...))
-	packet.PutBuffer(resBuffer)
-
-	// 2. Send New SOA + Additions
-	resp = packet.NewDNSPacket()
-	resp.Header.ID = id
-	resp.Header.Response = true
-	resp.Answers = append(resp.Answers, soa)
-	resp.Answers[0].Serial++
-	resp.Answers = append(resp.Answers, additions...)
-
-	resBuffer = packet.GetBuffer()
-	_ = resp.Write(resBuffer)
-	resData = resBuffer.Buf[:resBuffer.Position()]
-	fullLen2 := uint16(len(resData)) // #nosec G115
-	_, _ = conn.Write(append([]byte{byte(fullLen2 >> 8), byte(fullLen2 & 0xFF)}, resData...))
 	packet.PutBuffer(resBuffer)
 }
 
