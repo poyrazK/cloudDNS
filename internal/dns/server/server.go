@@ -51,6 +51,7 @@ type Server struct {
 	// Testing/Chaos flags
 	SimulateDBLatency  time.Duration
 	NotifyPortOverride int
+	DisableAsync       bool // If true, NOTIFY and UPDATE handlers won't spawn goroutines
 
 	// TLS Config for DoT and DoH
 	TLSConfig *tls.Config
@@ -884,19 +885,21 @@ func (s *Server) handleNotify(request *packet.DNSPacket, clientIP string, sendFn
 	response.Header.AuthoritativeAnswer = true
 	if len(request.Questions) > 0 {
 		response.Questions = append(response.Questions, request.Questions[0])
-		
+
 		// Trigger async refresh if it's a slave zone
-		go func(zoneName string) {
-			ctx := context.Background()
-			zone, err := s.Repo.GetZone(ctx, zoneName)
-			if err != nil {
-				s.Logger.Error("failed to fetch zone for notify refresh", "zone", zoneName, "error", err)
-				return
-			}
-			if zone != nil && zone.Role == "slave" {
-				s.refreshZone(zone)
-			}
-		}(request.Questions[0].Name)
+		if !s.DisableAsync {
+			go func(zoneName string) {
+				ctx := context.Background()
+				zone, err := s.Repo.GetZone(ctx, zoneName)
+				if err != nil {
+					s.Logger.Error("failed to fetch zone for notify refresh", "zone", zoneName, "error", err)
+					return
+				}
+				if zone != nil && zone.Role == "slave" {
+					s.refreshZone(zone)
+				}
+			}(request.Questions[0].Name)
+		}
 	}
 
 	response.Header.ResCode = packet.RcodeNoError
@@ -1051,11 +1054,18 @@ func (s *Server) handleUpdate(request *packet.DNSPacket, rawData []byte, clientI
 								}
 							}
 
-							if persistSuccess {
-								s.Logger.Info("dynamic update successful", "zone", zone.Name, "new_serial", newSerial)
-								s.Cache.Flush()
+							if !persistSuccess {
+								response.Header.ResCode = packet.RcodeServFail
+								return s.sendUpdateResponse(response, sendFn)
+							}
+
+							s.Logger.Info("dynamic update successful", "zone", zone.Name, "new_serial", newSerial)
+							s.Cache.Flush()
+							if !s.DisableAsync {
 								go s.notifySlaves(zone.Name)
 							}
+							response.Header.ResCode = packet.RcodeNoError
+							return s.sendUpdateResponse(response, sendFn)
 						} else {
 							s.Logger.Error("failed to create new SOA during update", "zone", dbZone.Name, "error", errCreate)
 						}
@@ -1066,18 +1076,23 @@ func (s *Server) handleUpdate(request *packet.DNSPacket, rawData []byte, clientI
 					s.Logger.Error("failed to parse SOA serial during update", "zone", dbZone.Name, "error", errParse)
 				}
 			}
+			response.Header.ResCode = packet.RcodeServFail
+			return s.sendUpdateResponse(response, sendFn)
 		} else if err != nil {
 			s.Logger.Error("failed to fetch SOA for update", "zone", dbZone.Name, "error", err)
+			response.Header.ResCode = packet.RcodeServFail
+			return s.sendUpdateResponse(response, sendFn)
 		}
 	}
 
-	// 5. Success
+	// 5. Success (no changes)
 	response.Header.ResCode = packet.RcodeNoError
-	s.Logger.Info("dynamic update successful", "zone", zone.Name)
+	s.Logger.Info("dynamic update processed", "zone", zone.Name)
 	s.Cache.Flush()
 
-	// 6. Trigger NOTIFY (RFC 1996)
-	go s.notifySlaves(zone.Name)
+	if !s.DisableAsync {
+		go s.notifySlaves(zone.Name)
+	}
 
 	return s.sendUpdateResponse(response, sendFn)
 }

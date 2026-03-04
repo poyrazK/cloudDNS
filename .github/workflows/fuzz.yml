@@ -37,4 +37,5 @@ jobs:
 
       - name: Run Fuzzer
         # Run each fuzzer for 5 minutes. Fuzzing will exit with 0 if no crashes occur.
-        run: go test -fuzz=${{ matrix.target.func }} -fuzztime=5m ${{ matrix.target.pkg }}
+        # -run=^$ ensures no regular tests are run during fuzzing.
+        run: go test -run=^$ -fuzz=${{ matrix.target.func }} -fuzztime=5m ${{ matrix.target.pkg }}

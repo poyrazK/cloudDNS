@@ -16,12 +16,12 @@ func FuzzNSEC3Parse(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		buf := NewBytePacketBuffer()
-		_ = buf.WriteName("nsec3.test.")
-		_ = buf.Writeu16(uint16(NSEC3))
-		_ = buf.Writeu16(1) // Class IN
-		_ = buf.Writeu32(300) // TTL
-		_ = buf.Writeu16(uint16(len(data))) // RDLENGTH
-		_ = buf.WriteRange(buf.Position(), data)
+		if err := buf.WriteName("nsec3.test."); err != nil { return }
+		if err := buf.Writeu16(uint16(NSEC3)); err != nil { return }
+		if err := buf.Writeu16(1); err != nil { return } // Class IN
+		if err := buf.Writeu32(300); err != nil { return } // TTL
+		if err := buf.Writeu16(uint16(len(data))); err != nil { return } // RDLENGTH
+		if err := buf.WriteRange(buf.Position(), data); err != nil { return }
 
 		buf.Len = buf.Pos
 		buf.parsing = true
@@ -42,12 +42,12 @@ func FuzzRRSIGParse(f *testing.F) {
 	
 	f.Fuzz(func(t *testing.T, data []byte) {
 		buf := NewBytePacketBuffer()
-		_ = buf.WriteName("rrsig.test.")
-		_ = buf.Writeu16(uint16(RRSIG))
-		_ = buf.Writeu16(1) // Class IN
-		_ = buf.Writeu32(300) // TTL
-		_ = buf.Writeu16(uint16(len(data))) // RDLENGTH
-		_ = buf.WriteRange(buf.Position(), data)
+		if err := buf.WriteName("rrsig.test."); err != nil { return }
+		if err := buf.Writeu16(uint16(RRSIG)); err != nil { return }
+		if err := buf.Writeu16(1); err != nil { return } // Class IN
+		if err := buf.Writeu32(300); err != nil { return } // TTL
+		if err := buf.Writeu16(uint16(len(data))); err != nil { return } // RDLENGTH
+		if err := buf.WriteRange(buf.Position(), data); err != nil { return }
 
 		buf.Len = buf.Pos
 		buf.parsing = true
@@ -66,12 +66,12 @@ func FuzzSRVParse(f *testing.F) {
 	
 	f.Fuzz(func(t *testing.T, data []byte) {
 		buf := NewBytePacketBuffer()
-		_ = buf.WriteName("_sip._tcp.example.com.")
-		_ = buf.Writeu16(uint16(SRV))
-		_ = buf.Writeu16(1)
-		_ = buf.Writeu32(300)
-		_ = buf.Writeu16(uint16(len(data)))
-		_ = buf.WriteRange(buf.Position(), data)
+		if err := buf.WriteName("_sip._tcp.example.com."); err != nil { return }
+		if err := buf.Writeu16(uint16(SRV)); err != nil { return }
+		if err := buf.Writeu16(1); err != nil { return }
+		if err := buf.Writeu32(300); err != nil { return }
+		if err := buf.Writeu16(uint16(len(data))); err != nil { return }
+		if err := buf.WriteRange(buf.Position(), data); err != nil { return }
 
 		buf.Len = buf.Pos
 		buf.parsing = true
@@ -98,12 +98,12 @@ func FuzzSOAParse(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		buf := NewBytePacketBuffer()
-		_ = buf.WriteName("example.com.")
-		_ = buf.Writeu16(uint16(SOA))
-		_ = buf.Writeu16(1)
-		_ = buf.Writeu32(300)
-		_ = buf.Writeu16(uint16(len(data)))
-		_ = buf.WriteRange(buf.Position(), data)
+		if err := buf.WriteName("example.com."); err != nil { return }
+		if err := buf.Writeu16(uint16(SOA)); err != nil { return }
+		if err := buf.Writeu16(1); err != nil { return }
+		if err := buf.Writeu32(300); err != nil { return }
+		if err := buf.Writeu16(uint16(len(data))); err != nil { return }
+		if err := buf.WriteRange(buf.Position(), data); err != nil { return }
 
 		buf.Len = buf.Pos
 		buf.parsing = true

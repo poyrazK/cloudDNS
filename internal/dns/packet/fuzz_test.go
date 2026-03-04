@@ -94,12 +94,45 @@ func FuzzDNSPacketRoundTrip(f *testing.F) {
 		if pkt1.Header.ID != pkt2.Header.ID {
 			t.Errorf("Header ID mismatch: %v != %v", pkt1.Header.ID, pkt2.Header.ID)
 		}
+		if pkt1.Header.Opcode != pkt2.Header.Opcode || pkt1.Header.Response != pkt2.Header.Response {
+			t.Errorf("Header flags mismatch after round-trip: Opcode(%d != %d), Response(%v != %v)",
+				pkt1.Header.Opcode, pkt2.Header.Opcode, pkt1.Header.Response, pkt2.Header.Response)
+		}
 		if len(pkt1.Questions) != len(pkt2.Questions) {
 			t.Errorf("Question count mismatch: %d != %d", len(pkt1.Questions), len(pkt2.Questions))
 		}
 		if len(pkt1.Answers) != len(pkt2.Answers) {
 			t.Errorf("Answer count mismatch: %d != %d", len(pkt1.Answers), len(pkt2.Answers))
 		}
+		if len(pkt1.Authorities) != len(pkt2.Authorities) {
+			t.Errorf("Authority count mismatch: %d != %d", len(pkt1.Authorities), len(pkt2.Authorities))
+		}
+		if len(pkt1.Resources) != len(pkt2.Resources) {
+			t.Errorf("Resource count mismatch: %d != %d", len(pkt1.Resources), len(pkt2.Resources))
+		}
+
+		for i := range pkt1.Questions {
+			if strings.ToLower(pkt1.Questions[i].Name) != strings.ToLower(pkt2.Questions[i].Name) ||
+				pkt1.Questions[i].QType != pkt2.Questions[i].QType ||
+				pkt1.Questions[i].QClass != pkt2.Questions[i].QClass {
+				t.Errorf("Question[%d] mismatch: %+v != %+v", i, pkt1.Questions[i], pkt2.Questions[i])
+			}
+		}
+
+		compareRRs := func(section string, rrs1, rrs2 []DNSRecord) {
+			for i := range rrs1 {
+				if strings.ToLower(rrs1[i].Name) != strings.ToLower(rrs2[i].Name) ||
+					rrs1[i].Type != rrs2[i].Type ||
+					rrs1[i].Class != rrs2[i].Class ||
+					rrs1[i].TTL != rrs2[i].TTL {
+					t.Errorf("%s[%d] metadata mismatch: %+v != %+v", section, i, rrs1[i], rrs2[i])
+				}
+			}
+		}
+
+		compareRRs("Answer", pkt1.Answers, pkt2.Answers)
+		compareRRs("Authority", pkt1.Authorities, pkt2.Authorities)
+		compareRRs("Resource", pkt1.Resources, pkt2.Resources)
 	})
 }
 
