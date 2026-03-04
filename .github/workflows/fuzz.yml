@@ -21,6 +21,8 @@ jobs:
           - { pkg: "./internal/dns/packet", func: "FuzzDNSPacketRoundTrip" }
           - { pkg: "./internal/dns/packet", func: "FuzzNSEC3Parse" }
           - { pkg: "./internal/dns/packet", func: "FuzzRRSIGParse" }
+          - { pkg: "./internal/dns/packet", func: "FuzzSRVParse" }
+          - { pkg: "./internal/dns/packet", func: "FuzzSOAParse" }
           - { pkg: "./internal/dns/server", func: "FuzzServerHandlePacket" }
           - { pkg: "./internal/dns/master", func: "FuzzZoneFileParse" }
 
