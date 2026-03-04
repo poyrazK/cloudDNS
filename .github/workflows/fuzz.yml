@@ -1,0 +1,38 @@
+name: Continuous Fuzzing
+
+on:
+  schedule:
+    # Run at 02:00 every Sunday
+    - cron: '0 2 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: Run Fuzz Tests
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - { pkg: "./internal/dns/packet", func: "FuzzDNSPacketParse" }
+          - { pkg: "./internal/dns/packet", func: "FuzzDNSPacketRoundTrip" }
+          - { pkg: "./internal/dns/packet", func: "FuzzNSEC3Parse" }
+          - { pkg: "./internal/dns/packet", func: "FuzzRRSIGParse" }
+          - { pkg: "./internal/dns/server", func: "FuzzServerHandlePacket" }
+          - { pkg: "./internal/dns/master", func: "FuzzZoneFileParse" }
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Run Fuzzer
+        # Run each fuzzer for 5 minutes. Fuzzing will exit with 0 if no crashes occur.
+        run: go test -fuzz=${{ matrix.target.func }} -fuzztime=5m ${{ matrix.target.pkg }}
