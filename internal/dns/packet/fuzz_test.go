@@ -1,6 +1,7 @@
 package packet
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -101,15 +102,19 @@ func FuzzDNSPacketRoundTrip(f *testing.F) {
 		}
 		if len(pkt1.Questions) != len(pkt2.Questions) {
 			t.Errorf("Question count mismatch: %d != %d", len(pkt1.Questions), len(pkt2.Questions))
+			return
 		}
 		if len(pkt1.Answers) != len(pkt2.Answers) {
 			t.Errorf("Answer count mismatch: %d != %d", len(pkt1.Answers), len(pkt2.Answers))
+			return
 		}
 		if len(pkt1.Authorities) != len(pkt2.Authorities) {
 			t.Errorf("Authority count mismatch: %d != %d", len(pkt1.Authorities), len(pkt2.Authorities))
+			return
 		}
 		if len(pkt1.Resources) != len(pkt2.Resources) {
 			t.Errorf("Resource count mismatch: %d != %d", len(pkt1.Resources), len(pkt2.Resources))
+			return
 		}
 
 		for i := range pkt1.Questions {
@@ -122,11 +127,8 @@ func FuzzDNSPacketRoundTrip(f *testing.F) {
 
 		compareRRs := func(section string, rrs1, rrs2 []DNSRecord) {
 			for i := range rrs1 {
-				if !strings.EqualFold(rrs1[i].Name, rrs2[i].Name) ||
-					rrs1[i].Type != rrs2[i].Type ||
-					rrs1[i].Class != rrs2[i].Class ||
-					rrs1[i].TTL != rrs2[i].TTL {
-					t.Errorf("%s[%d] metadata mismatch: %+v != %+v", section, i, rrs1[i], rrs2[i])
+				if !reflect.DeepEqual(rrs1[i], rrs2[i]) {
+					t.Errorf("%s[%d] record mismatch: %+v != %+v", section, i, rrs1[i], rrs2[i])
 				}
 			}
 		}
