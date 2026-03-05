@@ -121,9 +121,10 @@ func TestChaos_DBError_Update(t *testing.T) {
 	res := packet.NewDNSPacket()
 	resBuf := packet.GetBuffer()
 	resBuf.Load(responseData)
-	_ = res.FromBuffer(resBuf)
+	err = res.FromBuffer(resBuf)
 	packet.PutBuffer(resBuf)
 
+	assert.NoError(t, err, "Response packet should be well-formed")
 	// Since prerequisite check threw an error from DB ("failed to fetch records for prerequisite check"),
 	// it should return SERVFAIL.
 	assert.Equal(t, uint8(packet.RcodeServFail), res.Header.ResCode)
