@@ -1,6 +1,7 @@
 package packet
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -112,7 +113,7 @@ func FuzzDNSPacketRoundTrip(f *testing.F) {
 		}
 
 		for i := range pkt1.Questions {
-			if strings.ToLower(pkt1.Questions[i].Name) != strings.ToLower(pkt2.Questions[i].Name) ||
+			if !strings.EqualFold(pkt1.Questions[i].Name, pkt2.Questions[i].Name) ||
 				pkt1.Questions[i].QType != pkt2.Questions[i].QType ||
 				pkt1.Questions[i].QClass != pkt2.Questions[i].QClass {
 				t.Errorf("Question[%d] mismatch: %+v != %+v", i, pkt1.Questions[i], pkt2.Questions[i])
@@ -121,7 +122,7 @@ func FuzzDNSPacketRoundTrip(f *testing.F) {
 
 		compareRRs := func(section string, rrs1, rrs2 []DNSRecord) {
 			for i := range rrs1 {
-				if strings.ToLower(rrs1[i].Name) != strings.ToLower(rrs2[i].Name) ||
+				if !strings.EqualFold(rrs1[i].Name, rrs2[i].Name) ||
 					rrs1[i].Type != rrs2[i].Type ||
 					rrs1[i].Class != rrs2[i].Class ||
 					rrs1[i].TTL != rrs2[i].TTL {
