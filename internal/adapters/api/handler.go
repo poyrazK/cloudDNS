@@ -56,6 +56,7 @@ func (h *APIHandler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 		if checkErr != nil {
 			status = "DEGRADED"
 			details[name] = checkErr.Error()
+			log.Printf("Health check failed: %s: %v", name, checkErr)
 		} else {
 			details[name] = "OK"
 		}
