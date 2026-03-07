@@ -91,9 +91,12 @@ spec:
           periodSeconds: 15
           timeoutSeconds: 5
         resources:
+          requests:
+            cpu: "1m"
+            memory: "32Mi"
           limits:
-            cpu: "500m"
-            memory: "256Mi"
+            cpu: "100m"
+            memory: "128Mi"
 ---
 # DNS over UDP (port 53) — needs a separate LB service for GKE
 apiVersion: v1
