@@ -21,8 +21,8 @@ func TestChaos_SimulateDBLatency(t *testing.T) {
 	baseLatency := 50 * time.Millisecond
 	srv.SimulateDBLatency = baseLatency
 
-	mockRepo.On("GetZone", mock.Anything, mock.Anything).Return(&domain.Zone{ID: "zone1", Name: "example.com."}, nil)
-	mockRepo.On("GetRecords", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]domain.Record{
+	mockRepo.On("GetZone", mock.Anything).Return(&domain.Zone{ID: "zone1", Name: "example.com."}, nil)
+	mockRepo.On("GetRecords", mock.Anything, mock.Anything, mock.Anything).Return([]domain.Record{
 		{Name: "example.com.", Type: domain.TypeA, Content: "1.2.3.4", TTL: 300},
 	}, nil)
 
@@ -30,12 +30,13 @@ func TestChaos_SimulateDBLatency(t *testing.T) {
 	req.Header.ID = 1234
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "example.com.", QType: packet.A, QClass: 1})
 	buf := packet.GetBuffer()
-	_ = req.Write(buf)
+	err := req.Write(buf)
+	assert.NoError(t, err)
 	data := buf.Buf[:buf.Position()]
 	packet.PutBuffer(buf)
 
 	start := time.Now()
-	err := srv.handlePacket(data, &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
+	err = srv.handlePacket(data, &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
 		return nil
 	}, "udp")
 
@@ -56,19 +57,20 @@ func TestChaos_DBError_Query(t *testing.T) {
 	srv.DisableAsync = true
 
 	// Simulate database connection failure during zone and records fetch
-	mockRepo.On("GetZone", mock.Anything, mock.Anything).Return((*domain.Zone)(nil), errors.New("simulated db connection lost"))
-	mockRepo.On("GetRecords", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(([]domain.Record)(nil), errors.New("simulated db connection lost"))
+	mockRepo.On("GetZone", mock.Anything).Return((*domain.Zone)(nil), errors.New("simulated db connection lost"))
+	mockRepo.On("GetRecords", mock.Anything, mock.Anything, mock.Anything).Return(([]domain.Record)(nil), errors.New("simulated db connection lost"))
 
 	req := packet.NewDNSPacket()
 	req.Header.ID = 5678
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "error.test.", QType: packet.A, QClass: 1})
 	buf := packet.GetBuffer()
-	_ = req.Write(buf)
+	err := req.Write(buf)
+	assert.NoError(t, err)
 	data := buf.Buf[:buf.Position()]
 	packet.PutBuffer(buf)
 
 	var responseData []byte
-	err := srv.handlePacket(data, "127.0.0.1:54321", func(resp []byte) error {
+	err = srv.handlePacket(data, "127.0.0.1:54321", func(resp []byte) error {
 		responseData = resp
 		return nil
 	}, "udp")
@@ -94,8 +96,8 @@ func TestChaos_DBError_Update(t *testing.T) {
 	srv.DisableAsync = true
 
 	// Simulate zone exists, but prerequisite check fails because GetRecords throws a DB error
-	mockRepo.On("GetZone", mock.Anything, mock.Anything).Return(&domain.Zone{ID: "zone1", Name: "update.test."}, nil)
-	mockRepo.On("GetRecords", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(([]domain.Record)(nil), errors.New("db offline"))
+	mockRepo.On("GetZone", mock.Anything).Return(&domain.Zone{ID: "zone1", Name: "update.test."}, nil)
+	mockRepo.On("GetRecords", mock.Anything, mock.Anything, mock.Anything).Return(([]domain.Record)(nil), errors.New("db offline"))
 
 	req := packet.NewDNSPacket()
 	req.Header.ID = 9999
@@ -106,12 +108,13 @@ func TestChaos_DBError_Update(t *testing.T) {
 	req.Answers = append(req.Answers, packet.DNSRecord{Name: "update.test.", Type: packet.ANY, Class: 255})
 
 	buf := packet.GetBuffer()
-	_ = req.Write(buf)
+	err := req.Write(buf)
+	assert.NoError(t, err)
 	data := buf.Buf[:buf.Position()]
 	packet.PutBuffer(buf)
 
 	var responseData []byte
-	err := srv.handlePacket(data, "127.0.0.1:54321", func(resp []byte) error {
+	err = srv.handlePacket(data, "127.0.0.1:54321", func(resp []byte) error {
 		responseData = resp
 		return nil
 	}, "udp")
