@@ -72,7 +72,7 @@ jobs:
           kubectl set image deployment/clouddns \
             clouddns="$IMAGE:${{ github.sha }}"
           
-          if ! kubectl rollout status deployment/clouddns --timeout=300s; then
+          if ! kubectl rollout status deployment/clouddns --timeout=600s; then
             echo "❌ Deployment failed! Gathering debug info..."
             kubectl get nodes
             kubectl describe nodes
