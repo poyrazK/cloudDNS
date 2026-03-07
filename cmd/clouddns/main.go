@@ -61,10 +61,10 @@ func run(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		// Tune DB pool for high concurrency
-		db.SetMaxOpenConns(2000)
-		db.SetMaxIdleConns(1000)
-		db.SetConnMaxLifetime(10 * time.Minute)
+		// Sane pool settings for Cloud SQL f1-micro (limited RAM and ~25 connections max)
+		db.SetMaxOpenConns(20)
+		db.SetMaxIdleConns(10)
+		db.SetConnMaxLifetime(5 * time.Minute)
 
 		defer func() { _ = db.Close() }()
 		repo = repository.NewPostgresRepository(db)
