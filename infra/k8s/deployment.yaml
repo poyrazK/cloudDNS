@@ -91,9 +91,6 @@ spec:
           periodSeconds: 15
           timeoutSeconds: 5
         resources:
-          requests:
-            cpu: "1m"
-            memory: "32Mi"
           limits:
             cpu: "500m"
             memory: "256Mi"
@@ -136,3 +133,4 @@ spec:
     port: 853
     targetPort: 853
     protocol: TCP
+.
