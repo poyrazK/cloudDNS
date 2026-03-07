@@ -22,10 +22,12 @@ jobs:
         uses: golangci/golangci-lint-action@v6
         with:
           version: latest
+          install-mode: goinstall
 
   test-matrix:
     name: Test Matrix
-    strategy:
+...
+
       matrix:
         go-version: ["1.26.1"]
         os: [ubuntu-latest, macos-latest]
