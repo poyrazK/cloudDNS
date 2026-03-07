@@ -19,12 +19,13 @@ jobs:
           go-version: "1.26.1"
           cache: true
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v3
+        uses: golangci/golangci-lint-action@v6
         with:
           version: latest
 
   test-matrix:
-    name: Test Matrix
+...
+
     strategy:
       matrix:
         go-version: ["1.26.1"]
