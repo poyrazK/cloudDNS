@@ -512,6 +512,9 @@ func (r *DNSRecord) Read(buffer *BytePacketBuffer) error {
 		if r.KeyTag, err = buffer.Readu16(); err != nil { return err }
 		if r.SignerName, err = buffer.ReadName(); err != nil { return err }
 		remaining := int(dataLen) - (buffer.Position() - startPos)
+		if remaining < 0 {
+			return fmt.Errorf("RRSIG data length too short")
+		}
 		if r.Signature, err = buffer.ReadRange(buffer.Position(), remaining); err != nil { return err }
 		if errStep := buffer.Step(remaining); errStep != nil { return errStep }
 	case NSEC3:
