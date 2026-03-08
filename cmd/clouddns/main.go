@@ -160,7 +160,7 @@ func run(ctx context.Context) error {
 	dnsServer.Redis = redisCache
 
 	go func() {
-		if err := dnsServer.Run(); err != nil {
+		if err := dnsServer.Run(ctx); err != nil {
 			logger.Error("DNS server failed", "error", err)
 		}
 	}()

@@ -10,7 +10,9 @@ import (
 
 func TestGenerateNSEC(t *testing.T) {
 	repo := &mockServerRepo{
-		zones: []domain.Zone{{ID: "z1", Name: "example.com."}},
+		zones: []domain.Zone{
+			{ID: "z1", Name: "example.com."},
+		},
 		records: []domain.Record{
 			{ZoneID: "z1", Name: "example.com.", Type: domain.TypeSOA},
 			{ZoneID: "z1", Name: "a.example.com.", Type: domain.TypeA},
@@ -45,7 +47,9 @@ func TestGenerateNSEC(t *testing.T) {
 
 func TestGenerateNSEC3(t *testing.T) {
 	repo := &mockServerRepo{
-		zones: []domain.Zone{{ID: "z1", Name: "example.com."}},
+		zones: []domain.Zone{
+			{ID: "z1", Name: "example.com."},
+		},
 		records: []domain.Record{
 			{ZoneID: "z1", Name: "example.com.", Type: domain.TypeSOA},
 			{ZoneID: "z1", Name: "example.com.", Type: "NSEC3PARAM", Content: "1 0 10 ABCD"},
@@ -76,5 +80,34 @@ func TestGenerateNSEC3_NoParam(t *testing.T) {
 	_, err := srv.generateNSEC3(context.Background(), zone, "test")
 	if err == nil {
 		t.Errorf("Expected error when NSEC3PARAM is missing")
+	}
+}
+
+func TestGenerateNSEC_NoRecords(t *testing.T) {
+	repo := &mockServerRepo{}
+	srv := NewServer(":0", repo, nil)
+	zone := &domain.Zone{ID: "z1", Name: "example.com."}
+
+	_, err := srv.generateNSEC(context.Background(), zone, "test")
+	if err == nil {
+		t.Errorf("Expected error when no records in zone for NSEC")
+	}
+}
+
+func TestGenerateNSEC3_MalformedParam(t *testing.T) {
+	repo := &mockServerRepo{
+		zones: []domain.Zone{
+			{ID: "z1", Name: "example.com."},
+		},
+		records: []domain.Record{
+			{ZoneID: "z1", Name: "example.com.", Type: "NSEC3PARAM", Content: "too short"},
+		},
+	}
+	srv := NewServer(":0", repo, nil)
+	zone := &domain.Zone{ID: "z1", Name: "example.com."}
+
+	_, err := srv.generateNSEC3(context.Background(), zone, "test")
+	if err == nil {
+		t.Errorf("Expected error for malformed NSEC3PARAM")
 	}
 }

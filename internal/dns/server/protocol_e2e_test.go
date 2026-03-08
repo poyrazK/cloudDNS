@@ -34,8 +34,10 @@ func TestEndToEnd_Protocols(t *testing.T) {
 	cert, _ := tls.X509KeyPair([]byte(""), []byte("")) // Mock won't actually work without real certs, but we test the setup
 	dnsSrv.TLSConfig = &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	go func() {
-		_ = dnsSrv.Run()
+		_ = dnsSrv.Run(ctx)
 	}()
 
 	apiHandler := api.NewAPIHandler(svc, repo)
