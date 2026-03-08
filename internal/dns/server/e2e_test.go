@@ -26,8 +26,10 @@ func TestEndToEndDNSAdvanced(t *testing.T) {
 	apiAddr := "127.0.0.1:18081"
 
 	dnsSrv := NewServer(dnsAddr, repo, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	go func() {
-		_ = dnsSrv.Run()
+		_ = dnsSrv.Run(ctx)
 	}()
 
 	apiHandler := api.NewAPIHandler(svc, repo)

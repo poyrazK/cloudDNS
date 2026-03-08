@@ -24,6 +24,9 @@ type mockServerRepo struct {
 	keys    []domain.DNSSECKey
 	apiKeys []domain.APIKey
 	pingErr error
+
+	failListZones bool
+	failCreateKey bool
 }
 
 func (m *mockServerRepo) GetAPIKeyByHash(_ context.Context, keyHash string) (*domain.APIKey, error) {
@@ -199,6 +202,9 @@ func (m *mockServerRepo) BatchCreateRecords(ctx context.Context, records []domai
 }
 
 func (m *mockServerRepo) ListZones(ctx context.Context, tenantID string) ([]domain.Zone, error) {
+	if m.failListZones {
+		return nil, errors.New("list zones failed")
+	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	var res []domain.Zone
@@ -391,6 +397,9 @@ func (m *mockServerRepo) GetAuditLogs(ctx context.Context, tenantID string) ([]d
 }
 
 func (m *mockServerRepo) CreateKey(ctx context.Context, key *domain.DNSSECKey) error {
+	if m.failCreateKey {
+		return errors.New("create key failed")
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.keys = append(m.keys, *key)
@@ -714,7 +723,7 @@ func TestSendTCPError(t *testing.T) {
 func TestServer_RunError(t *testing.T) {
 	// Privileged port should fail on non-root
 	srv := NewServer("127.0.0.1:1", nil, nil)
-	err := srv.Run()
+	err := srv.Run(context.Background())
 	if err == nil {
 		t.Errorf("Expected error when running on privileged port 1")
 	}

@@ -24,3 +24,24 @@ func TestServer_AutomateDNSSEC(t *testing.T) {
 		t.Errorf("Expected at least 2 keys (KSK+ZSK), got %d", len(keys))
 	}
 }
+
+func TestServer_AutomateDNSSEC_ListError(t *testing.T) {
+	repo := &mockServerRepo{
+		failListZones: true,
+	}
+	srv := NewServer("127.0.0.1:0", repo, nil)
+	// Should not panic, just return
+	srv.automateDNSSEC()
+}
+
+func TestServer_AutomateDNSSEC_AutomateError(t *testing.T) {
+	repo := &mockServerRepo{
+		zones: []domain.Zone{
+			{ID: "z1", Name: "fail.test.", TenantID: "t1"},
+		},
+		failCreateKey: true,
+	}
+	srv := NewServer("127.0.0.1:0", repo, nil)
+	// Should log error and continue
+	srv.automateDNSSEC()
+}

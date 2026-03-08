@@ -152,7 +152,8 @@ func (s *Server) startInvalidationListener(ctx context.Context) {
 			// Standardize key for L1 cache lookup (lowercase name)
 			parts := strings.SplitN(msg.Payload, ":", 2)
 			if len(parts) == 2 {
-				l1Key := strings.ToLower(parts[0]) + ":" + parts[1]
+				qType := packet.RecordTypeToQueryType(domain.RecordType(parts[1]))
+				l1Key := fmt.Sprintf("%s:%d", strings.ToLower(parts[0]), qType)
 				s.Cache.Invalidate(l1Key)
 			} else {
 				s.Logger.Warn("received malformed cache invalidation payload", "payload", msg.Payload)
@@ -161,10 +162,7 @@ func (s *Server) startInvalidationListener(ctx context.Context) {
 	}
 }
 
-func (s *Server) Run() error {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
+func (s *Server) Run(ctx context.Context) error {
 	s.Logger.Info("starting parallel server", "addr", s.Addr, "listeners", runtime.NumCPU())
 
 	// Start cache invalidation listener if Redis is enabled
@@ -283,7 +281,8 @@ func (s *Server) Run() error {
 		}()
 	}
 
-	select {}
+	<-ctx.Done()
+	return nil
 }
 
 func (s *Server) handleDoH(w http.ResponseWriter, r *http.Request) {

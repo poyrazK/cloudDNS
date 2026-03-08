@@ -47,6 +47,27 @@ func TestHandleNotify(t *testing.T) {
 	}
 }
 
+func TestHandleNotify_NoQuestions(t *testing.T) {
+	repo := &mockServerRepo{}
+	srv := NewServer("127.0.0.1:0", repo, nil)
+
+	req := packet.NewDNSPacket()
+	req.Header.ID = 789
+	req.Header.Opcode = packet.OpcodeNotify
+	// No questions added
+
+	reqBuf := packet.NewBytePacketBuffer()
+	_ = req.Write(reqBuf)
+	
+	err := srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], "127.0.0.1:12345", func(resp []byte) error {
+		return nil
+	}, "udp")
+
+	if err != nil {
+		t.Fatalf("handleNotify failed: %v", err)
+	}
+}
+
 // TestNotifySlaves verifies that the server proactively sends NOTIFY messages
 // to all name servers (slaves) listed in the zone's NS records after an update.
 func TestNotifySlaves(t *testing.T) {
