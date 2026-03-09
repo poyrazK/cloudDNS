@@ -422,7 +422,7 @@ func (r *DNSRecord) AddEDE(code uint16, text string) {
 	if text != "" {
 		data = append(data, []byte(text)...)
 	}
-	r.SetOption(EdnsOptionEDE, data)
+	r.Options = append(r.Options, EdnsOption{Code: EdnsOptionEDE, Data: data})
 }
 
 // GetOption retrieves an EDNS option by its code.
