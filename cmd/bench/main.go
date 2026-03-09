@@ -313,7 +313,12 @@ func runScaleTest(count int, concurrency int) {
 	repo := repository.NewPostgresRepository(db)
 	srv := server.NewServer(addr, repo, logger)
 	srv.Redis = server.NewRedisCache(fmt.Sprintf("%s:%s", redisHost, redisPort.Port()), "", 0)
-	_ = srv.Run()
+	
+	srvCtx, cancelSrv := context.WithCancel(ctx)
+	defer cancelSrv()
+	go func() {
+		_ = srv.Run(srvCtx)
+	}()
 
 	time.Sleep(1 * time.Second)
 
