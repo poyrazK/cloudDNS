@@ -73,6 +73,18 @@ const (
 	TSIG       QueryType = 250
 )
 
+// EDNS0 Option Codes
+const (
+	// EdnsOptionNSID represents Name Server Identifier (RFC 5001).
+	EdnsOptionNSID    uint16 = 3
+	// EdnsOptionCookie represents DNS Cookie (RFC 7873).
+	EdnsOptionCookie  uint16 = 10
+	// EdnsOptionPadding represents EDNS0 Padding (RFC 7830).
+	EdnsOptionPadding uint16 = 12
+	// EdnsOptionEDE represents Extended DNS Error (RFC 8914).
+	EdnsOptionEDE     uint16 = 15
+)
+
 // RFC 8914: Extended DNS Error Codes
 const (
 	// EdeOther represents a generic error.
@@ -410,7 +422,28 @@ func (r *DNSRecord) AddEDE(code uint16, text string) {
 	if text != "" {
 		data = append(data, []byte(text)...)
 	}
-	r.Options = append(r.Options, EdnsOption{Code: 15, Data: data})
+	r.SetOption(EdnsOptionEDE, data)
+}
+
+// GetOption retrieves an EDNS option by its code.
+func (r *DNSRecord) GetOption(code uint16) ([]byte, bool) {
+	for _, opt := range r.Options {
+		if opt.Code == code {
+			return opt.Data, true
+		}
+	}
+	return nil, false
+}
+
+// SetOption adds or updates an EDNS option.
+func (r *DNSRecord) SetOption(code uint16, data []byte) {
+	for i, opt := range r.Options {
+		if opt.Code == code {
+			r.Options[i].Data = data
+			return
+		}
+	}
+	r.Options = append(r.Options, EdnsOption{Code: code, Data: data})
 }
 
 // Read populates the DNSRecord fields by reading from the provided buffer.

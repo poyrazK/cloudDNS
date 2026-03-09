@@ -3,7 +3,9 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
 	crand "crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/binary"
@@ -47,6 +49,7 @@ type Server struct {
 	TsigKeys         map[string][]byte
 	NodeID           string
 	RecursionEnabled bool
+	CookieSecret     []byte
 
 	// Testing/Chaos flags
 	SimulateDBLatency  time.Duration
@@ -92,7 +95,9 @@ func NewServer(addr string, repo ports.DNSRepository, logger *slog.Logger) *Serv
 		TsigKeys:         make(map[string][]byte),
 		NodeID:           nodeID,
 		RecursionEnabled: recursion,
+		CookieSecret:     make([]byte, 32),
 	}
+	_, _ = crand.Read(s.CookieSecret)
 	s.queryFn = s.sendQuery
 
 	// Periodic cleanup of rate limiter buckets
@@ -112,6 +117,54 @@ func NewServer(addr string, repo ports.DNSRepository, logger *slog.Logger) *Serv
 	}()
 
 	return s
+}
+
+func (s *Server) generateServerCookie(clientCookie []byte, clientIP string) []byte {
+	h := hmac.New(sha256.New, s.CookieSecret)
+	h.Write(clientCookie)
+	h.Write([]byte(clientIP))
+	return h.Sum(nil)[:16] // Return 16 bytes of server cookie
+}
+
+func (s *Server) padResponse(response *packet.DNSPacket, blockSize int) {
+	// Find OPT record
+	var opt *packet.DNSRecord
+	for i := range response.Resources {
+		if response.Resources[i].Type == packet.OPT {
+			opt = &response.Resources[i]
+			break
+		}
+	}
+
+	if opt == nil {
+		// PADDING requires an OPT record.
+		return
+	}
+
+	// Remove existing padding if any to avoid double padding
+	for i, o := range opt.Options {
+		if o.Code == packet.EdnsOptionPadding {
+			opt.Options = append(opt.Options[:i], opt.Options[i+1:]...)
+			break
+		}
+	}
+
+	// Calculate current size with compression enabled
+	buf := packet.GetBuffer()
+	defer packet.PutBuffer(buf)
+	buf.HasNames = true
+	_ = response.Write(buf)
+	currentSize := buf.Position()
+
+	// The Padding option itself adds 4 bytes (code + length)
+	overhead := 4
+	needed := blockSize - (currentSize+overhead)%blockSize
+	if (currentSize+overhead)%blockSize == 0 {
+		needed = 0
+	}
+	
+	padding := make([]byte, needed)
+	opt.SetOption(packet.EdnsOptionPadding, padding)
 }
 
 func (s *Server) automateDNSSEC() {
@@ -628,6 +681,9 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 	maxSize := 512
 	dnssecOK := false
 	nsidRequested := false
+	var clientCookie []byte
+	paddingRequested := false
+
 	var clientOPT *packet.DNSRecord
 	for _, res := range request.Resources {
 		if res.Type == packet.OPT {
@@ -639,11 +695,15 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 			// DO bit is the first bit of the Z field (TTL bits 15-0)
 			dnssecOK = (res.Z & 0x8000) != 0
 
-			// Check for NSID option (RFC 5001)
+			// Check options
 			for _, opt := range res.Options {
-				if opt.Code == 3 { // NSID
+				switch opt.Code {
+				case packet.EdnsOptionNSID:
 					nsidRequested = true
-					break
+				case packet.EdnsOptionCookie:
+					clientCookie = opt.Data
+				case packet.EdnsOptionPadding:
+					paddingRequested = true
 				}
 			}
 			break
@@ -669,10 +729,12 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 			opt.Z = 0x8000 // Set DO bit if client set it
 		}
 		if nsidRequested {
-			opt.Options = append(opt.Options, packet.EdnsOption{
-				Code: 3, // NSID
-				Data: []byte(s.NodeID),
-			})
+			opt.SetOption(packet.EdnsOptionNSID, []byte(s.NodeID))
+		}
+		if len(clientCookie) >= 8 {
+			serverCookie := s.generateServerCookie(clientCookie[:8], clientIP)
+			fullCookie := append(clientCookie[:8], serverCookie...)
+			opt.SetOption(packet.EdnsOptionCookie, fullCookie)
 		}
 		response.Resources = append(response.Resources, opt)
 	}
@@ -833,6 +895,15 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 			}
 			break
 		}
+	}
+
+	// RFC 7830 / 8467: Padding
+	if paddingRequested || protocol == "dot" || protocol == "doh" {
+		blockSize := 128
+		if response.Header.Response {
+			blockSize = 468 // Recommended response block size
+		}
+		s.padResponse(response, blockSize)
 	}
 
 	resBuffer := packet.GetBuffer()
