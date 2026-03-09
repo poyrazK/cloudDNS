@@ -25,8 +25,9 @@ type mockServerRepo struct {
 	apiKeys []domain.APIKey
 	pingErr error
 
-	failListZones bool
-	failCreateKey bool
+	failListZones   bool
+	failCreateKey   bool
+	failListRecords bool
 }
 
 func (m *mockServerRepo) GetAPIKeyByHash(_ context.Context, keyHash string) (*domain.APIKey, error) {
@@ -126,6 +127,9 @@ func (m *mockServerRepo) GetRecord(ctx context.Context, id string, zoneID string
 }
 
 func (m *mockServerRepo) ListRecordsForZone(ctx context.Context, zoneID string, tenantID string) ([]domain.Record, error) {
+	if m.failListRecords {
+		return nil, errors.New("list records failed")
+	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	var res []domain.Record
@@ -757,4 +761,86 @@ func TestHealthCheck_PingError(t *testing.T) {
 	if checks == nil || checks.Error() != "db down" {
 		t.Errorf("Expected 'db down' error, got %v", checks)
 	}
+}
+
+func TestApplyUpdate_ConvertError(t *testing.T) {
+	srv := NewServer(":0", &mockServerRepo{}, nil)
+	zone := &domain.Zone{ID: "z1"}
+	up := packet.DNSRecord{
+		Name:  "test.com.",
+		Type:  packet.UNKNOWN,
+		Class: 1,
+	}
+	err := srv.applyUpdate(context.Background(), zone, up)
+	_ = err
+}
+
+func TestHandleAXFR_ConvertError(t *testing.T) {
+	repo := &mockServerRepo{
+		zones: []domain.Zone{{ID: "z1", Name: "axfr-fail.test."}},
+		records: []domain.Record{
+			{ZoneID: "z1", Name: "axfr-fail.test.", Type: domain.TypeSOA, Content: "ns1. ns2. 1 2 3 4 5"},
+			{ZoneID: "z1", Name: "bad.axfr-fail.test.", Type: domain.TypeA, Content: "not-an-ip"},
+		},
+	}
+	srv := NewServer(":0", repo, nil)
+
+	req := packet.NewDNSPacket()
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "axfr-fail.test.", QType: packet.AXFR})
+
+	conn := &mockTCPConn{}
+	srv.handleAXFR(conn, req)
+
+	if len(conn.captured) < 2 {
+		t.Errorf("Expected at least 2 records (Start SOA and End SOA)")
+	}
+}
+
+func TestHandleUpdate_ApplyUpdateError(t *testing.T) {
+	repo := &mockServerRepo{
+		zones:   []domain.Zone{{ID: "z1", Name: "update-fail.test."}},
+		records: []domain.Record{{ZoneID: "z1", Name: "update-fail.test.", Type: domain.TypeSOA, Content: "ns1. ns2. 1 2 3 4 5"}},
+	}
+	srv := NewServer(":0", repo, nil)
+
+	req := packet.NewDNSPacket()
+	req.Header.Opcode = packet.OpcodeUpdate
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "update-fail.test.", QType: packet.SOA})
+	// Use an unknown type to trigger conversion error in applyUpdate
+	req.Authorities = append(req.Authorities, packet.DNSRecord{Name: "bad.update-fail.test.", Type: 999, Class: 1})
+
+	_ = srv.handleUpdate(req, nil, "127.0.0.1", func(resp []byte) error {
+		res := packet.NewDNSPacket()
+		pb := packet.NewBytePacketBuffer()
+		pb.Load(resp)
+		_ = res.FromBuffer(pb)
+		if res.Header.ResCode != packet.RcodeServFail {
+			t.Errorf("Expected SERVFAIL for conversion error, got %d", res.Header.ResCode)
+		}
+		return nil
+	})
+}
+
+func TestHandleUpdate_IncrementSerialError(t *testing.T) {
+	repo := &mockServerRepo{
+		zones:   []domain.Zone{{ID: "z1", Name: "serial-fail.test."}},
+		records: []domain.Record{{ZoneID: "z1", Name: "serial-fail.test.", Type: domain.TypeSOA, Content: "bad soa content"}},
+	}
+	srv := NewServer(":0", repo, nil)
+
+	req := packet.NewDNSPacket()
+	req.Header.Opcode = packet.OpcodeUpdate
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "serial-fail.test.", QType: packet.SOA})
+	req.Authorities = append(req.Authorities, packet.DNSRecord{Name: "new.serial-fail.test.", Type: packet.TXT, Txt: "test", Class: 1})
+
+	_ = srv.handleUpdate(req, nil, "127.0.0.1", func(resp []byte) error {
+		res := packet.NewDNSPacket()
+		pb := packet.NewBytePacketBuffer()
+		pb.Load(resp)
+		_ = res.FromBuffer(pb)
+		if res.Header.ResCode != packet.RcodeServFail {
+			t.Errorf("Expected SERVFAIL for malformed SOA serial increment, got %d", res.Header.ResCode)
+		}
+		return nil
+	})
 }

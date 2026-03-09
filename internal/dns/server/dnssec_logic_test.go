@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
@@ -109,5 +110,113 @@ func TestGenerateNSEC3_MalformedParam(t *testing.T) {
 	_, err := srv.generateNSEC3(context.Background(), zone, "test")
 	if err == nil {
 		t.Errorf("Expected error for malformed NSEC3PARAM")
+	}
+}
+
+func TestGenerateNSEC3_EmptyHashes(t *testing.T) {
+	repo := &mockServerRepo{
+		zones: []domain.Zone{
+			{ID: "z1", Name: "example.com."},
+		},
+		records: []domain.Record{
+			{ZoneID: "z1", Name: "example.com.", Type: "NSEC3PARAM", Content: "1 0 10 ABCD"},
+		},
+		failListRecords: true, // This will make ListRecordsForZone return an error
+	}
+	srv := NewServer(":0", repo, nil)
+	zone := &domain.Zone{ID: "z1", Name: "example.com."}
+
+	_, err := srv.generateNSEC3(context.Background(), zone, "test")
+	if err == nil {
+		t.Errorf("Expected error when no records to hash for NSEC3")
+	}
+}
+
+func TestGenerateNSEC3_BoundaryWrap(t *testing.T) {
+	repo := &mockServerRepo{
+		zones: []domain.Zone{
+			{ID: "z1", Name: "example.com."},
+		},
+		records: []domain.Record{
+			{ZoneID: "z1", Name: "example.com.", Type: "NSEC3PARAM", Content: "1 0 10 -"},
+			{ZoneID: "z1", Name: "a.example.com.", Type: domain.TypeA},
+		},
+	}
+	srv := NewServer(":0", repo, nil)
+	zone := &domain.Zone{ID: "z1", Name: "example.com."}
+
+	nsec3, err := srv.generateNSEC3(context.Background(), zone, "zzzzzzzz.example.com.")
+	if err != nil {
+		t.Fatalf("generateNSEC3 failed: %v", err)
+	}
+
+	if nsec3.Type != packet.NSEC3 {
+		t.Errorf("Expected NSEC3 record")
+	}
+}
+
+func TestGenerateNSEC3_ExactMatch(t *testing.T) {
+	repo := &mockServerRepo{
+		zones: []domain.Zone{
+			{ID: "z1", Name: "example.com."},
+		},
+		records: []domain.Record{
+			{ZoneID: "z1", Name: "example.com.", Type: "NSEC3PARAM", Content: "1 0 10 ABCD"},
+			{ZoneID: "z1", Name: "www.example.com.", Type: domain.TypeA},
+		},
+	}
+	srv := NewServer(":0", repo, nil)
+	zone := &domain.Zone{ID: "z1", Name: "example.com."}
+
+	nsec3, err := srv.generateNSEC3(context.Background(), zone, "www.example.com.")
+	if err != nil {
+		t.Fatalf("generateNSEC3 failed: %v", err)
+	}
+
+	if !strings.HasSuffix(nsec3.Name, ".example.com.") {
+		t.Errorf("NSEC3 name should have zone suffix: %s", nsec3.Name)
+	}
+}
+
+func TestGenerateNSEC_ListError(t *testing.T) {
+	repo := &mockServerRepo{failListRecords: true}
+	srv := NewServer(":0", repo, nil)
+	zone := &domain.Zone{ID: "z1", Name: "example.com."}
+
+	_, err := srv.generateNSEC(context.Background(), zone, "test")
+	if err == nil {
+		t.Errorf("Expected error when ListRecordsForZone fails")
+	}
+}
+
+func TestPadResponse_NoOPT(t *testing.T) {
+	srv := NewServer(":0", nil, nil)
+	resp := packet.NewDNSPacket()
+	// No OPT in Resources
+	srv.padResponse(resp, 128)
+	if len(resp.Resources) != 0 {
+		t.Errorf("Expected no changes when OPT is missing")
+	}
+}
+
+func TestPadResponse_ExactBlockSize(t *testing.T) {
+	srv := NewServer(":0", nil, nil)
+	resp := packet.NewDNSPacket()
+	opt := packet.DNSRecord{Type: packet.OPT, Class: 4096}
+	resp.Resources = append(resp.Resources, opt)
+
+	// Header 12 + OPT 11 = 23. Overhead 4 = 27.
+	srv.padResponse(resp, 27)
+	
+	for _, r := range resp.Resources {
+		if r.Type == packet.OPT {
+			for _, o := range r.Options {
+				if o.Code == packet.EdnsOptionPadding {
+					if len(o.Data) != 0 {
+						t.Errorf("Expected 0 bytes of padding for exact block size match, got %d", len(o.Data))
+					}
+				}
+			}
+		}
 	}
 }
