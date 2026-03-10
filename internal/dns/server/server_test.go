@@ -25,9 +25,14 @@ type mockServerRepo struct {
 	apiKeys []domain.APIKey
 	pingErr error
 
-	failListZones   bool
-	failCreateKey   bool
-	failListRecords bool
+	failListZones        bool
+	failCreateKey        bool
+	failListRecords      bool
+	failCreateRecord     bool
+	failDeleteRecord     bool
+	failRecordZoneChange bool
+	failGetZone          bool
+	failGetRecords       bool
 }
 
 func (m *mockServerRepo) GetAPIKeyByHash(_ context.Context, keyHash string) (*domain.APIKey, error) {
@@ -75,6 +80,9 @@ func (m *mockServerRepo) DeleteAPIKey(_ context.Context, _ string, id string) er
 }
 
 func (m *mockServerRepo) GetRecords(_ context.Context, name string, qType domain.RecordType, clientIP string) ([]domain.Record, error) {
+	if m.failGetRecords {
+		return nil, errors.New("get records failed")
+	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	var res []domain.Record
@@ -181,6 +189,9 @@ func (m *mockServerRepo) GetRecordsToProbe(ctx context.Context) ([]domain.Record
 }
 
 func (m *mockServerRepo) CreateRecord(ctx context.Context, record *domain.Record) error {
+	if m.failCreateRecord {
+		return errors.New("create record failed")
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if record.Type == domain.TypeSOA {
@@ -246,6 +257,9 @@ func (m *mockServerRepo) DeleteZone(ctx context.Context, zoneID string, tenantID
 	return nil
 }
 func (m *mockServerRepo) DeleteRecord(ctx context.Context, recordID string, zoneID string, tenantID string) error {
+	if m.failDeleteRecord {
+		return errors.New("delete record failed")
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var next []domain.Record
@@ -325,6 +339,9 @@ func (m *mockServerRepo) DeleteRecordsForZone(ctx context.Context, zoneID string
 }
 
 func (m *mockServerRepo) RecordZoneChange(ctx context.Context, change *domain.ZoneChange) error {
+	if m.failRecordZoneChange {
+		return errors.New("record zone change failed")
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.changes = append(m.changes, *change)
