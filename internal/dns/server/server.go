@@ -1043,71 +1043,13 @@ func (s *Server) handleUpdate(request *packet.DNSPacket, rawData []byte, clientI
 	changes := make([]domain.ZoneChange, 0, len(request.Authorities))
 
 	for _, up := range request.Authorities {
-		upName := up.Name
-		if !strings.HasSuffix(upName, ".") {
-			upName += "."
-		}
-
-		op := domain.UpdateOperation{}
-		dRec, errConv := repository.ConvertPacketRecordToDomain(up, dbZone.ID)
-		if errConv != nil && up.Class != 255 { // Class ANY might fail conversion if RDATA is missing
-			s.Logger.Error("update failed: conversion error", "error", errConv)
+		op, change, errPrep := s.prepareUpdate(dbZone.ID, up)
+		if errPrep != nil {
+			s.Logger.Error("update failed: conversion error", "error", errPrep)
 			response.Header.ResCode = packet.RcodeServFail
 			return s.sendUpdateResponse(response, sendFn)
 		}
-
-		switch up.Class {
-		case 255: // ANY: Delete RRset
-			if up.Type == 255 {
-				op.Action = domain.ActionDeleteAll
-			} else {
-				op.Action = domain.ActionDeleteRRSet
-			}
-			op.Record = domain.Record{
-				ZoneID: dbZone.ID,
-				Name:   upName,
-				Type:   domain.RecordType(up.Type.String()),
-			}
-		case 254: // NONE: Delete specific record
-			op.Action = domain.ActionDeleteSpecific
-			op.Record = dRec
-		default: // Add record
-			op.Action = domain.ActionAdd
-			if dRec.ID == "" {
-				var bid [16]byte
-				_, _ = crand.Read(bid[:])
-				dRec.ID = fmt.Sprintf("%d-%x", time.Now().UnixNano(), bid)
-			}
-			if dRec.CreatedAt.IsZero() {
-				dRec.CreatedAt = time.Now()
-				dRec.UpdatedAt = time.Now()
-			}
-			op.Record = dRec
-		}
 		operations = append(operations, op)
-
-		// Prepare historical change record for IXFR
-		var rb [8]byte
-		_, _ = crand.Read(rb[:])
-		randomPart := binary.LittleEndian.Uint64(rb[:])
-		change := domain.ZoneChange{
-			ID:        fmt.Sprintf("%d-%x", time.Now().UnixNano(), randomPart),
-			ZoneID:    dbZone.ID,
-			Name:      upName,
-			Type:      domain.RecordType(up.Type.String()),
-			TTL:       int(up.TTL),
-			CreatedAt: time.Now(),
-		}
-		if op.Action == domain.ActionAdd {
-			change.Action = "ADD"
-			change.Content = op.Record.Content
-			change.Priority = op.Record.Priority
-		} else {
-			change.Action = "DELETE"
-			if op.Action == domain.ActionDeleteSpecific {
-				change.Content = op.Record.Content
-			}
-		}
 		changes = append(changes, change)
 	}
 
@@ -1529,39 +1471,38 @@ func (s *Server) checkPrerequisite(ctx context.Context, pr packet.DNSRecord) err
 //   - Class ANY (255): Deletes an entire RRset (by name or name+type).
 //   - Class NONE (254): Deletes a specific RR (must match name, type, and RDATA).
 //   - Default Class (IN): Adds or replaces a record.
-func (s *Server) applyUpdate(ctx context.Context, zone *domain.Zone, up packet.DNSRecord) error {
-	// Standardize name for database lookups to ensure consistency.
+// prepareUpdate converts a DNS record update from an RFC 2136 message into an internal
+// atomic operation and its corresponding historical change record.
+func (s *Server) prepareUpdate(zoneID string, up packet.DNSRecord) (domain.UpdateOperation, domain.ZoneChange, error) {
 	upName := up.Name
 	if !strings.HasSuffix(upName, ".") {
 		upName += "."
 	}
 
+	op := domain.UpdateOperation{}
+	dRec, errConv := repository.ConvertPacketRecordToDomain(up, zoneID)
+	if errConv != nil && up.Class != 255 { // Class ANY might fail conversion if RDATA is missing
+		return op, domain.ZoneChange{}, errConv
+	}
+
 	switch up.Class {
 	case 255: // ANY: Delete RRset (RFC 2136 Section 2.5.2)
-		if up.Type == 255 { // Type ANY: Delete all records for this name
-			return s.Repo.DeleteRecordsByName(ctx, zone.ID, upName)
+		if up.Type == 255 {
+			op.Action = domain.ActionDeleteAll
+		} else {
+			op.Action = domain.ActionDeleteRRSet
 		}
-		// Delete all records of a specific type for this name
-		qTypeStr := queryTypeToRecordType(up.Type)
-		return s.Repo.DeleteRecordsByNameAndType(ctx, zone.ID, upName, qTypeStr)
-
+		op.Record = domain.Record{
+			ZoneID: zoneID,
+			Name:   upName,
+			Type:   domain.RecordType(up.Type.String()),
+		}
 	case 254: // NONE: Delete specific record (RFC 2136 Section 2.5.4)
-		qTypeStr := queryTypeToRecordType(up.Type)
-		dRec, errConv := repository.ConvertPacketRecordToDomain(up, zone.ID)
-		if errConv != nil {
-			return errConv
-		}
-		// Matches name, type, and content (RDATA)
-		return s.Repo.DeleteRecordSpecific(ctx, zone.ID, upName, qTypeStr, dRec.Content)
-
+		op.Action = domain.ActionDeleteSpecific
+		op.Record = dRec
 	default: // Add record (RFC 2136 Section 2.5.1)
-		dRec, errConv := repository.ConvertPacketRecordToDomain(up, zone.ID)
-		if errConv != nil {
-			return errConv
-		}
-		dRec.Name = upName
+		op.Action = domain.ActionAdd
 		if dRec.ID == "" {
-			// Generate a cryptographically secure ID for new records.
 			var bid [16]byte
 			_, _ = crand.Read(bid[:])
 			dRec.ID = fmt.Sprintf("%d-%x", time.Now().UnixNano(), bid)
@@ -1570,8 +1511,33 @@ func (s *Server) applyUpdate(ctx context.Context, zone *domain.Zone, up packet.D
 			dRec.CreatedAt = time.Now()
 			dRec.UpdatedAt = time.Now()
 		}
-		return s.Repo.CreateRecord(ctx, &dRec)
+		op.Record = dRec
 	}
+
+	// Prepare historical change record for IXFR
+	var rb [8]byte
+	_, _ = crand.Read(rb[:])
+	randomPart := binary.LittleEndian.Uint64(rb[:])
+	change := domain.ZoneChange{
+		ID:        fmt.Sprintf("%d-%x", time.Now().UnixNano(), randomPart),
+		ZoneID:    zoneID,
+		Name:      upName,
+		Type:      domain.RecordType(up.Type.String()),
+		TTL:       int(up.TTL),
+		CreatedAt: time.Now(),
+	}
+	if op.Action == domain.ActionAdd {
+		change.Action = "ADD"
+		change.Content = op.Record.Content
+		change.Priority = op.Record.Priority
+	} else {
+		change.Action = "DELETE"
+		if op.Action == domain.ActionDeleteSpecific {
+			change.Content = op.Record.Content
+		}
+	}
+
+	return op, change, nil
 }
 
 func (s *Server) notifySlaves(zoneName string) {

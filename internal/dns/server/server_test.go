@@ -855,15 +855,14 @@ func TestHealthCheck_PingError(t *testing.T) {
 	}
 }
 
-func TestApplyUpdate_ConvertError(t *testing.T) {
+func TestPrepareUpdate_ConvertError(t *testing.T) {
 	srv := NewServer(":0", &mockServerRepo{}, nil)
-	zone := &domain.Zone{ID: "z1"}
 	up := packet.DNSRecord{
 		Name:  "test.com.",
 		Type:  packet.UNKNOWN,
 		Class: 1,
 	}
-	err := srv.applyUpdate(context.Background(), zone, up)
+	_, _, err := srv.prepareUpdate("z1", up)
 	_ = err
 }
 

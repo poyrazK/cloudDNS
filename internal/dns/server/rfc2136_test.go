@@ -507,17 +507,16 @@ func TestApplyUpdate_TransactionRollback(t *testing.T) {
 	}
 }
 
-// TestApplyUpdate_ConvertErrorNone verifies that applyUpdate returns an error
+// TestPrepareUpdate_ConvertErrorNone verifies that prepareUpdate returns an error
 // if record conversion fails during a Class NONE (delete specific) update.
-func TestApplyUpdate_ConvertErrorNone(t *testing.T) {
+func TestPrepareUpdate_ConvertErrorNone(t *testing.T) {
 	srv := NewServer(":0", &mockServerRepo{}, nil)
-	zone := &domain.Zone{ID: "z1"}
 	up := packet.DNSRecord{
 		Name:  "test.com.",
 		Type:  999, // Unsupported
 		Class: 254, // NONE
 	}
-	err := srv.applyUpdate(context.Background(), zone, up)
+	_, _, err := srv.prepareUpdate("z1", up)
 	if err == nil {
 		t.Errorf("Expected error for unsupported type in Class NONE update")
 	}
