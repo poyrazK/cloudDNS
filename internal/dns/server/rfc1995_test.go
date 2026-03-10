@@ -41,7 +41,7 @@ func TestHandleIXFR_UpToDate(t *testing.T) {
 	if len(conn.captured) != 1 {
 		t.Fatalf("Expected 1 response packet, got %d", len(conn.captured))
 	}
-	
+
 	resp := packet.NewDNSPacket()
 	pBuf := packet.NewBytePacketBuffer()
 	pBuf.Load(conn.captured[0])
@@ -115,14 +115,16 @@ func TestHandleIXFR_MissingSOA(t *testing.T) {
 	conn := &mockTCPConn{}
 	srv.handleIXFR(conn, req)
 
-	if len(conn.captured) > 0 {
-		resp := packet.NewDNSPacket()
-		pb := packet.NewBytePacketBuffer()
-		pb.Load(conn.captured[0])
-		_ = resp.FromBuffer(pb)
-		if resp.Header.ResCode != packet.RcodeServFail {
-			t.Errorf("Expected SERVFAIL, got %d", resp.Header.ResCode)
-		}
+	if len(conn.captured) != 1 {
+		t.Fatalf("expected 1 TCP response, got %d", len(conn.captured))
+	}
+
+	resp := packet.NewDNSPacket()
+	pb := packet.NewBytePacketBuffer()
+	pb.Load(conn.captured[0])
+	_ = resp.FromBuffer(pb)
+	if resp.Header.ResCode != packet.RcodeServFail {
+		t.Errorf("Expected SERVFAIL, got %d", resp.Header.ResCode)
 	}
 }
 
@@ -139,10 +141,10 @@ func TestHandleIXFR_NoAuthoritySOA(t *testing.T) {
 	conn := &mockTCPConn{}
 	srv.handleIXFR(conn, req)
 
-	if len(conn.captured) == 0 {
-		t.Errorf("Expected an error response for malformed IXFR request")
+	if len(conn.captured) != 1 {
+		t.Fatalf("expected 1 TCP response, got %d", len(conn.captured))
 	}
-	
+
 	resp := packet.NewDNSPacket()
 	pb := packet.NewBytePacketBuffer()
 	pb.Load(conn.captured[0])
@@ -165,8 +167,8 @@ func TestHandleIXFR_ZoneNotFound(t *testing.T) {
 	conn := &mockTCPConn{}
 	srv.handleIXFR(conn, req)
 
-	if len(conn.captured) == 0 {
-		t.Errorf("Expected an error response for unknown zone IXFR")
+	if len(conn.captured) != 1 {
+		t.Fatalf("expected 1 TCP response, got %d", len(conn.captured))
 	}
 
 	resp := packet.NewDNSPacket()
@@ -196,14 +198,16 @@ func TestHandleIXFR_MalformedSOAContent(t *testing.T) {
 	conn := &mockTCPConn{}
 	srv.handleIXFR(conn, req)
 
-	if len(conn.captured) > 0 {
-		resp := packet.NewDNSPacket()
-		pb := packet.NewBytePacketBuffer()
-		pb.Load(conn.captured[0])
-		_ = resp.FromBuffer(pb)
-		if resp.Header.ResCode != packet.RcodeServFail {
-			t.Errorf("Expected SERVFAIL for malformed SOA, got %d", resp.Header.ResCode)
-		}
+	if len(conn.captured) != 1 {
+		t.Fatalf("expected 1 TCP response, got %d", len(conn.captured))
+	}
+
+	resp := packet.NewDNSPacket()
+	pb := packet.NewBytePacketBuffer()
+	pb.Load(conn.captured[0])
+	_ = resp.FromBuffer(pb)
+	if resp.Header.ResCode != packet.RcodeServFail {
+		t.Errorf("Expected SERVFAIL for malformed SOA, got %d", resp.Header.ResCode)
 	}
 }
 
@@ -225,14 +229,16 @@ func TestHandleIXFR_InvalidSOASerial(t *testing.T) {
 	conn := &mockTCPConn{}
 	srv.handleIXFR(conn, req)
 
-	if len(conn.captured) > 0 {
-		resp := packet.NewDNSPacket()
-		pb := packet.NewBytePacketBuffer()
-		pb.Load(conn.captured[0])
-		_ = resp.FromBuffer(pb)
-		if resp.Header.ResCode != packet.RcodeServFail {
-			t.Errorf("Expected SERVFAIL for invalid serial, got %d", resp.Header.ResCode)
-		}
+	if len(conn.captured) != 1 {
+		t.Fatalf("expected 1 TCP response, got %d", len(conn.captured))
+	}
+
+	resp := packet.NewDNSPacket()
+	pb := packet.NewBytePacketBuffer()
+	pb.Load(conn.captured[0])
+	_ = resp.FromBuffer(pb)
+	if resp.Header.ResCode != packet.RcodeServFail {
+		t.Errorf("Expected SERVFAIL for invalid serial, got %d", resp.Header.ResCode)
 	}
 }
 
@@ -242,6 +248,7 @@ func TestHandleIXFR_GapInHistoryFallback(t *testing.T) {
 		records: []domain.Record{
 			{ZoneID: "z1", Name: "gap.test.", Type: domain.TypeSOA, Content: "ns1. ns2. 10 3600 600 604800 300"},
 			{ZoneID: "z1", Name: "www.gap.test.", Type: domain.TypeA, Content: "1.1.1.1"},
+			{ZoneID: "z1", Name: "new.gap.test.", Type: domain.TypeA, Content: "2.2.2.2"},
 		},
 	}
 	// Client has serial 1. Current is 10. History only has 10. Gap detected.
@@ -261,8 +268,57 @@ func TestHandleIXFR_GapInHistoryFallback(t *testing.T) {
 	srv.handleIXFR(conn, req)
 
 	// Should fallback to AXFR. AXFR sequence: SOA, then all records, then SOA.
-	// records: SOA, www.gap.test., new.gap.test. (wait, new.gap.test is in changes, but not in records in my mock setup above)
-	// Let's add it to records to make it realistic.
+	// records: SOA, www.gap.test., new.gap.test.
+	// Expected responses:
+	// 1. Current SOA
+	// 2. www.gap.test. (A)
+	// 3. new.gap.test. (A)
+	// 4. Current SOA (end)
+	if len(conn.captured) != 4 {
+		t.Fatalf("Expected 4 responses for AXFR fallback, got %d", len(conn.captured))
+	}
+
+	// Verify first record is SOA with serial 10
+	resp1 := packet.NewDNSPacket()
+	pBuf1 := packet.NewBytePacketBuffer()
+	pBuf1.Load(conn.captured[0])
+	_ = resp1.FromBuffer(pBuf1)
+	if resp1.Answers[0].Type != packet.SOA || resp1.Answers[0].Serial != 10 {
+		t.Errorf("Expected first response to be SOA with serial 10")
+	}
+
+	// Verify last record is SOA with serial 10
+	resp4 := packet.NewDNSPacket()
+	pBuf4 := packet.NewBytePacketBuffer()
+	pBuf4.Load(conn.captured[3])
+	_ = resp4.FromBuffer(pBuf4)
+	if resp4.Answers[0].Type != packet.SOA || resp4.Answers[0].Serial != 10 {
+		t.Errorf("Expected last response to be SOA with serial 10")
+	}
+
+	// Verify middle records
+	names := []string{resp1.Answers[0].Name, "", "", resp4.Answers[0].Name}
+	for i := 1; i < 3; i++ {
+		resp := packet.NewDNSPacket()
+		pb := packet.NewBytePacketBuffer()
+		pb.Load(conn.captured[i])
+		_ = resp.FromBuffer(pb)
+		names[i] = resp.Answers[0].Name
+	}
+
+	foundWWW := false
+	foundNew := false
+	for i := 1; i < 3; i++ {
+		if names[i] == "www.gap.test." {
+			foundWWW = true
+		}
+		if names[i] == "new.gap.test." {
+			foundNew = true
+		}
+	}
+	if !foundWWW || !foundNew {
+		t.Errorf("Missing zone records in AXFR fallback: www=%v, new=%v", foundWWW, foundNew)
+	}
 }
 
 func TestHandleIXFR_ListRecordsError(t *testing.T) {
@@ -284,14 +340,16 @@ func TestHandleIXFR_ListRecordsError(t *testing.T) {
 	conn := &mockTCPConn{}
 	srv.handleIXFR(conn, req)
 
-	if len(conn.captured) > 0 {
-		resp := packet.NewDNSPacket()
-		pb := packet.NewBytePacketBuffer()
-		pb.Load(conn.captured[0])
-		_ = resp.FromBuffer(pb)
-		if resp.Header.ResCode != packet.RcodeServFail {
-			t.Errorf("Expected SERVFAIL for list records failure, got %d", resp.Header.ResCode)
-		}
+	if len(conn.captured) != 1 {
+		t.Fatalf("expected 1 TCP response, got %d", len(conn.captured))
+	}
+
+	resp := packet.NewDNSPacket()
+	pb := packet.NewBytePacketBuffer()
+	pb.Load(conn.captured[0])
+	_ = resp.FromBuffer(pb)
+	if resp.Header.ResCode != packet.RcodeServFail {
+		t.Errorf("Expected SERVFAIL for list records failure, got %d", resp.Header.ResCode)
 	}
 }
 

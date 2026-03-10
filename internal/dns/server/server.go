@@ -1037,43 +1037,81 @@ func (s *Server) handleUpdate(request *packet.DNSPacket, rawData []byte, clientI
 		}
 	}
 
-	// 3. Perform Updates (UPCOUNT)
+	// 3. Prepare Updates (UPCOUNT)
 	var newSerial uint32
+	operations := make([]domain.UpdateOperation, 0, len(request.Authorities))
 	changes := make([]domain.ZoneChange, 0, len(request.Authorities))
 
 	for _, up := range request.Authorities {
-		if errUpd := s.applyUpdate(ctx, dbZone, up); errUpd != nil {
-			s.Logger.Error("update failed: failed to apply record change", "up", up.Name, "error", errUpd)
+		upName := up.Name
+		if !strings.HasSuffix(upName, ".") {
+			upName += "."
+		}
+
+		op := domain.UpdateOperation{}
+		dRec, errConv := repository.ConvertPacketRecordToDomain(up, dbZone.ID)
+		if errConv != nil && up.Class != 255 { // Class ANY might fail conversion if RDATA is missing
+			s.Logger.Error("update failed: conversion error", "error", errConv)
 			response.Header.ResCode = packet.RcodeServFail
 			return s.sendUpdateResponse(response, sendFn)
 		}
 
-		// Record change for IXFR (using crand for secure ID)
-		var b [8]byte
-		_, _ = crand.Read(b[:])
-		randomPart := binary.LittleEndian.Uint64(b[:])
+		switch up.Class {
+		case 255: // ANY: Delete RRset
+			if up.Type == 255 {
+				op.Action = domain.ActionDeleteAll
+			} else {
+				op.Action = domain.ActionDeleteRRSet
+			}
+			op.Record = domain.Record{
+				ZoneID: dbZone.ID,
+				Name:   upName,
+				Type:   domain.RecordType(up.Type.String()),
+			}
+		case 254: // NONE: Delete specific record
+			op.Action = domain.ActionDeleteSpecific
+			op.Record = dRec
+		default: // Add record
+			op.Action = domain.ActionAdd
+			if dRec.ID == "" {
+				var bid [16]byte
+				_, _ = crand.Read(bid[:])
+				dRec.ID = fmt.Sprintf("%d-%x", time.Now().UnixNano(), bid)
+			}
+			if dRec.CreatedAt.IsZero() {
+				dRec.CreatedAt = time.Now()
+				dRec.UpdatedAt = time.Now()
+			}
+			op.Record = dRec
+		}
+		operations = append(operations, op)
+
+		// Prepare historical change record for IXFR
+		var rb [8]byte
+		_, _ = crand.Read(rb[:])
+		randomPart := binary.LittleEndian.Uint64(rb[:])
 		change := domain.ZoneChange{
 			ID:        fmt.Sprintf("%d-%x", time.Now().UnixNano(), randomPart),
 			ZoneID:    dbZone.ID,
-			Name:      up.Name,
+			Name:      upName,
 			Type:      domain.RecordType(up.Type.String()),
 			TTL:       int(up.TTL),
 			CreatedAt: time.Now(),
 		}
-		if up.Class == 255 || up.Class == 254 {
-			change.Action = "DELETE"
-		} else {
+		if op.Action == domain.ActionAdd {
 			change.Action = "ADD"
-			dRec, _ := repository.ConvertPacketRecordToDomain(up, dbZone.ID)
-			change.Content = dRec.Content
-			if dRec.Priority != nil {
-				change.Priority = dRec.Priority
+			change.Content = op.Record.Content
+			change.Priority = op.Record.Priority
+		} else {
+			change.Action = "DELETE"
+			if op.Action == domain.ActionDeleteSpecific {
+				change.Content = op.Record.Content
 			}
 		}
 		changes = append(changes, change)
 	}
 
-	// 4. Increment Serial if changes occurred
+	// 4. Handle Serial Increment and Atomic Apply
 	if len(changes) > 0 {
 		soaRecords, err := s.Repo.GetRecords(ctx, dbZone.Name, domain.TypeSOA, "")
 		if err == nil && len(soaRecords) > 0 {
@@ -1082,7 +1120,15 @@ func (s *Server) handleUpdate(request *packet.DNSPacket, rawData []byte, clientI
 			if len(parts) >= 3 {
 				var currentSerial uint32
 				if _, errParse := fmt.Sscanf(parts[2], "%d", &currentSerial); errParse == nil {
-					// Log Old SOA as DELETE using original values
+					newSerial = currentSerial + 1
+					parts[2] = fmt.Sprintf("%d", newSerial)
+					newSOAContent := strings.Join(parts, " ")
+					updatedSOA := oldSOA
+					updatedSOA.Content = newSOAContent
+					updatedSOA.UpdatedAt = time.Now()
+
+					// Add SOA changes to atomic transaction
+					// 1. Delete Old SOA from historical log
 					changes = append([]domain.ZoneChange{{
 						ID:        fmt.Sprintf("%d-soa-old", time.Now().UnixNano()),
 						ZoneID:    dbZone.ID,
@@ -1094,67 +1140,61 @@ func (s *Server) handleUpdate(request *packet.DNSPacket, rawData []byte, clientI
 						CreatedAt: time.Now(),
 					}}, changes...)
 
-					newSerial = currentSerial + 1
-					parts[2] = fmt.Sprintf("%d", newSerial)
-					newSOAContent := strings.Join(parts, " ")
-					updatedSOA := oldSOA
-					updatedSOA.Content = newSOAContent
+					// 2. Add New SOA to historical log
+					changes = append(changes, domain.ZoneChange{
+						ID:        fmt.Sprintf("%d-soa-new", time.Now().UnixNano()),
+						ZoneID:    dbZone.ID,
+						Action:    "ADD",
+						Name:      updatedSOA.Name,
+						Type:      domain.TypeSOA,
+						Content:   newSOAContent,
+						TTL:       updatedSOA.TTL,
+						CreatedAt: time.Now(),
+					})
 
-					// Delete old SOA and create new one
-					if errDel := s.Repo.DeleteRecord(ctx, oldSOA.ID, dbZone.ID, dbZone.TenantID); errDel == nil {
-						if errCreate := s.Repo.CreateRecord(ctx, &updatedSOA); errCreate == nil {
-							// Log New SOA as ADD
-							changes = append(changes, domain.ZoneChange{
-								ID:        fmt.Sprintf("%d-soa-new", time.Now().UnixNano()),
-								ZoneID:    dbZone.ID,
-								Action:    "ADD",
-								Name:      updatedSOA.Name,
-								Type:      domain.TypeSOA,
-								Content:   newSOAContent,
-								TTL:       updatedSOA.TTL,
-								CreatedAt: time.Now(),
-							})
-
-							// Persist all changes with the new serial
-							persistSuccess := true
-							for i := range changes {
-								changes[i].Serial = newSerial
-								if errRecord := s.Repo.RecordZoneChange(ctx, &changes[i]); errRecord != nil {
-									s.Logger.Error("failed to record zone change", "zone", dbZone.Name, "error", errRecord)
-									persistSuccess = false
-									break
-								}
-							}
-
-							if !persistSuccess {
-								response.Header.ResCode = packet.RcodeServFail
-								return s.sendUpdateResponse(response, sendFn)
-							}
-
-							s.Logger.Info("dynamic update successful", "zone", zone.Name, "new_serial", newSerial)
-							s.Cache.Flush()
-							if !s.DisableAsync {
-								go s.notifySlaves(zone.Name)
-							}
-							response.Header.ResCode = packet.RcodeNoError
-							return s.sendUpdateResponse(response, sendFn)
-						} else {
-							s.Logger.Error("failed to create new SOA during update", "zone", dbZone.Name, "error", errCreate)
-						}
-					} else {
-						s.Logger.Error("failed to delete old SOA during update", "zone", dbZone.Name, "error", errDel)
-					}
+					// 3. Add SOA updates to operations
+					operations = append(operations, domain.UpdateOperation{
+						Action: domain.ActionDeleteSpecific,
+						Record: oldSOA,
+					}, domain.UpdateOperation{
+						Action: domain.ActionAdd,
+						Record: updatedSOA,
+					})
 				} else {
 					s.Logger.Error("failed to parse SOA serial during update", "zone", dbZone.Name, "error", errParse)
+					response.Header.ResCode = packet.RcodeServFail
+					return s.sendUpdateResponse(response, sendFn)
 				}
+			} else {
+				s.Logger.Error("failed to process SOA for update: malformed content", "zone", dbZone.Name)
+				response.Header.ResCode = packet.RcodeServFail
+				return s.sendUpdateResponse(response, sendFn)
 			}
-			response.Header.ResCode = packet.RcodeServFail
-			return s.sendUpdateResponse(response, sendFn)
 		} else if err != nil {
 			s.Logger.Error("failed to fetch SOA for update", "zone", dbZone.Name, "error", err)
 			response.Header.ResCode = packet.RcodeServFail
 			return s.sendUpdateResponse(response, sendFn)
 		}
+
+		// Apply everything in a single transaction
+		if errApply := s.Repo.ApplyZoneUpdate(ctx, dbZone.ID, operations, newSerial, changes); errApply != nil {
+			s.Logger.Error("atomic update failed", "zone", dbZone.Name, "error", errApply)
+			response.Header.ResCode = packet.RcodeServFail
+			return s.sendUpdateResponse(response, sendFn)
+		}
+
+		if newSerial > 0 {
+			s.Logger.Info("dynamic update successful", "zone", zone.Name, "new_serial", newSerial)
+		} else {
+			s.Logger.Info("dynamic update applied without serial increment (no SOA found)", "zone", zone.Name)
+		}
+
+		s.Cache.Flush()
+		if !s.DisableAsync {
+			go s.notifySlaves(zone.Name)
+		}
+		response.Header.ResCode = packet.RcodeNoError
+		return s.sendUpdateResponse(response, sendFn)
 	}
 
 	// 5. Success (no changes)

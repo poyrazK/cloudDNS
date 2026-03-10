@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net"
 	"strings"
 	"testing"
@@ -30,11 +31,11 @@ func TestHandleUpdateAddRecord(t *testing.T) {
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "example.test.", QType: packet.SOA})
 	// Update Section: The record to be added (Class IN)
 	req.Authorities = append(req.Authorities, packet.DNSRecord{
-		Name: "new.example.test.",
-		Type: packet.A,
+		Name:  "new.example.test.",
+		Type:  packet.A,
 		Class: 1, // IN -> Add
-		TTL: 3600,
-		IP: net.ParseIP("192.168.1.10"),
+		TTL:   3600,
+		IP:    net.ParseIP("192.168.1.10"),
 	})
 
 	buffer := packet.NewBytePacketBuffer()
@@ -81,6 +82,7 @@ func TestHandleUpdateDeleteRRSet(t *testing.T) {
 			{ID: "zone-1", Name: "example.test."},
 		},
 		records: []domain.Record{
+			{ID: "soa1", ZoneID: "zone-1", Name: "example.test.", Type: domain.TypeSOA, Content: "ns1. ns2. 1 3600 600 604800 300"},
 			{ZoneID: "zone-1", Name: "del.example.test.", Type: domain.TypeA, Content: "1.1.1.1"},
 			{ZoneID: "zone-1", Name: "del.example.test.", Type: domain.TypeA, Content: "2.2.2.2"},
 			{ZoneID: "zone-1", Name: "del.example.test.", Type: domain.TypeTXT, Content: "keep me"},
@@ -93,8 +95,8 @@ func TestHandleUpdateDeleteRRSet(t *testing.T) {
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "example.test.", QType: packet.SOA})
 	// Delete RRSet: Class ANY (255), Type A
 	req.Authorities = append(req.Authorities, packet.DNSRecord{
-		Name: "del.example.test.",
-		Type: packet.A,
+		Name:  "del.example.test.",
+		Type:  packet.A,
 		Class: 255, // ANY -> Delete RRset
 	})
 
@@ -123,6 +125,7 @@ func TestHandleUpdateDeleteRRSet(t *testing.T) {
 	}
 }
 
+
 // TestHandleUpdatePrerequisiteFail verifies that an update fails with NXDOMAIN
 // if a "Name is in use" prerequisite is not met.
 func TestHandleUpdatePrerequisiteFail(t *testing.T) {
@@ -138,8 +141,8 @@ func TestHandleUpdatePrerequisiteFail(t *testing.T) {
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "example.test.", QType: packet.SOA})
 	// Prerequisite: Name is in use (Class ANY, Type ANY)
 	req.Answers = append(req.Answers, packet.DNSRecord{
-		Name: "missing.example.test.",
-		Type: 255, // ANY
+		Name:  "missing.example.test.",
+		Type:  255, // ANY
 		Class: 255, // ANY
 	})
 
@@ -165,7 +168,7 @@ func TestHandleUpdatePrerequisiteFail(t *testing.T) {
 	}
 }
 
-// TestHandleUpdateMorePrereqs tests complex prerequisite scenarios including 
+// TestHandleUpdateMorePrereqs tests complex prerequisite scenarios including
 // "Name NOT in use" (Class NONE).
 func TestHandleUpdateMorePrereqs(t *testing.T) {
 	repo := &mockServerRepo{
@@ -183,7 +186,7 @@ func TestHandleUpdateMorePrereqs(t *testing.T) {
 	req.Answers = append(req.Answers, packet.DNSRecord{
 		Name: "exists.test.", Type: packet.A, Class: 255,
 	})
-	
+
 	buf := packet.NewBytePacketBuffer()
 	_ = req.Write(buf)
 	if err := srv.handlePacket(buf.Buf[:buf.Position()], "127.0.0.1:1", func(_ []byte) error {
@@ -268,24 +271,24 @@ func TestHandleUpdateTSIG(t *testing.T) {
 	req.Header.Opcode = packet.OpcodeUpdate
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "tsig.test.", QType: packet.SOA})
 	req.Authorities = append(req.Authorities, packet.DNSRecord{
-		Name: "auth.tsig.test.",
-		Type: packet.A,
+		Name:  "auth.tsig.test.",
+		Type:  packet.A,
 		Class: 1,
-		TTL: 300,
-		IP: net.ParseIP("1.2.3.4"),
+		TTL:   300,
+		IP:    net.ParseIP("1.2.3.4"),
 	})
 
 	buffer := packet.NewBytePacketBuffer()
 	_ = req.Write(buffer)
-	
+
 	// Sign the packet with TSIG
 	err := req.SignTSIG(buffer, "testkey.", []byte("secret123"))
 	if err != nil {
 		t.Fatalf("Failed to sign TSIG: %v", err)
 	}
-	
+
 	data := buffer.Buf[:buffer.Position()]
-	
+
 	parsedReq := packet.NewDNSPacket()
 	pBuf := packet.NewBytePacketBuffer()
 	pBuf.Load(data)
@@ -384,7 +387,7 @@ func TestHandleUpdate_ErrorCases(t *testing.T) {
 
 func TestCheckPrerequisite_GetRecordsError(t *testing.T) {
 	repo := &mockServerRepo{
-		zones: []domain.Zone{{ID: "z1", Name: "update.test."}},
+		zones:          []domain.Zone{{ID: "z1", Name: "update.test."}},
 		failGetRecords: true,
 	}
 	srv := NewServer(":0", repo, nil)
@@ -419,33 +422,45 @@ func TestCheckPrerequisite_MoreBranches(t *testing.T) {
 	srv := NewServer("127.0.0.1:0", repo, nil)
 	ctx := context.Background()
 
+	assertRcode := func(err error, expectedRcode int) {
+		t.Helper()
+		var uErr updateError
+		if !errors.As(err, &uErr) {
+			t.Fatalf("Expected updateError, got %v", err)
+		}
+		if uErr.rcode != expectedRcode {
+			t.Errorf("Expected rcode %d, got %d", expectedRcode, uErr.rcode)
+		}
+	}
+
 	// 1. Class ANY (255), Type ANY (255), exists -> Success
 	err := srv.checkPrerequisite(ctx, packet.DNSRecord{Name: "exists.test.", Type: 255, Class: 255})
-	if err != nil { t.Errorf("Expected success, got %v", err) }
+	if err != nil {
+		t.Errorf("Expected success, got %v", err)
+	}
 
 	// 2. Class ANY (255), Type A, exists -> Success
 	err = srv.checkPrerequisite(ctx, packet.DNSRecord{Name: "exists.test.", Type: packet.A, Class: 255})
-	if err != nil { t.Errorf("Expected success, got %v", err) }
+	if err != nil {
+		t.Errorf("Expected success, got %v", err)
+	}
 
 	// 3. Class NONE (254), Type ANY (255), exists -> YXDOMAIN
 	err = srv.checkPrerequisite(ctx, packet.DNSRecord{Name: "exists.test.", Type: 255, Class: 254})
-	if err == nil { t.Errorf("Expected YXDOMAIN error") }
+	assertRcode(err, int(packet.RcodeYxDomain))
 
 	// 4. Class NONE (254), Type A, exists -> YXRRSET
 	err = srv.checkPrerequisite(ctx, packet.DNSRecord{Name: "exists.test.", Type: packet.A, Class: 254})
-	if err == nil { t.Errorf("Expected YXRRSET error") }
+	assertRcode(err, int(packet.RcodeYxRRSet))
 
 	// 5. Class IN (1), Type A, missing -> NXRRSET
 	err = srv.checkPrerequisite(ctx, packet.DNSRecord{Name: "missing.test.", Type: packet.A, Class: 1})
-	if err == nil { t.Errorf("Expected NXRRSET error") }
+	assertRcode(err, int(packet.RcodeNxRRSet))
 }
 
-// TestApplyUpdate_TransactionRollback verifies that if a database failure occurs 
+// TestApplyUpdate_TransactionRollback verifies that if a database failure occurs
 // mid-update, the entire transaction is rolled back and no partial updates remain.
 func TestApplyUpdate_TransactionRollback(t *testing.T) {
-	// We need a way to mock failure in RecordZoneChange or CreateRecord
-	// but currently NewServer uses a simple repo.
-	// Let's use our extended mockRepo.
 	repo := &mockServerRepo{
 		zones: []domain.Zone{{ID: "z1", Name: "rollback.test."}},
 		records: []domain.Record{
@@ -454,12 +469,11 @@ func TestApplyUpdate_TransactionRollback(t *testing.T) {
 	}
 	srv := NewServer(":0", repo, nil)
 
-	// Prerequisite: Name in use (exists)
 	req := packet.NewDNSPacket()
 	req.Header.Opcode = packet.OpcodeUpdate
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "rollback.test.", QType: packet.SOA})
-	
-	// Two updates: 
+
+	// Two updates:
 	// 1. Add valid A record
 	// 2. Add another A record, but we'll trigger a failure here
 	req.Authorities = append(req.Authorities, packet.DNSRecord{
@@ -469,8 +483,8 @@ func TestApplyUpdate_TransactionRollback(t *testing.T) {
 		Name: "fail.rollback.test.", Type: packet.A, Class: 1, TTL: 60, IP: net.ParseIP("9.9.9.9"),
 	})
 
-	// Inject failure for the second record
-	repo.failRecordZoneChange = true
+	// Inject deterministic failure for the second record
+	repo.failOnRecordName = "fail.rollback.test."
 
 	_ = srv.handleUpdate(req, nil, "127.0.0.1", func(resp []byte) error {
 		res := packet.NewDNSPacket()
@@ -484,11 +498,13 @@ func TestApplyUpdate_TransactionRollback(t *testing.T) {
 	})
 
 	// Verify NO records were added (atomicity)
-	// We currently don't have real transaction rollback in the mock, 
-	// but we should check if the server implementation handles it.
-	// Note: The current server implementation processes updates one-by-one in a loop.
-	// If it doesn't use a DB transaction, it might be partially updated.
-	// This test will reveal that.
+	// Original state: 1 SOA record
+	if len(repo.records) != 1 {
+		t.Errorf("Expected 1 record after rollback, got %d", len(repo.records))
+	}
+	if repo.records[0].Type != domain.TypeSOA {
+		t.Errorf("Expected only SOA record to remain")
+	}
 }
 
 // TestApplyUpdate_ConvertErrorNone verifies that applyUpdate returns an error
@@ -536,12 +552,13 @@ func TestHandleUpdateDeleteRRSetSpecific(t *testing.T) {
 
 func TestHandleUpdate_SOAFetchError(t *testing.T) {
 	repo := &mockServerRepo{
-		zones: []domain.Zone{{ID: "z1", Name: "soaerr.test."}},
+		zones:          []domain.Zone{{ID: "z1", Name: "soaerr.test."}},
 		failGetRecords: true, // Fail fetching SOA
 	}
 	srv := NewServer(":0", repo, nil)
 
 	req := packet.NewDNSPacket()
+	req.Header.ID = 0
 	req.Header.Opcode = packet.OpcodeUpdate
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "soaerr.test.", QType: packet.SOA})
 	req.Authorities = append(req.Authorities, packet.DNSRecord{
@@ -571,6 +588,7 @@ func TestHandleUpdate_SOADeleteError(t *testing.T) {
 	srv := NewServer(":0", repo, nil)
 
 	req := packet.NewDNSPacket()
+	req.Header.ID = 0
 	req.Header.Opcode = packet.OpcodeUpdate
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "soadel.test.", QType: packet.SOA})
 	req.Authorities = append(req.Authorities, packet.DNSRecord{
@@ -595,11 +613,12 @@ func TestHandleUpdate_SOACreateError(t *testing.T) {
 		records: []domain.Record{
 			{ZoneID: "z1", Name: "soacrt.test.", Type: domain.TypeSOA, Content: "ns1. ns2. 1 2 3 4 5"},
 		},
-		failCreateRecord: true,
+		failCreateSOA: true, // Only fail when creating SOA
 	}
 	srv := NewServer(":0", repo, nil)
 
 	req := packet.NewDNSPacket()
+	req.Header.ID = 0
 	req.Header.Opcode = packet.OpcodeUpdate
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "soacrt.test.", QType: packet.SOA})
 	req.Authorities = append(req.Authorities, packet.DNSRecord{

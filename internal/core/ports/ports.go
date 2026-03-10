@@ -33,6 +33,9 @@ type DNSRepository interface {
 	GetAuditLogs(ctx context.Context, tenantID string) ([]domain.AuditLog, error)
 	Ping(ctx context.Context) error
 
+	// ApplyZoneUpdate applies a batch of updates and records historical changes atomically.
+	ApplyZoneUpdate(ctx context.Context, zoneID string, operations []domain.UpdateOperation, newSerial uint32, changes []domain.ZoneChange) error
+
 	// DNSSEC Key Management
 	CreateKey(ctx context.Context, key *domain.DNSSECKey) error
 	ListKeysForZone(ctx context.Context, zoneID string) ([]domain.DNSSECKey, error)

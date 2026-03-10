@@ -631,6 +631,59 @@ func (r *PostgresRepository) GetAuditLogs(ctx context.Context, tenantID string) 
 	return logs, nil
 }
 
+func (r *PostgresRepository) ApplyZoneUpdate(ctx context.Context, zoneID string, operations []domain.UpdateOperation, newSerial uint32, changes []domain.ZoneChange) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if errRollback := tx.Rollback(); errRollback != nil && !errors.Is(errRollback, sql.ErrTxDone) {
+			log.Printf("failed to rollback transaction: %v", errRollback)
+		}
+	}()
+
+	for _, op := range operations {
+		switch op.Action {
+		case domain.ActionAdd:
+			healthType := op.Record.HealthCheckType
+			if healthType == "" {
+				healthType = domain.HealthCheckNone
+			}
+			query := `INSERT INTO dns_records (id, zone_id, name, type, content, ttl, priority, weight, port, network, health_check_type, health_check_target, created_at, updated_at) 
+					  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`
+			_, err = tx.ExecContext(ctx, query, op.Record.ID, op.Record.ZoneID, op.Record.Name, op.Record.Type, op.Record.Content, op.Record.TTL, op.Record.Priority, op.Record.Weight, op.Record.Port, op.Record.Network, string(healthType), op.Record.HealthCheckTarget, op.Record.CreatedAt, op.Record.UpdatedAt)
+
+		case domain.ActionDeleteRRSet:
+			query := `DELETE FROM dns_records WHERE zone_id = $1 AND LOWER(name) = LOWER($2) AND type = $3`
+			_, err = tx.ExecContext(ctx, query, zoneID, op.Record.Name, string(op.Record.Type))
+
+		case domain.ActionDeleteAll:
+			query := `DELETE FROM dns_records WHERE zone_id = $1 AND LOWER(name) = LOWER($2)`
+			_, err = tx.ExecContext(ctx, query, zoneID, op.Record.Name)
+
+		case domain.ActionDeleteSpecific:
+			query := `DELETE FROM dns_records WHERE zone_id = $1 AND LOWER(name) = LOWER($2) AND type = $3 AND content = $4`
+			_, err = tx.ExecContext(ctx, query, zoneID, op.Record.Name, string(op.Record.Type), op.Record.Content)
+		}
+
+		if err != nil {
+			return fmt.Errorf("failed to apply operation %s: %w", op.Action, err)
+		}
+	}
+
+	// Record historical changes for IXFR
+	for _, change := range changes {
+		query := `INSERT INTO dns_zone_changes (id, zone_id, serial, action, name, type, content, ttl, priority, weight, port, created_at) 
+				  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
+		_, err = tx.ExecContext(ctx, query, change.ID, change.ZoneID, newSerial, change.Action, change.Name, string(change.Type), change.Content, change.TTL, change.Priority, change.Weight, change.Port, change.CreatedAt)
+		if err != nil {
+			return fmt.Errorf("failed to record zone change: %w", err)
+		}
+	}
+
+	return tx.Commit()
+}
+
 func (r *PostgresRepository) Ping(ctx context.Context) error {
 	return r.db.PingContext(ctx)
 }

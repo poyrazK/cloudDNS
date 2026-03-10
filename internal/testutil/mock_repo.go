@@ -134,6 +134,11 @@ func (m *MockRepo) Ping(ctx context.Context) error {
 	return args.Error(0)
 }
 
+func (m *MockRepo) ApplyZoneUpdate(ctx context.Context, zoneID string, operations []domain.UpdateOperation, newSerial uint32, changes []domain.ZoneChange) error {
+	args := m.Called(zoneID, operations, newSerial, changes)
+	return args.Error(0)
+}
+
 func (m *MockRepo) CreateKey(ctx context.Context, key *domain.DNSSECKey) error {
 	args := m.Called(key)
 	return args.Error(0)

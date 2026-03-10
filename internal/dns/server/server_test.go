@@ -33,6 +33,9 @@ type mockServerRepo struct {
 	failRecordZoneChange bool
 	failGetZone          bool
 	failGetRecords       bool
+	failCreateSOA        bool
+	failDeleteSOA        bool
+	failOnRecordName     string
 }
 
 func (m *mockServerRepo) GetAPIKeyByHash(_ context.Context, keyHash string) (*domain.APIKey, error) {
@@ -111,6 +114,9 @@ func (m *mockServerRepo) GetIPsForName(_ context.Context, name string, clientIP 
 }
 
 func (m *mockServerRepo) GetZone(_ context.Context, name string) (*domain.Zone, error) {
+	if m.failGetZone {
+		return nil, errors.New("get zone failed")
+	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	qName := strings.TrimSuffix(strings.ToLower(name), ".")
@@ -189,7 +195,7 @@ func (m *mockServerRepo) GetRecordsToProbe(ctx context.Context) ([]domain.Record
 }
 
 func (m *mockServerRepo) CreateRecord(ctx context.Context, record *domain.Record) error {
-	if m.failCreateRecord {
+	if m.failCreateRecord || (m.failCreateSOA && record.Type == domain.TypeSOA) || (m.failOnRecordName != "" && record.Name == m.failOnRecordName) {
 		return errors.New("create record failed")
 	}
 	m.mu.Lock()
@@ -339,12 +345,81 @@ func (m *mockServerRepo) DeleteRecordsForZone(ctx context.Context, zoneID string
 }
 
 func (m *mockServerRepo) RecordZoneChange(ctx context.Context, change *domain.ZoneChange) error {
-	if m.failRecordZoneChange {
+	if m.failRecordZoneChange || (m.failOnRecordName != "" && change.Name == m.failOnRecordName) {
 		return errors.New("record zone change failed")
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.changes = append(m.changes, *change)
+	return nil
+}
+
+func (m *mockServerRepo) ApplyZoneUpdate(ctx context.Context, zoneID string, operations []domain.UpdateOperation, newSerial uint32, changes []domain.ZoneChange) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// 1. Create a snapshot of current state for rollback
+	oldRecords := make([]domain.Record, len(m.records))
+	copy(oldRecords, m.records)
+	oldChanges := make([]domain.ZoneChange, len(m.changes))
+	copy(oldChanges, m.changes)
+
+	// 2. Apply operations
+	for _, op := range operations {
+		switch op.Action {
+		case domain.ActionAdd:
+			if m.failCreateRecord || (m.failCreateSOA && op.Record.Type == domain.TypeSOA) || (m.failOnRecordName != "" && op.Record.Name == m.failOnRecordName) {
+				m.records = oldRecords
+				m.changes = oldChanges
+				return errors.New("create record failed")
+			}
+			m.records = append(m.records, op.Record)
+		case domain.ActionDeleteRRSet:
+			var next []domain.Record
+			for _, r := range m.records {
+				if r.ZoneID == zoneID && strings.EqualFold(r.Name, op.Record.Name) && r.Type == op.Record.Type {
+					continue
+				}
+				next = append(next, r)
+			}
+			m.records = next
+		case domain.ActionDeleteAll:
+			var next []domain.Record
+			for _, r := range m.records {
+				if r.ZoneID == zoneID && strings.EqualFold(r.Name, op.Record.Name) {
+					continue
+				}
+				next = append(next, r)
+			}
+			m.records = next
+		case domain.ActionDeleteSpecific:
+			if m.failDeleteRecord || (m.failDeleteSOA && op.Record.Type == domain.TypeSOA) {
+				m.records = oldRecords
+				m.changes = oldChanges
+				return errors.New("delete record failed")
+			}
+			var next []domain.Record
+			for _, r := range m.records {
+				if r.ZoneID == zoneID && strings.EqualFold(r.Name, op.Record.Name) && r.Type == op.Record.Type && r.Content == op.Record.Content {
+					continue
+				}
+				next = append(next, r)
+			}
+			m.records = next
+		}
+	}
+
+	// 3. Record historical changes
+	if m.failRecordZoneChange {
+		m.records = oldRecords
+		m.changes = oldChanges
+		return errors.New("record zone change failed")
+	}
+	for i := range changes {
+		changes[i].Serial = newSerial
+		m.changes = append(m.changes, changes[i])
+	}
+
 	return nil
 }
 
