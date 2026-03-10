@@ -863,7 +863,9 @@ func TestPrepareUpdate_ConvertError(t *testing.T) {
 		Class: 1,
 	}
 	_, _, err := srv.prepareUpdate("z1", up)
-	_ = err
+	if err == nil {
+		t.Errorf("Expected conversion error for packet.UNKNOWN, got nil")
+	}
 }
 
 func TestHandleAXFR_ConvertError(t *testing.T) {

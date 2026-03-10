@@ -415,5 +415,5 @@ func TestResolve_SmartEngine(t *testing.T) {
 	if len(recs) != 2 {
 		t.Errorf("Expected fallback to return all 2 records, got %d", len(recs))
 	}
-	}
+}
 

@@ -371,10 +371,10 @@ func TestHandleIXFR_MalformedSOA(t *testing.T) {
 	conn := &mockTCPConn{}
 	srv.handleIXFR(conn, req)
 
-	if len(conn.captured) == 0 {
-		t.Errorf("Expected SERVFAIL response for malformed SOA")
+	if len(conn.captured) != 1 {
+		t.Fatalf("expected 1 TCP response for malformed SOA, got %d", len(conn.captured))
 	}
-	
+
 	resp := packet.NewDNSPacket()
 	pb := packet.NewBytePacketBuffer()
 	pb.Load(conn.captured[0])
@@ -403,7 +403,7 @@ func TestHandleIXFR_InvalidSerial(t *testing.T) {
 	srv.handleIXFR(conn, req)
 
 	if len(conn.captured) == 0 {
-		t.Errorf("Expected SERVFAIL response for invalid SOA serial")
+		t.Fatalf("Expected SERVFAIL response for invalid SOA serial, got no response")
 	}
 }
 
@@ -427,7 +427,7 @@ func TestHandleIXFR_FallbackListError(t *testing.T) {
 	srv.handleIXFR(conn, req)
 
 	if len(conn.captured) == 0 {
-		t.Errorf("Expected SERVFAIL response for fallback list error")
+		t.Fatalf("Expected SERVFAIL response for fallback list error, got no response")
 	}
 }
 
