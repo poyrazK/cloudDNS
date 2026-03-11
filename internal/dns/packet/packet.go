@@ -2,8 +2,16 @@
 package packet
 
 import (
+	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
+	"io"
 	"net"
+	"strings"
+	"time"
+
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
 )
 
@@ -615,13 +623,31 @@ func (r *DNSRecord) Read(buffer *BytePacketBuffer) error {
 		if errReadTag != nil { return errReadTag }
 		r.CAATag = string(tagData)
 		if errStep := buffer.Step(int(tagLen)); errStep != nil { return errStep }
-		
+
 		valLen := int(dataLen) - 2 - int(tagLen)
 		if valLen > 0 {
 			valData, errReadVal := buffer.ReadRange(buffer.Position(), valLen)
 			if errReadVal != nil { return errReadVal }
 			r.CAAValue = string(valData)
 			if errStep2 := buffer.Step(valLen); errStep2 != nil { return errStep2 }
+		}
+	case OPT:
+		r.UDPPayloadSize = r.Class
+		r.ExtendedRcode = uint8(r.TTL >> 24) // #nosec G115
+		r.EDNSVersion = uint8((r.TTL >> 16) & 0xFF) // #nosec G115
+		r.Z = uint16(r.TTL & 0xFFFF) // #nosec G115
+		remaining := int(dataLen)
+		for remaining >= 4 {
+			optCode, errReadCode := buffer.Readu16()
+			if errReadCode != nil { return errReadCode }
+			optLen, errReadLen2 := buffer.Readu16()
+			if errReadLen2 != nil { return errReadLen2 }
+			if int(optLen) > remaining-4 { break }
+			optData, errReadData := buffer.ReadRange(buffer.Position(), int(optLen))
+			if errReadData != nil { return errReadData }
+			if errStep := buffer.Step(int(optLen)); errStep != nil { return errStep }
+			r.Options = append(r.Options, EdnsOption{Code: optCode, Data: optData})
+			remaining -= (4 + int(optLen))
 		}
 	default:
 		if errStep := buffer.Step(int(dataLen)); errStep != nil { return errStep }
@@ -765,9 +791,11 @@ func (r *DNSRecord) Write(buffer *BytePacketBuffer) (int, error) {
 		for i := 0; i < len(r.CPU); i++ {
 			if err := buffer.Write(r.CPU[i]); err != nil { return 0, err }
 		}
-		if err := buffer.Write(byte(len(r.OS))); err != nil { return 0, err } // #nosec G115
-		for i := 0; i < len(r.OS); i++ {
-			if err := buffer.Write(r.OS[i]); err != nil { return 0, err }
+		if byte(len(r.OS)) > 0 {
+			if err := buffer.Write(byte(len(r.OS))); err != nil { return 0, err } // #nosec G115
+			for i := 0; i < len(r.OS); i++ {
+				if err := buffer.Write(r.OS[i]); err != nil { return 0, err }
+			}
 		}
 	case MINFO:
 		lenPos := buffer.Position()
@@ -961,4 +989,78 @@ func (p *DNSPacket) Write(buffer *BytePacketBuffer) error {
 		if _, err := a.Write(buffer); err != nil { return err }
 	}
 	return nil
+}
+
+// VerifyTSIG validates a TSIG record signature.
+func (p *DNSPacket) VerifyTSIG(rawData []byte, tsigStart int, secret []byte) error {
+	if p.TSIGStart == -1 {
+		return fmt.Errorf("no TSIG record found")
+	}
+
+	tsig := p.Resources[len(p.Resources)-1]
+	if tsig.Type != TSIG {
+		return fmt.Errorf("last additional record is not TSIG")
+	}
+
+	// 1. Prepare data for HMAC calculation
+	// RFC 2845: The signature is calculated over the original DNS message (excluding TSIG)
+	// and the TSIG variables.
+	dataToSign := make([]byte, tsigStart)
+	copy(dataToSign, rawData[:tsigStart])
+
+	// Rewrite ID in the header to OriginalID from TSIG if they differ
+	binary.BigEndian.PutUint16(dataToSign[0:2], tsig.OriginalID)
+
+	// Rewrite ARCOUNT in the header (must be ARCOUNT - 1)
+	arcount := binary.BigEndian.Uint16(dataToSign[10:12])
+	binary.BigEndian.PutUint16(dataToSign[10:12], arcount-1)
+
+	// Append TSIG variables (excluding MAC itself)
+	buf := new(bytes.Buffer)
+	
+	_ = writeName(buf, tsig.Name)
+	_ = binary.Write(buf, binary.BigEndian, uint16(tsig.Class))
+	_ = binary.Write(buf, binary.BigEndian, uint32(tsig.TTL))
+	_ = writeName(buf, tsig.AlgorithmName)
+	_ = binary.Write(buf, binary.BigEndian, tsig.TimeSigned)
+	_ = binary.Write(buf, binary.BigEndian, tsig.Fudge)
+	_ = binary.Write(buf, binary.BigEndian, tsig.Error)
+	_ = binary.Write(buf, binary.BigEndian, uint16(len(tsig.Other)))
+	buf.Write(tsig.Other)
+
+	dataToSign = append(dataToSign, buf.Bytes()...)
+
+	// 2. Calculate HMAC
+	h := hmac.New(sha256.New, secret) // Assuming SHA-256 for now, should map from AlgorithmName
+	h.Write(dataToSign)
+	expectedMAC := h.Sum(nil)
+
+	// 3. Compare MACs
+	if !hmac.Equal(tsig.MAC, expectedMAC) {
+		return fmt.Errorf("TSIG signature mismatch")
+	}
+
+	// 4. Verify Time Signed (within Fudge window)
+	now := uint64(time.Now().Unix())
+	diff := uint64(0)
+	if now > tsig.TimeSigned {
+		diff = now - tsig.TimeSigned
+	} else {
+		diff = tsig.TimeSigned - now
+	}
+
+	if diff > uint64(tsig.Fudge) {
+		return fmt.Errorf("TSIG time out of range")
+	}
+
+	return nil
+}
+
+func writeName(w io.Writer, name string) error {
+	labels := strings.Split(strings.TrimSuffix(name, "."), ".")
+	for _, label := range labels {
+		if err := binary.Write(w, binary.BigEndian, uint8(len(label))); err != nil { return err }
+		if _, err := w.Write([]byte(label)); err != nil { return err }
+	}
+	return binary.Write(w, binary.BigEndian, uint8(0))
 }

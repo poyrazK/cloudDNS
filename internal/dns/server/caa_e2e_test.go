@@ -20,7 +20,7 @@ func TestCAAEndToEnd(t *testing.T) {
 	
 	go func() {
 		if err := dnsSrv.Run(ctx); err != nil {
-			// t.Logf("DNS server stopped: %v", err)
+			t.Logf("DNS server stopped: %v", err)
 		}
 	}()
 
@@ -29,18 +29,22 @@ func TestCAAEndToEnd(t *testing.T) {
 
 	// Setup Zone and CAA Record
 	zoneName := "caa.test."
-	repo.CreateZone(context.Background(), &domain.Zone{ID: "zone-caa", Name: zoneName})
+	if err := repo.CreateZone(context.Background(), &domain.Zone{ID: "zone-caa", Name: zoneName}); err != nil {
+		t.Fatalf("Failed to create zone: %v", err)
+	}
 	
 	// CAA record format: [flag] [tag] "[value]"
 	caaContent := "0 issue \"letsencrypt.org\""
-	repo.CreateRecord(context.Background(), &domain.Record{
+	if err := repo.CreateRecord(context.Background(), &domain.Record{
 		ID:      "rec-caa-1",
 		ZoneID:  "zone-caa",
 		Name:    zoneName,
 		Type:    domain.TypeCAA,
 		Content: caaContent,
 		TTL:     3600,
-	})
+	}); err != nil {
+		t.Fatalf("Failed to create record: %v", err)
+	}
 
 	// Query for CAA
 	query := packet.NewDNSPacket()
@@ -122,7 +126,7 @@ func TestCAAUpdateEndToEnd(t *testing.T) {
 	
 	go func() {
 		if err := dnsSrv.Run(ctx); err != nil {
-			// t.Logf("DNS server stopped: %v", err)
+			t.Logf("DNS server stopped: %v", err)
 		}
 	}()
 
@@ -131,17 +135,21 @@ func TestCAAUpdateEndToEnd(t *testing.T) {
 
 	// Setup Zone
 	zoneName := "update-caa.test."
-	repo.CreateZone(context.Background(), &domain.Zone{ID: "zone-update-caa", Name: zoneName})
+	if err := repo.CreateZone(context.Background(), &domain.Zone{ID: "zone-update-caa", Name: zoneName}); err != nil {
+		t.Fatalf("Failed to create zone: %v", err)
+	}
 	
 	// SOA is required for dynamic updates logic in this implementation
-	repo.CreateRecord(context.Background(), &domain.Record{
+	if err := repo.CreateRecord(context.Background(), &domain.Record{
 		ID:      "soa-1",
 		ZoneID:  "zone-update-caa",
 		Name:    zoneName,
 		Type:    domain.TypeSOA,
 		Content: "ns1.update-caa.test. admin.update-caa.test. 2023010101 3600 600 604800 300",
 		TTL:     3600,
-	})
+	}); err != nil {
+		t.Fatalf("Failed to create record: %v", err)
+	}
 
 	// 1. Send UPDATE to add CAA record
 	update := packet.NewDNSPacket()
@@ -222,7 +230,9 @@ func TestCAAUpdateEndToEnd(t *testing.T) {
 	resPacket = packet.NewDNSPacket()
 	resBufWrapper.Reset()
 	resBufWrapper.Load(respBuf[:n])
-	_ = resPacket.FromBuffer(resBufWrapper)
+	if err := resPacket.FromBuffer(resBufWrapper); err != nil {
+		t.Fatalf("Failed to parse response: %v", err)
+	}
 
 	if len(resPacket.Answers) == 0 {
 		t.Fatalf("Expected 1 answer, got 0")
