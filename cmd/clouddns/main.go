@@ -35,9 +35,38 @@ func main() {
 
 func run(ctx context.Context) error {
 	// 1. Initialize Structured Logging
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	}))
+	logLevel := slog.LevelInfo
+	if lvl := os.Getenv("LOG_LEVEL"); lvl != "" {
+		if err := logLevel.UnmarshalText([]byte(lvl)); err != nil {
+			fmt.Printf("invalid LOG_LEVEL %q, defaulting to INFO\n", lvl)
+		}
+	}
+
+	opts := &slog.HandlerOptions{
+		Level: logLevel,
+	}
+
+	var handler slog.Handler
+	if os.Getenv("LOG_FORMAT") == "text" {
+		handler = slog.NewTextHandler(os.Stdout, opts)
+	} else {
+		handler = slog.NewJSONHandler(os.Stdout, opts)
+	}
+
+	logger := slog.New(handler)
+
+	// Add NodeID to all logs
+	nodeID := os.Getenv("NODE_ID")
+	if nodeID == "" {
+		h, _ := os.Hostname()
+		if h != "" {
+			nodeID = h
+		} else {
+			nodeID = "unknown-node"
+		}
+	}
+	logger = logger.With("node_id", nodeID)
+
 	slog.SetDefault(logger)
 
 	dbURL := os.Getenv("DATABASE_URL")
