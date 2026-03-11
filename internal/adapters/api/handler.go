@@ -198,6 +198,13 @@ func (h *APIHandler) CreateRecord(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if record.Type == domain.TypeCAA {
+		if err := domain.ValidateCAAContent(record.Content); err != nil {
+			http.Error(w, "Invalid CAA record: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+
 	record.ZoneID = zoneID
 
 	tenantID, ok := r.Context().Value(CtxTenantID).(string)

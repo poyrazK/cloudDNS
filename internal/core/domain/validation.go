@@ -83,6 +83,34 @@ func ValidateSRVFields(priority, weight, port *int, target string) error {
 	return nil
 }
 
+// ValidateCAAContent ensures CAA content follows "[flag] [tag] \"[value]\"" format.
+func ValidateCAAContent(content string) error {
+	parts := strings.Fields(content)
+	if len(parts) < 3 {
+		return fmt.Errorf("CAA content must be in format: flag tag \"value\"")
+	}
+
+	flag, err := strconv.Atoi(parts[0])
+	if err != nil || flag < 0 || flag > 255 {
+		return fmt.Errorf("invalid flag: %s (must be 0-255)", parts[0])
+	}
+
+	tag := parts[1]
+	for _, r := range tag {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')) {
+			return fmt.Errorf("invalid tag: %s (must be alphanumeric)", tag)
+		}
+	}
+
+	// Value might be multiple fields if not quoted properly, but we expect it to be quoted
+	valuePart := strings.Join(parts[2:], " ")
+	if !strings.HasPrefix(valuePart, "\"") || !strings.HasSuffix(valuePart, "\"") {
+		return fmt.Errorf("CAA value must be enclosed in double quotes")
+	}
+
+	return nil
+}
+
 // ValidateZoneRole checks if the role is valid and master_server is provided for slave zones.
 func ValidateZoneRole(role, masterServer string) error {
 	if role == "" {
