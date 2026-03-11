@@ -1,0 +1,2782 @@
+
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<title>server: Go Coverage Report</title>
+		<style>
+			body {
+				background: black;
+				color: rgb(80, 80, 80);
+			}
+			body, pre, #legend span {
+				font-family: Menlo, monospace;
+				font-weight: bold;
+			}
+			#topbar {
+				background: black;
+				position: fixed;
+				top: 0; left: 0; right: 0;
+				height: 42px;
+				border-bottom: 1px solid rgb(80, 80, 80);
+			}
+			#content {
+				margin-top: 50px;
+			}
+			#nav, #legend {
+				float: left;
+				margin-left: 10px;
+			}
+			#legend {
+				margin-top: 12px;
+			}
+			#nav {
+				margin-top: 10px;
+			}
+			#legend span {
+				margin: 0 5px;
+			}
+			.cov0 { color: rgb(192, 0, 0) }
+.cov1 { color: rgb(128, 128, 128) }
+.cov2 { color: rgb(116, 140, 131) }
+.cov3 { color: rgb(104, 152, 134) }
+.cov4 { color: rgb(92, 164, 137) }
+.cov5 { color: rgb(80, 176, 140) }
+.cov6 { color: rgb(68, 188, 143) }
+.cov7 { color: rgb(56, 200, 146) }
+.cov8 { color: rgb(44, 212, 149) }
+.cov9 { color: rgb(32, 224, 152) }
+.cov10 { color: rgb(20, 236, 155) }
+
+		</style>
+	</head>
+	<body>
+		<div id="topbar">
+			<div id="nav">
+				<select id="files">
+				
+				<option value="file0">github.com/poyrazK/cloudDNS/internal/dns/server/cache.go (95.3%)</option>
+				
+				<option value="file1">github.com/poyrazK/cloudDNS/internal/dns/server/client.go (43.5%)</option>
+				
+				<option value="file2">github.com/poyrazK/cloudDNS/internal/dns/server/ratelimit.go (100.0%)</option>
+				
+				<option value="file3">github.com/poyrazK/cloudDNS/internal/dns/server/recursive.go (84.1%)</option>
+				
+				<option value="file4">github.com/poyrazK/cloudDNS/internal/dns/server/redis.go (100.0%)</option>
+				
+				<option value="file5">github.com/poyrazK/cloudDNS/internal/dns/server/reuseport_unix.go (100.0%)</option>
+				
+				<option value="file6">github.com/poyrazK/cloudDNS/internal/dns/server/server.go (86.6%)</option>
+				
+				</select>
+			</div>
+			<div id="legend">
+				<span>not tracked</span>
+			
+				<span class="cov0">not covered</span>
+				<span class="cov8">covered</span>
+			
+			</div>
+		</div>
+		<div id="content">
+		
+		<pre class="file" id="file0" style="display: none">package server
+
+import "context"
+
+import (
+        "hash/fnv"
+        "sync"
+        "time"
+)
+
+// shardCount determines the number of internal shards to reduce lock contention.
+const shardCount = 256
+
+type cacheEntry struct {
+        data      []byte
+        expiresAt time.Time
+}
+
+type cacheShard struct {
+        mu    sync.RWMutex
+        items map[string]cacheEntry
+}
+
+// DNSCache implements a sharded, thread-safe, in-memory cache for DNS responses.
+// Sharding is used to minimize lock contention during high-concurrency access.
+type DNSCache struct {
+        shards [shardCount]*cacheShard
+}
+
+// NewDNSCache initializes a new DNSCache with pre-allocated shards and starts 
+// the background expiration cleanup loop.
+func NewDNSCache() *DNSCache <span class="cov8" title="1">{
+        c := &amp;DNSCache{}
+        for i := 0; i &lt; shardCount; i++ </span><span class="cov8" title="1">{
+                c.shards[i] = &amp;cacheShard{
+                        items: make(map[string]cacheEntry),
+                }
+        }</span>
+        // Background goroutine to periodically clean up expired items from all shards.
+        <span class="cov8" title="1">go c.cleanupLoop()
+        return c</span>
+}
+
+// getShard returns the specific cacheShard responsible for the given key based on its hash.
+func (c *DNSCache) getShard(key string) *cacheShard <span class="cov8" title="1">{
+        h := fnv.New32a()
+        h.Write([]byte(key)) // #nosec G104
+        return c.shards[h.Sum32()%shardCount]
+}</span>
+
+// Get retrieves a response from the cache. It returns (nil, false) if the key is missing 
+// or has already expired.
+func (c *DNSCache) Get(key string) ([]byte, bool) <span class="cov8" title="1">{
+        shard := c.getShard(key)
+        shard.mu.RLock()
+        defer shard.mu.RUnlock()
+
+        item, found := shard.items[key]
+        if !found </span><span class="cov8" title="1">{
+                return nil, false
+        }</span>
+
+        // Check if the item is still valid.
+        <span class="cov8" title="1">if time.Now().After(item.expiresAt) </span><span class="cov8" title="1">{
+                return nil, false
+        }</span>
+
+        <span class="cov8" title="1">return item.data, true</span>
+}
+
+// Set stores a response in the cache with a specific TTL.
+func (c *DNSCache) Set(key string, data []byte, ttl time.Duration) <span class="cov8" title="1">{
+        shard := c.getShard(key)
+        shard.mu.Lock()
+        defer shard.mu.Unlock()
+
+        shard.items[key] = cacheEntry{
+                data:      data,
+                expiresAt: time.Now().Add(ttl),
+        }
+}</span>
+
+// Invalidate removes a specific key from the cache.
+func (c *DNSCache) Invalidate(key string) <span class="cov8" title="1">{
+        shard := c.getShard(key)
+        shard.mu.Lock()
+        defer shard.mu.Unlock()
+        delete(shard.items, key)
+}</span>
+
+// Flush removes all items from all shards in the cache.
+func (c *DNSCache) Ping(_ context.Context) error <span class="cov0" title="0">{ return nil }</span>
+
+func (c *DNSCache) Flush() <span class="cov8" title="1">{
+        for i := 0; i &lt; shardCount; i++ </span><span class="cov8" title="1">{
+                shard := c.shards[i]
+                shard.mu.Lock()
+                shard.items = make(map[string]cacheEntry)
+                shard.mu.Unlock()
+        }</span>
+}
+
+// cleanupLoop periodically triggers the cache-wide cleanup process.
+func (c *DNSCache) cleanupLoop() <span class="cov8" title="1">{
+        ticker := time.NewTicker(5 * time.Minute)
+        defer ticker.Stop()
+        for range ticker.C </span><span class="cov0" title="0">{
+                c.Cleanup()
+        }</span>
+}
+
+// Cleanup scans all shards and deletes items that have passed their expiration time.
+func (c *DNSCache) Cleanup() <span class="cov8" title="1">{
+        now := time.Now()
+        for i := 0; i &lt; shardCount; i++ </span><span class="cov8" title="1">{
+                shard := c.shards[i]
+                shard.mu.Lock()
+                for k, v := range shard.items </span><span class="cov8" title="1">{
+                        if now.After(v.expiresAt) </span><span class="cov8" title="1">{
+                                delete(shard.items, k)
+                        }</span>
+                }
+                <span class="cov8" title="1">shard.mu.Unlock()</span>
+        }
+}
+</pre>
+		
+		<pre class="file" id="file1" style="display: none">package server
+
+import (
+        "context"
+        "fmt"
+        "io"
+        "net"
+        "strings"
+        "time"
+
+        "github.com/poyrazK/cloudDNS/internal/adapters/repository"
+        "github.com/poyrazK/cloudDNS/internal/core/domain"
+        "github.com/poyrazK/cloudDNS/internal/dns/packet"
+)
+
+func (s *Server) refreshZone(zone *domain.Zone) <span class="cov0" title="0">{
+        if zone.MasterServer == "" </span><span class="cov0" title="0">{
+                s.Logger.Warn("slave zone has no master server configured", "zone", zone.Name)
+                return
+        }</span>
+
+        <span class="cov0" title="0">masterAddr := net.JoinHostPort(zone.MasterServer, "53")
+        s.Logger.Info("initiating zone refresh", "zone", zone.Name, "master", masterAddr)
+
+        // 1. Query master for SOA
+        masterPacket, err := s.queryFn(masterAddr, zone.Name, packet.SOA)
+        if err != nil </span><span class="cov0" title="0">{
+                s.Logger.Error("failed to query master SOA", "zone", zone.Name, "error", err)
+                return
+        }</span>
+
+        <span class="cov0" title="0">if len(masterPacket.Answers) == 0 || masterPacket.Answers[0].Type != packet.SOA </span><span class="cov0" title="0">{
+                s.Logger.Warn("master returned no SOA for zone", "zone", zone.Name)
+                return
+        }</span>
+
+        <span class="cov0" title="0">masterSOA := masterPacket.Answers[0]
+
+        // 2. Get local SOA
+        records, err := s.Repo.GetRecords(context.Background(), zone.Name, domain.TypeSOA, "")
+        if err != nil </span><span class="cov0" title="0">{
+                s.Logger.Error("failed to get local records for refresh", "zone", zone.Name, "error", err)
+                return
+        }</span>
+
+        <span class="cov0" title="0">var localSerial uint32
+        if len(records) &gt; 0 </span><span class="cov0" title="0">{
+                // Parse serial from SOA content
+                parts := strings.Fields(records[0].Content)
+                if len(parts) &gt;= 3 </span><span class="cov0" title="0">{
+                        if _, err := fmt.Sscanf(parts[2], "%d", &amp;localSerial); err != nil </span><span class="cov0" title="0">{
+                                s.Logger.Warn("failed to parse local SOA serial", "content", records[0].Content, "error", err)
+                        }</span>
+                }
+        }
+
+        <span class="cov0" title="0">s.Logger.Info("comparing serials", "zone", zone.Name, "local", localSerial, "master", masterSOA.Serial)
+
+        if localSerial &gt;= masterSOA.Serial &amp;&amp; localSerial != 0 </span><span class="cov0" title="0">{
+                s.Logger.Info("zone is up to date", "zone", zone.Name)
+                return
+        }</span>
+
+        // 3. Initiate transfer: Try IXFR first, then fall back to AXFR
+        <span class="cov0" title="0">if localSerial != 0 </span><span class="cov0" title="0">{
+                s.Logger.Info("attempting IXFR", "zone", zone.Name, "from", localSerial)
+                if err := s.performIXFR(zone, masterAddr, localSerial); err == nil </span><span class="cov0" title="0">{
+                        s.Logger.Info("IXFR successful", "zone", zone.Name)
+                        return
+                }</span> else<span class="cov0" title="0"> {
+                        s.Logger.Warn("IXFR failed, falling back to AXFR", "zone", zone.Name, "error", err)
+                }</span>
+        }
+
+        <span class="cov0" title="0">if err := s.performAXFR(zone, masterAddr); err != nil </span><span class="cov0" title="0">{
+                s.Logger.Error("AXFR failed", "zone", zone.Name, "error", err)
+        }</span>
+}
+
+func (s *Server) performIXFR(zone *domain.Zone, masterAddr string, localSerial uint32) error <span class="cov8" title="1">{
+        conn, err := net.DialTimeout("tcp", masterAddr, 10*time.Second)
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+        <span class="cov8" title="1">defer func() </span><span class="cov8" title="1">{ _ = conn.Close() }</span>()
+
+        // Construct IXFR query
+        <span class="cov8" title="1">req := packet.NewDNSPacket()
+        req.Header.ID = generateTransactionID()
+        req.Questions = append(req.Questions, packet.DNSQuestion{
+                Name:   zone.Name,
+                QType:  packet.IXFR,
+                QClass: 1,
+        })
+
+        // Add client's current SOA to Authority section
+        localSOARecords, err := s.Repo.GetRecords(context.Background(), zone.Name, domain.TypeSOA, "")
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("failed to fetch local SOA for IXFR: %w", err)
+        }</span>
+        <span class="cov8" title="1">if len(localSOARecords) &gt; 0 </span><span class="cov8" title="1">{
+                pSOA, errConv := repository.ConvertDomainToPacketRecord(localSOARecords[0])
+                if errConv != nil </span><span class="cov0" title="0">{
+                        return fmt.Errorf("failed to convert local SOA for IXFR: %w", errConv)
+                }</span>
+                <span class="cov8" title="1">req.Authorities = append(req.Authorities, pSOA)</span>
+        } else<span class="cov0" title="0"> {
+                return fmt.Errorf("local SOA not found for zone %s", zone.Name)
+        }</span>
+
+        <span class="cov8" title="1">buffer := packet.NewBytePacketBuffer()
+        if err := req.Write(buffer); err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+        <span class="cov8" title="1">data := buffer.Buf[:buffer.Position()]
+        prefix := []byte{byte(len(data) &gt;&gt; 8), byte(len(data) &amp; 0xFF)}
+        if _, err := conn.Write(append(prefix, data...)); err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+
+        // State machine for IXFR
+        <span class="cov8" title="1">var allRecords []packet.DNSRecord
+        first := true
+        isIncremental := false
+        soaCount := 0
+        var masterSerial uint32
+
+        for </span><span class="cov8" title="1">{
+                lenBuf := make([]byte, 2)
+                if _, err := io.ReadFull(conn, lenBuf); err != nil </span><span class="cov0" title="0">{
+                        return err
+                }</span>
+                <span class="cov8" title="1">pLen := int(lenBuf[0])&lt;&lt;8 | int(lenBuf[1])
+                pData := make([]byte, pLen)
+                if _, err := io.ReadFull(conn, pData); err != nil </span><span class="cov0" title="0">{
+                        return err
+                }</span>
+
+                <span class="cov8" title="1">resBuffer := packet.NewBytePacketBuffer()
+                resBuffer.Load(pData)
+                resp := packet.NewDNSPacket()
+                if err := resp.FromBuffer(resBuffer); err != nil </span><span class="cov0" title="0">{
+                        return err
+                }</span>
+
+                <span class="cov8" title="1">if resp.Header.ResCode != packet.RcodeNoError </span><span class="cov0" title="0">{
+                        return fmt.Errorf("master returned error: %d", resp.Header.ResCode)
+                }</span>
+
+                <span class="cov8" title="1">done := false
+                for _, ans := range resp.Answers </span><span class="cov8" title="1">{
+                        if first </span><span class="cov8" title="1">{
+                                if ans.Type != packet.SOA </span><span class="cov0" title="0">{
+                                        return fmt.Errorf("first record must be SOA")
+                                }</span>
+                                <span class="cov8" title="1">masterSerial = ans.Serial
+                                if ans.Serial &lt;= localSerial </span><span class="cov0" title="0">{
+                                        return nil // Already up to date
+                                }</span>
+                                <span class="cov8" title="1">first = false
+                                // Initial Current SOA skipped for counting/allRecords
+                                continue</span>
+                        }
+
+                        <span class="cov8" title="1">if ans.Type == packet.SOA </span><span class="cov8" title="1">{
+                                soaCount++
+                                if soaCount == 1 </span><span class="cov8" title="1">{
+                                        // RFC 1995: The first record after the initial SOA MUST be the
+                                        // version the client requested (localSerial) for it to be incremental.
+                                        // If it's anything else (like masterSerial again), it's AXFR fallback.
+                                        isIncremental = ans.Serial == localSerial
+                                }</span>
+
+                                // Termination check:
+                                // Incremental: ODD SOA count (&gt;1) matching master serial marks end
+                                <span class="cov8" title="1">if isIncremental &amp;&amp; soaCount &gt; 1 &amp;&amp; soaCount%2 == 1 &amp;&amp; ans.Serial == masterSerial </span><span class="cov8" title="1">{
+                                        done = true
+                                        break</span>
+                                }
+                                // AXFR Fallback check: second SOA (soaCount == 1 since we skip first) marks end
+                                <span class="cov8" title="1">if !isIncremental &amp;&amp; soaCount == 1 </span><span class="cov8" title="1">{
+                                        done = true
+                                        // Don't break yet, we might want to include this SOA if it's AXFR
+                                }</span>
+                        }
+                        <span class="cov8" title="1">allRecords = append(allRecords, ans)
+                        if done </span><span class="cov8" title="1">{
+                                break</span>
+                        }
+                }
+                <span class="cov8" title="1">if done </span><span class="cov8" title="1">{
+                        break</span>
+                }
+        }
+
+        <span class="cov8" title="1">ctx := context.Background()
+        if !isIncremental </span><span class="cov8" title="1">{
+                // AXFR Fallback
+                var newRecords []domain.Record
+                for _, r := range allRecords </span><span class="cov8" title="1">{
+                        dRec, errConv := repository.ConvertPacketRecordToDomain(r, zone.ID)
+                        if errConv != nil </span><span class="cov0" title="0">{
+                                s.Logger.Warn("failed to convert packet record in AXFR fallback", "error", errConv)
+                                continue</span>
+                        }
+                        <span class="cov8" title="1">dRec.TenantID = zone.TenantID
+                        newRecords = append(newRecords, dRec)</span>
+                }
+                <span class="cov8" title="1">if err := s.Repo.DeleteRecordsForZone(ctx, zone.ID); err != nil </span><span class="cov0" title="0">{
+                        return fmt.Errorf("AXFR fallback failed to clear zone: %w", err)
+                }</span>
+                <span class="cov8" title="1">if err := s.Repo.BatchCreateRecords(ctx, newRecords); err != nil </span><span class="cov0" title="0">{
+                        return fmt.Errorf("AXFR fallback failed to import records: %w", err)
+                }</span>
+                <span class="cov8" title="1">return nil</span>
+        }
+
+        // Incremental logic: Apply Deletions then Additions
+        // The sequence is [SOA(old), deleted..., SOA(new), added...]
+        <span class="cov8" title="1">deleting := false
+        for _, r := range allRecords </span><span class="cov8" title="1">{
+                dRec, errConv := repository.ConvertPacketRecordToDomain(r, zone.ID)
+                if errConv != nil </span><span class="cov0" title="0">{
+                        s.Logger.Warn("failed to convert record in IXFR delta", "error", errConv)
+                        return errConv
+                }</span>
+                <span class="cov8" title="1">if r.Type == packet.SOA </span><span class="cov8" title="1">{
+                        deleting = !deleting
+                        if !deleting </span><span class="cov8" title="1">{
+                                // This is SOA(new), save it to update local serial
+                                dRec.TenantID = zone.TenantID
+                                if err := s.Repo.CreateRecord(ctx, &amp;dRec); err != nil </span><span class="cov0" title="0">{
+                                        return fmt.Errorf("IXFR failed to save new SOA: %w", err)
+                                }</span>
+                        } else<span class="cov8" title="1"> {
+                                // This is SOA(old), delete it
+                                if err := s.Repo.DeleteRecordSpecific(ctx, zone.ID, dRec.Name, dRec.Type, dRec.Content); err != nil </span><span class="cov0" title="0">{
+                                        return fmt.Errorf("IXFR failed to delete old SOA: %w", err)
+                                }</span>
+                        }
+                        <span class="cov8" title="1">continue</span>
+                }
+                <span class="cov8" title="1">if deleting </span><span class="cov8" title="1">{
+                        if err := s.Repo.DeleteRecordSpecific(ctx, zone.ID, dRec.Name, dRec.Type, dRec.Content); err != nil </span><span class="cov0" title="0">{
+                                return fmt.Errorf("IXFR failed to delete record: %w", err)
+                        }</span>
+                } else<span class="cov8" title="1"> {
+                        dRec.TenantID = zone.TenantID
+                        if err := s.Repo.CreateRecord(ctx, &amp;dRec); err != nil </span><span class="cov0" title="0">{
+                                return fmt.Errorf("IXFR failed to create record: %w", err)
+                        }</span>
+                }
+        }
+
+        <span class="cov8" title="1">return nil</span>
+}
+
+func (s *Server) performAXFR(zone *domain.Zone, masterAddr string) error <span class="cov0" title="0">{
+        s.Logger.Info("starting AXFR", "zone", zone.Name, "master", masterAddr)
+
+        conn, err := net.DialTimeout("tcp", masterAddr, 10*time.Second)
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+        <span class="cov0" title="0">defer func() </span><span class="cov0" title="0">{
+                if errClose := conn.Close(); errClose != nil </span><span class="cov0" title="0">{
+                        s.Logger.Warn("failed to close AXFR connection", "error", errClose)
+                }</span>
+        }()
+
+        // Construct AXFR query
+        <span class="cov0" title="0">req := packet.NewDNSPacket()
+        req.Header.ID = generateTransactionID()
+        req.Header.RecursionDesired = false
+        req.Questions = append(req.Questions, packet.DNSQuestion{
+                Name:   zone.Name,
+                QType:  packet.AXFR,
+                QClass: 1,
+        })
+
+        buffer := packet.NewBytePacketBuffer()
+        if err := req.Write(buffer); err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+
+        // Write length-prefixed query
+        <span class="cov0" title="0">data := buffer.Buf[:buffer.Position()]
+        prefix := []byte{byte(len(data) &gt;&gt; 8), byte(len(data) &amp; 0xFF)}
+        if _, err := conn.Write(append(prefix, data...)); err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+
+        <span class="cov0" title="0">var newRecords []domain.Record
+        soaCount := 0
+
+        for </span><span class="cov0" title="0">{
+                // Read 2-byte length
+                lenBuf := make([]byte, 2)
+                if _, err := io.ReadFull(conn, lenBuf); err != nil </span><span class="cov0" title="0">{
+                        return err
+                }</span>
+                <span class="cov0" title="0">pLen := int(lenBuf[0])&lt;&lt;8 | int(lenBuf[1])
+
+                // Read packet
+                pData := make([]byte, pLen)
+                if _, err := io.ReadFull(conn, pData); err != nil </span><span class="cov0" title="0">{
+                        return err
+                }</span>
+
+                <span class="cov0" title="0">resBuffer := packet.NewBytePacketBuffer()
+                resBuffer.Load(pData)
+
+                resp := packet.NewDNSPacket()
+                if err := resp.FromBuffer(resBuffer); err != nil </span><span class="cov0" title="0">{
+                        return err
+                }</span>
+
+                <span class="cov0" title="0">if resp.Header.ResCode != packet.RcodeNoError </span><span class="cov0" title="0">{
+                        return fmt.Errorf("master returned error: %d", resp.Header.ResCode)
+                }</span>
+
+                <span class="cov0" title="0">for _, ans := range resp.Answers </span><span class="cov0" title="0">{
+                        if ans.Type == packet.SOA </span><span class="cov0" title="0">{
+                                soaCount++
+                        }</span>
+                        
+                        <span class="cov0" title="0">dRec, err := repository.ConvertPacketRecordToDomain(ans, zone.ID)
+                        if err != nil </span><span class="cov0" title="0">{
+                                s.Logger.Warn("failed to convert packet record", "error", err)
+                                continue</span>
+                        }
+                        <span class="cov0" title="0">dRec.TenantID = zone.TenantID
+                        newRecords = append(newRecords, dRec)</span>
+                }
+
+                // AXFR ends when the second SOA is received
+                <span class="cov0" title="0">if soaCount &gt;= 2 </span><span class="cov0" title="0">{
+                        break</span>
+                }
+        }
+
+        <span class="cov0" title="0">s.Logger.Info("AXFR received all records, updating repository", "zone", zone.Name, "count", len(newRecords))
+
+        // Atomic-ish update: delete all and batch create
+        ctx := context.Background()
+        if err := s.Repo.DeleteRecordsForZone(ctx, zone.ID); err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("failed to clear old records: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">return s.Repo.BatchCreateRecords(ctx, newRecords)</span>
+}
+</pre>
+		
+		<pre class="file" id="file2" style="display: none">package server
+
+import (
+        "sync"
+        "time"
+)
+
+// rateLimiter implements a simple per-IP token bucket
+type rateLimiter struct {
+        mu      sync.Mutex
+        buckets map[string]*bucket
+        rate    float64 // tokens per second
+        burst   int     // max tokens
+}
+
+type bucket struct {
+        tokens float64
+        last   time.Time
+}
+
+func newRateLimiter(rate float64, burst int) *rateLimiter <span class="cov8" title="1">{
+        return &amp;rateLimiter{
+                buckets: make(map[string]*bucket),
+                rate:    rate,
+                burst:   burst,
+        }
+}</span>
+
+func (rl *rateLimiter) Allow(ip string) bool <span class="cov8" title="1">{
+        rl.mu.Lock()
+        defer rl.mu.Unlock()
+
+        b, exists := rl.buckets[ip]
+        if !exists </span><span class="cov8" title="1">{
+                b = &amp;bucket{
+                        tokens: float64(rl.burst),
+                        last:   time.Now(),
+                }
+                rl.buckets[ip] = b
+        }</span>
+
+        <span class="cov8" title="1">now := time.Now()
+        elapsed := now.Sub(b.last).Seconds()
+        b.last = now
+
+        // Refill
+        b.tokens += elapsed * rl.rate
+        if b.tokens &gt; float64(rl.burst) </span><span class="cov8" title="1">{
+                b.tokens = float64(rl.burst)
+        }</span>
+
+        // Consume
+        <span class="cov8" title="1">if b.tokens &gt;= 1 </span><span class="cov8" title="1">{
+                b.tokens--
+                return true
+        }</span>
+
+        <span class="cov8" title="1">return false</span>
+}
+
+// Cleanup removes old buckets to prevent memory leaks
+func (rl *rateLimiter) Cleanup() <span class="cov8" title="1">{
+        rl.mu.Lock()
+        defer rl.mu.Unlock()
+
+        now := time.Now()
+        for ip, b := range rl.buckets </span><span class="cov8" title="1">{
+                if now.Sub(b.last) &gt; 10*time.Minute </span><span class="cov8" title="1">{
+                        delete(rl.buckets, ip)
+                }</span>
+        }
+}
+</pre>
+		
+		<pre class="file" id="file3" style="display: none">package server
+
+import (
+        "crypto/rand"
+        "encoding/binary"
+        "fmt"
+        mrand "math/rand"
+        "net"
+        "time"
+
+        "github.com/poyrazK/cloudDNS/internal/dns/packet"
+)
+
+type recursiveResolver struct {
+        rootHints []string
+}
+
+func newRecursiveResolver() *recursiveResolver <span class="cov8" title="1">{
+        return &amp;recursiveResolver{
+                rootHints: []string{
+                        "198.41.0.4",     // a.root-servers.net
+                        "170.247.170.2",  // b.root-servers.net
+                        "192.33.4.12",    // c.root-servers.net
+                        "199.7.91.13",    // d.root-servers.net
+                        "192.203.230.10", // e.root-servers.net
+                        "192.5.5.241",    // f.root-servers.net
+                        "192.112.36.4",   // g.root-servers.net
+                        "198.97.190.53",  // h.root-servers.net
+                        "192.36.148.17",  // i.root-servers.net
+                        "192.58.128.30",  // j.root-servers.net
+                        "193.0.14.129",   // k.root-servers.net
+                        "199.7.83.42",    // l.root-servers.net
+                        "202.12.27.33",   // m.root-servers.net
+                },
+        }
+}</span>
+
+func (r *recursiveResolver) getShuffledRoots() []string <span class="cov8" title="1">{
+        shuffled := make([]string, len(r.rootHints))
+        copy(shuffled, r.rootHints)
+        // #nosec G404 -- Shuffling root hints for load balancing doesn't require crypto/rand
+        mrand.Shuffle(len(shuffled), func(i, j int) </span><span class="cov8" title="1">{
+                shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+        }</span>)
+        <span class="cov8" title="1">return shuffled</span>
+}
+
+func (s *Server) resolveRecursive(name string) (*packet.DNSPacket, error) <span class="cov8" title="1">{
+        // Start with a random root server for load balancing and resilience.
+        resolver := newRecursiveResolver()
+        roots := resolver.getShuffledRoots()
+
+        var lastErr error
+
+        // Failover logic: Iterate through all available root servers.
+        // If one fails (timeout, unreachable), proceed to the next.
+        for _, rootNS := range roots </span><span class="cov8" title="1">{
+                ns := rootNS
+                
+                for </span><span class="cov8" title="1">{
+                        s.Logger.Info("recursive lookup", "name", name, "ns", ns)
+
+                        // Query the current authoritative name server
+                        serverAddr := net.JoinHostPort(ns, "53")
+                        resp, err := s.queryFn(serverAddr, name, packet.A)
+                        if err != nil </span><span class="cov0" title="0">{
+                                // Record the error and break the inner loop to try the next root server
+                                lastErr = err
+                                s.Logger.Warn("recursive query failed", "ns", ns, "error", err)
+                                break</span> 
+                        }
+
+                        // If we got a valid answer with NOERROR, we are done
+                        <span class="cov8" title="1">if len(resp.Answers) &gt; 0 &amp;&amp; resp.Header.ResCode == 0 </span><span class="cov8" title="1">{
+                                return resp, nil
+                        }</span>
+
+                        // NXDOMAIN is a definitive answer, so we stop here
+                        <span class="cov8" title="1">if resp.Header.ResCode == 3 </span><span class="cov8" title="1">{
+                                return resp, nil
+                        }</span>
+
+                        // Follow the referral chain: check Authority section for the next NS
+                        <span class="cov8" title="1">if nsIP, found := s.findNextNS(resp); found </span><span class="cov8" title="1">{
+                                ns = nsIP
+                                continue</span>
+                        }
+
+                        // No more referrals or answers, return what we have
+                        <span class="cov8" title="1">return resp, nil</span>
+                }
+        }
+
+        <span class="cov0" title="0">return nil, fmt.Errorf("recursion failed after trying all roots: %w", lastErr)</span>
+}
+
+func generateTransactionID() uint16 <span class="cov8" title="1">{
+        var id uint16
+        _ = binary.Read(rand.Reader, binary.BigEndian, &amp;id)
+        return id
+}</span>
+
+func (s *Server) sendQuery(server string, name string, _ packet.QueryType) (*packet.DNSPacket, error) <span class="cov8" title="1">{
+        conn, err := net.DialTimeout("udp", server, 5*time.Second)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+        <span class="cov8" title="1">defer func() </span><span class="cov8" title="1">{ _ = conn.Close() }</span>()
+
+        <span class="cov8" title="1">req := packet.NewDNSPacket()
+        req.Header.ID = generateTransactionID()
+        req.Header.Questions = 1
+        req.Header.RecursionDesired = false // Iterative
+        req.Questions = append(req.Questions, *packet.NewDNSQuestion(name, packet.A))
+
+        buffer := packet.NewBytePacketBuffer()
+        if errWrite := req.Write(buffer); errWrite != nil </span><span class="cov0" title="0">{
+                return nil, errWrite
+        }</span>
+
+        <span class="cov8" title="1">_, err = conn.Write(buffer.Buf[:buffer.Position()])
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+
+        <span class="cov8" title="1">resBuffer := packet.NewBytePacketBuffer()
+        _ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+        
+        // Read into a temporary buffer first
+        tmp := make([]byte, packet.MaxPacketSize)
+        n, errRead := conn.Read(tmp)
+        if errRead != nil </span><span class="cov0" title="0">{
+                return nil, errRead
+        }</span>
+        
+        // Use Load() to correctly update resBuffer.Len and parsing flag
+        <span class="cov8" title="1">resBuffer.Load(tmp[:n])
+
+        resp := packet.NewDNSPacket()
+        if errFromBuf := resp.FromBuffer(resBuffer); errFromBuf != nil </span><span class="cov0" title="0">{
+                return nil, errFromBuf
+        }</span>
+
+        <span class="cov8" title="1">if resp.Header.ID != req.Header.ID </span><span class="cov8" title="1">{
+                return nil, fmt.Errorf("transaction ID mismatch: expected %d, got %d", req.Header.ID, resp.Header.ID)
+        }</span>
+
+        <span class="cov8" title="1">return resp, nil</span>
+}
+
+func (s *Server) findNextNS(resp *packet.DNSPacket) (string, bool) <span class="cov8" title="1">{
+        for _, auth := range resp.Authorities </span><span class="cov8" title="1">{
+                if auth.Type == packet.NS </span><span class="cov8" title="1">{
+                        for _, res := range resp.Resources </span><span class="cov8" title="1">{
+                                if res.Name == auth.Host &amp;&amp; res.Type == packet.A </span><span class="cov8" title="1">{
+                                        return res.IP.String(), true
+                                }</span>
+                        }
+                }
+        }
+        <span class="cov8" title="1">for _, res := range resp.Resources </span><span class="cov0" title="0">{
+                if res.Type == packet.A </span><span class="cov0" title="0">{
+                        return res.IP.String(), true
+                }</span>
+        }
+        <span class="cov8" title="1">return "", false</span>
+}
+</pre>
+		
+		<pre class="file" id="file4" style="display: none">package server
+
+import (
+        "context"
+        "fmt"
+        "time"
+
+        "github.com/poyrazK/cloudDNS/internal/core/domain"
+        "github.com/redis/go-redis/v9"
+)
+
+const InvalidationChannel = "dns:invalidation"
+
+type RedisCache struct {
+        client *redis.Client
+}
+
+func NewRedisCache(addr string, password string, db int) *RedisCache <span class="cov8" title="1">{
+        rdb := redis.NewClient(&amp;redis.Options{
+                Addr:     addr,
+                Password: password,
+                DB:       db,
+        })
+        return &amp;RedisCache{client: rdb}
+}</span>
+
+func (r *RedisCache) Get(ctx context.Context, key string) ([]byte, bool) <span class="cov8" title="1">{
+        val, err := r.client.Get(ctx, "dns:"+key).Bytes()
+        if err != nil </span><span class="cov8" title="1">{
+                return nil, false
+        }</span>
+        <span class="cov8" title="1">return val, true</span>
+}
+
+func (r *RedisCache) Set(ctx context.Context, key string, data []byte, ttl time.Duration) <span class="cov8" title="1">{
+        r.client.Set(ctx, "dns:"+key, data, ttl)
+}</span>
+
+func (r *RedisCache) Ping(ctx context.Context) error <span class="cov8" title="1">{
+        return r.client.Ping(ctx).Err()
+}</span>
+
+// Invalidate publishes an invalidation event to all nodes.
+func (r *RedisCache) Invalidate(ctx context.Context, name string, qType domain.RecordType) error <span class="cov8" title="1">{
+        msg := fmt.Sprintf("%s:%s", name, string(qType))
+        return r.client.Publish(ctx, InvalidationChannel, msg).Err()
+}</span>
+
+// Subscribe returns a PubSub instance that receives invalidation keys.
+func (r *RedisCache) Subscribe(ctx context.Context) *redis.PubSub <span class="cov8" title="1">{
+        return r.client.Subscribe(ctx, InvalidationChannel)
+}</span>
+</pre>
+		
+		<pre class="file" id="file5" style="display: none">//go:build !windows
+
+package server
+
+import "golang.org/x/sys/unix"
+
+func setReusePort(fd uintptr) error <span class="cov8" title="1">{
+        return unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1)
+}</span>
+</pre>
+		
+		<pre class="file" id="file6" style="display: none">package server
+
+import (
+        "bytes"
+        "context"
+        "crypto/hmac"
+        crand "crypto/rand"
+        "crypto/sha256"
+        "crypto/tls"
+        "encoding/base64"
+        "encoding/binary"
+        "errors"
+        "fmt"
+        "io"
+        "log/slog"
+        "math"
+        "net"
+        "net/http"
+        "os"
+        "runtime"
+        "sort"
+        "strings"
+        "syscall"
+        "time"
+
+        "github.com/poyrazK/cloudDNS/internal/adapters/repository"
+        "github.com/poyrazK/cloudDNS/internal/core/domain"
+        "github.com/poyrazK/cloudDNS/internal/core/ports"
+        "github.com/poyrazK/cloudDNS/internal/core/services"
+        "github.com/poyrazK/cloudDNS/internal/dns/master"
+        "github.com/poyrazK/cloudDNS/internal/dns/packet"
+        "github.com/poyrazK/cloudDNS/internal/infrastructure/metrics"
+)
+
+// ClassCHAOS is the DNS class for server identity and metadata.
+const ClassCHAOS = 3
+
+type Server struct {
+        Addr             string
+        Repo             ports.DNSRepository
+        Cache            *DNSCache
+        Redis            *RedisCache
+        DNSSEC           *services.DNSSECService
+        WorkerCount      int
+        udpQueue         chan udpTask
+        Logger           *slog.Logger
+        queryFn          func(server string, name string, qtype packet.QueryType) (*packet.DNSPacket, error)
+        limiter          *rateLimiter
+        TsigKeys         map[string][]byte
+        NodeID           string
+        RecursionEnabled bool
+        CookieSecret     []byte
+
+        // Testing/Chaos flags
+        SimulateDBLatency  time.Duration
+        NotifyPortOverride int
+        DisableAsync       bool // If true, NOTIFY and UPDATE handlers won't spawn goroutines
+
+        // TLS Config for DoT and DoH
+        TLSConfig *tls.Config
+}
+
+type udpTask struct {
+        addr net.Addr
+        data []byte
+        conn net.PacketConn
+}
+
+func NewServer(addr string, repo ports.DNSRepository, logger *slog.Logger) *Server <span class="cov8" title="1">{
+        if logger == nil </span><span class="cov8" title="1">{
+                logger = slog.Default()
+        }</span>
+
+        <span class="cov8" title="1">nodeID := os.Getenv("NODE_ID")
+        if nodeID == "" </span><span class="cov8" title="1">{
+                h, _ := os.Hostname()
+                if h != "" </span><span class="cov8" title="1">{
+                        nodeID = h
+                }</span> else<span class="cov0" title="0"> {
+                        nodeID = "unknown-node"
+                }</span>
+        }
+
+        <span class="cov8" title="1">recursion := os.Getenv("RECURSION_ENABLED") == "true"
+
+        s := &amp;Server{
+                Addr:             addr,
+                Repo:             repo,
+                Cache:            NewDNSCache(),
+                DNSSEC:           services.NewDNSSECService(repo),
+                WorkerCount:      runtime.NumCPU() * 32, // High concurrency tuning
+                udpQueue:         make(chan udpTask, 50000),
+                Logger:           logger,
+                limiter:          newRateLimiter(500000, 200000),
+                TsigKeys:         make(map[string][]byte),
+                NodeID:           nodeID,
+                RecursionEnabled: recursion,
+                CookieSecret:     make([]byte, 32),
+        }
+        _, _ = crand.Read(s.CookieSecret)
+        s.queryFn = s.sendQuery
+
+        // Periodic cleanup of rate limiter buckets
+        go func() </span><span class="cov8" title="1">{
+                for </span><span class="cov8" title="1">{
+                        time.Sleep(5 * time.Minute)
+                        s.limiter.Cleanup()
+                }</span>
+        }()
+
+        // Background DNSSEC automation: Run every hour
+        <span class="cov8" title="1">go func() </span><span class="cov8" title="1">{
+                for </span><span class="cov8" title="1">{
+                        time.Sleep(1 * time.Hour)
+                        s.automateDNSSEC()
+                }</span>
+        }()
+
+        <span class="cov8" title="1">return s</span>
+}
+
+func (s *Server) generateServerCookie(clientCookie []byte, clientIP string) []byte <span class="cov8" title="1">{
+        h := hmac.New(sha256.New, s.CookieSecret)
+        h.Write(clientCookie)
+        h.Write([]byte(clientIP))
+        return h.Sum(nil)[:16] // Return 16 bytes of server cookie
+}</span>
+
+func (s *Server) padResponse(response *packet.DNSPacket, blockSize int) <span class="cov8" title="1">{
+        // Find OPT record
+        var opt *packet.DNSRecord
+        for i := range response.Resources </span><span class="cov8" title="1">{
+                if response.Resources[i].Type == packet.OPT </span><span class="cov8" title="1">{
+                        opt = &amp;response.Resources[i]
+                        break</span>
+                }
+        }
+
+        <span class="cov8" title="1">if opt == nil </span><span class="cov8" title="1">{
+                // PADDING requires an OPT record.
+                return
+        }</span>
+
+        // Remove existing padding if any to avoid double padding
+        <span class="cov8" title="1">for i, o := range opt.Options </span><span class="cov0" title="0">{
+                if o.Code == packet.EdnsOptionPadding </span><span class="cov0" title="0">{
+                        opt.Options = append(opt.Options[:i], opt.Options[i+1:]...)
+                        break</span>
+                }
+        }
+
+        // Calculate current size with compression enabled
+        <span class="cov8" title="1">buf := packet.GetBuffer()
+        defer packet.PutBuffer(buf)
+        buf.HasNames = true
+        _ = response.Write(buf)
+        currentSize := buf.Position()
+
+        // The Padding option itself adds 4 bytes (code + length)
+        overhead := 4
+        needed := blockSize - (currentSize+overhead)%blockSize
+        if (currentSize+overhead)%blockSize == 0 </span><span class="cov8" title="1">{
+                needed = 0
+        }</span>
+        
+        <span class="cov8" title="1">padding := make([]byte, needed)
+        opt.SetOption(packet.EdnsOptionPadding, padding)</span>
+}
+
+func (s *Server) automateDNSSEC() <span class="cov8" title="1">{
+        ctx := context.Background()
+        // Get all zones
+        zones, errList := s.Repo.ListZones(ctx, "")
+        if errList != nil </span><span class="cov8" title="1">{
+                return
+        }</span>
+
+        <span class="cov8" title="1">for _, z := range zones </span><span class="cov8" title="1">{
+                if errAutomate := s.DNSSEC.AutomateLifecycle(ctx, z.ID); errAutomate != nil </span><span class="cov8" title="1">{
+                        s.Logger.Error("DNSSEC automation failed for zone", "zone", z.Name, "error", errAutomate)
+                }</span>
+        }
+}
+
+func (s *Server) startInvalidationListener(ctx context.Context) <span class="cov8" title="1">{
+        pubsub := s.Redis.Subscribe(ctx)
+        defer func() </span><span class="cov8" title="1">{
+                if errClose := pubsub.Close(); errClose != nil </span><span class="cov0" title="0">{
+                        s.Logger.Error("failed to close pubsub", "error", errClose)
+                }</span>
+        }()
+
+        <span class="cov8" title="1">ch := pubsub.Channel()
+        s.Logger.Info("started global cache invalidation listener")
+
+        for </span><span class="cov8" title="1">{
+                select </span>{
+                case &lt;-ctx.Done():<span class="cov8" title="1">
+                        s.Logger.Info("stopping global cache invalidation listener")
+                        return</span>
+                case msg := &lt;-ch:<span class="cov8" title="1">
+                        // msg.Payload format is "name:type"
+                        s.Logger.Debug("received cache invalidation event", "key", msg.Payload)
+
+                        // Standardize key for L1 cache lookup (lowercase name)
+                        parts := strings.SplitN(msg.Payload, ":", 2)
+                        if len(parts) == 2 </span><span class="cov8" title="1">{
+                                qType := packet.RecordTypeToQueryType(domain.RecordType(parts[1]))
+                                l1Key := fmt.Sprintf("%s:%d", strings.ToLower(parts[0]), qType)
+                                s.Cache.Invalidate(l1Key)
+                        }</span> else<span class="cov8" title="1"> {
+                                s.Logger.Warn("received malformed cache invalidation payload", "payload", msg.Payload)
+                        }</span>
+                }
+        }
+}
+
+func (s *Server) Run(ctx context.Context) error <span class="cov8" title="1">{
+        s.Logger.Info("starting parallel server", "addr", s.Addr, "listeners", runtime.NumCPU())
+
+        // Start cache invalidation listener if Redis is enabled
+        if s.Redis != nil </span><span class="cov0" title="0">{
+                go s.startInvalidationListener(ctx)
+        }</span>
+
+        <span class="cov8" title="1">lc := net.ListenConfig{
+                Control: func(network, address string, c syscall.RawConn) error </span><span class="cov8" title="1">{
+                        return c.Control(func(fd uintptr) </span><span class="cov8" title="1">{
+                                if errReuse := setReusePort(fd); errReuse != nil </span><span class="cov0" title="0">{
+                                        s.Logger.Warn("failed to set reuse port", "error", errReuse)
+                                }</span>
+                        })
+                },
+        }
+
+        // 1. Parallel UDP
+        <span class="cov8" title="1">started := 0
+        for i := 0; i &lt; runtime.NumCPU(); i++ </span><span class="cov8" title="1">{
+                conn, errListen := lc.ListenPacket(ctx, "udp", s.Addr)
+                if errListen != nil </span><span class="cov8" title="1">{
+                        s.Logger.Error("failed to start UDP listener", "id", i, "error", errListen)
+                        continue</span>
+                }
+                <span class="cov8" title="1">started++
+                go func(c net.PacketConn) </span><span class="cov8" title="1">{
+                        defer func() </span><span class="cov0" title="0">{
+                                if errClose := c.Close(); errClose != nil </span><span class="cov0" title="0">{
+                                        s.Logger.Error("failed to close UDP connection", "error", errClose)
+                                }</span>
+                        }()
+                        <span class="cov8" title="1">for </span><span class="cov8" title="1">{
+                                buf := make([]byte, 512)
+                                n, addr, errRead := c.ReadFrom(buf)
+                                if errRead != nil </span><span class="cov0" title="0">{
+                                        continue</span>
+                                }
+                                <span class="cov8" title="1">data := make([]byte, n)
+                                copy(data, buf[:n])
+                                s.udpQueue &lt;- udpTask{addr: addr, data: data, conn: c}</span>
+                        }
+                }(conn)
+        }
+
+        <span class="cov8" title="1">if started == 0 </span><span class="cov8" title="1">{
+                return fmt.Errorf("failed to start any UDP listeners on %s", s.Addr)
+        }</span>
+
+        // 2. UDP Workers
+        <span class="cov8" title="1">for i := 0; i &lt; s.WorkerCount; i++ </span><span class="cov8" title="1">{
+                go s.udpWorker()
+        }</span>
+
+        // 3. TCP Listener
+        <span class="cov8" title="1">tcpListener, errTCP := lc.Listen(ctx, "tcp", s.Addr)
+        if errTCP == nil </span><span class="cov8" title="1">{
+                go func() </span><span class="cov8" title="1">{
+                        defer func() </span><span class="cov0" title="0">{
+                                if errClose := tcpListener.Close(); errClose != nil </span><span class="cov0" title="0">{
+                                        s.Logger.Error("failed to close TCP listener", "error", errClose)
+                                }</span>
+                        }()
+                        <span class="cov8" title="1">for </span><span class="cov8" title="1">{
+                                conn, errAccept := tcpListener.Accept()
+                                if errAccept != nil </span><span class="cov0" title="0">{
+                                        continue</span>
+                                }
+                                <span class="cov8" title="1">go s.handleTCPConnection(conn)</span>
+                        }
+                }()
+        }
+
+        // 4. DoT Listener (Port 853)
+        <span class="cov8" title="1">if s.TLSConfig != nil </span><span class="cov8" title="1">{
+                host, _, _ := net.SplitHostPort(s.Addr)
+                dotAddr := net.JoinHostPort(host, "853")
+                dotListener, errDoT := tls.Listen("tcp", dotAddr, s.TLSConfig)
+                if errDoT == nil </span><span class="cov0" title="0">{
+                        s.Logger.Info("DNS over TLS (DoT) starting", "addr", dotAddr)
+                        go func() </span><span class="cov0" title="0">{
+                                defer func() </span><span class="cov0" title="0">{
+                                        if errClose := dotListener.Close(); errClose != nil </span><span class="cov0" title="0">{
+                                                s.Logger.Error("failed to close DoT listener", "error", errClose)
+                                        }</span>
+                                }()
+                                <span class="cov0" title="0">for </span><span class="cov0" title="0">{
+                                        conn, errAccept := dotListener.Accept()
+                                        if errAccept != nil </span><span class="cov0" title="0">{
+                                                continue</span>
+                                        }
+                                        <span class="cov0" title="0">go s.handleTCPConnection(conn)</span>
+                                }
+                        }()
+                }
+
+                // 5. DoH Listener
+                <span class="cov8" title="1">dohPort := os.Getenv("DOH_PORT")
+                if dohPort == "" </span><span class="cov0" title="0">{
+                        dohPort = "443"
+                }</span>
+                <span class="cov8" title="1">dohAddr := net.JoinHostPort(host, dohPort)
+                mux := http.NewServeMux()
+                mux.HandleFunc("/dns-query", s.handleDoH)
+                dohServer := &amp;http.Server{
+                        Addr:              dohAddr,
+                        Handler:           mux,
+                        TLSConfig:         s.TLSConfig,
+                        ReadHeaderTimeout: 5 * time.Second,
+                }
+                s.Logger.Info("DNS over HTTPS (DoH) starting", "addr", dohAddr)
+                go func() </span><span class="cov8" title="1">{
+                        if errDoH := dohServer.ListenAndServeTLS("", ""); errDoH != nil </span><span class="cov0" title="0">{
+                                s.Logger.Error("DoH server failed", "error", errDoH)
+                        }</span>
+                }()
+        }
+
+        <span class="cov8" title="1">&lt;-ctx.Done()
+        return nil</span>
+}
+
+func (s *Server) handleDoH(w http.ResponseWriter, r *http.Request) <span class="cov8" title="1">{
+        var dnsMsg []byte
+        var errDoH error
+
+        switch r.Method </span>{
+        case http.MethodGet:<span class="cov8" title="1">
+                query := r.URL.Query().Get("dns")
+                if query == "" </span><span class="cov8" title="1">{
+                        http.Error(w, "missing dns parameter", http.StatusBadRequest)
+                        return
+                }</span>
+                <span class="cov8" title="1">dnsMsg, errDoH = base64.RawURLEncoding.DecodeString(query)
+                if errDoH != nil </span><span class="cov8" title="1">{
+                        // Try with padding if raw fails
+                        dnsMsg, errDoH = base64.URLEncoding.DecodeString(query)
+                        if errDoH != nil </span><span class="cov8" title="1">{
+                                http.Error(w, "invalid base64", http.StatusBadRequest)
+                                return
+                        }</span>
+                }
+        case http.MethodPost:<span class="cov8" title="1">
+                if r.Header.Get("Content-Type") != "application/dns-message" </span><span class="cov8" title="1">{
+                        http.Error(w, "invalid request", http.StatusBadRequest)
+                        return
+                }</span>
+                <span class="cov8" title="1">dnsMsg, errDoH = io.ReadAll(r.Body)
+                if errDoH != nil </span><span class="cov0" title="0">{
+                        http.Error(w, "failed to read body", http.StatusBadRequest)
+                        return
+                }</span>
+        default:<span class="cov8" title="1">
+                http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+                return</span>
+        }
+
+        <span class="cov8" title="1">if errHandle := s.handlePacket(dnsMsg, r.RemoteAddr, func(resp []byte) error </span><span class="cov8" title="1">{
+                w.Header().Set("Content-Type", "application/dns-message")
+                w.WriteHeader(http.StatusOK)
+                _, _ = w.Write(resp)
+                return nil
+        }</span>, "doh"); errHandle != nil <span class="cov0" title="0">{
+                http.Error(w, "server error", http.StatusInternalServerError)
+        }</span>
+}
+
+func (s *Server) udpWorker() <span class="cov8" title="1">{
+        for task := range s.udpQueue </span><span class="cov8" title="1">{
+                metrics.ActiveWorkers.Inc()
+                s.handleUDPConnection(task.conn, task.addr, task.data)
+                metrics.ActiveWorkers.Dec()
+        }</span>
+}
+
+func (s *Server) handleUDPConnection(pc net.PacketConn, addr net.Addr, data []byte) <span class="cov8" title="1">{
+        if errHandle := s.handlePacket(data, addr, func(resp []byte) error </span><span class="cov8" title="1">{
+                _, errWrite := pc.WriteTo(resp, addr)
+                return errWrite
+        }</span>, "udp"); errHandle != nil <span class="cov0" title="0">{
+                s.Logger.Error("failed to handle UDP packet", "error", errHandle)
+        }</span>
+}
+
+func (s *Server) handleTCPConnection(conn net.Conn) <span class="cov8" title="1">{
+        defer func() </span><span class="cov8" title="1">{ _ = conn.Close() }</span>()
+        <span class="cov8" title="1">for </span><span class="cov8" title="1">{
+                lenBuf := make([]byte, 2)
+                if _, errRead := io.ReadFull(conn, lenBuf); errRead != nil </span><span class="cov8" title="1">{
+                        return
+                }</span>
+                <span class="cov8" title="1">packetLen := uint16(lenBuf[0])&lt;&lt;8 | uint16(lenBuf[1])
+                data := make([]byte, packetLen)
+                if _, errRead := io.ReadFull(conn, data); errRead != nil </span><span class="cov0" title="0">{
+                        return
+                }</span>
+
+                // Check for AXFR/IXFR
+                <span class="cov8" title="1">reqBuffer := packet.GetBuffer()
+                reqBuffer.Load(data)
+                request := packet.NewDNSPacket()
+                if errFromBuf := request.FromBuffer(reqBuffer); errFromBuf == nil &amp;&amp; len(request.Questions) &gt; 0 </span><span class="cov8" title="1">{
+                        if request.Questions[0].QType == packet.AXFR </span><span class="cov8" title="1">{
+                                s.handleAXFR(conn, request)
+                                packet.PutBuffer(reqBuffer)
+                                continue</span>
+                        }
+                        <span class="cov8" title="1">if request.Questions[0].QType == packet.IXFR </span><span class="cov8" title="1">{
+                                s.handleIXFR(conn, request)
+                                packet.PutBuffer(reqBuffer)
+                                continue</span>
+                        }
+                }
+                <span class="cov8" title="1">packet.PutBuffer(reqBuffer)
+
+                if errHandle := s.handlePacket(data, conn.RemoteAddr(), func(resp []byte) error </span><span class="cov8" title="1">{
+                        resLen := uint16(len(resp)) // #nosec G115
+                        fullResp := append([]byte{byte(resLen &gt;&gt; 8), byte(resLen &amp; 0xFF)}, resp...)
+                        _, errWrite := conn.Write(fullResp)
+                        return errWrite
+                }</span>, "tcp"); errHandle != nil <span class="cov0" title="0">{
+                        s.Logger.Error("Failed to handle TCP packet", "error", errHandle)
+                }</span>
+        }
+}
+
+func (s *Server) handleAXFR(conn net.Conn, request *packet.DNSPacket) <span class="cov8" title="1">{
+        q := request.Questions[0]
+        if !strings.HasSuffix(q.Name, ".") </span><span class="cov0" title="0">{
+                q.Name += "."
+        }</span>
+
+        <span class="cov8" title="1">ctx := context.Background()
+        zone, _ := s.Repo.GetZone(ctx, q.Name)
+        if zone == nil </span><span class="cov8" title="1">{
+                s.Logger.Warn("AXFR requested for non-existent zone", "name", q.Name)
+                s.sendTCPError(conn, request.Header.ID, 3) // NXDOMAIN
+                return
+        }</span>
+
+        <span class="cov8" title="1">records, errList := s.Repo.ListRecordsForZone(ctx, zone.ID, zone.TenantID)
+        if errList != nil </span><span class="cov0" title="0">{
+                s.Logger.Error("AXFR failed to list records", "zone", zone.ID, "error", errList)
+                s.sendTCPError(conn, request.Header.ID, 2) // SERVFAIL
+                return
+        }</span>
+
+        <span class="cov8" title="1">var soa *domain.Record
+        for _, rec := range records </span><span class="cov8" title="1">{
+                if rec.Type == domain.TypeSOA </span><span class="cov8" title="1">{
+                        soa = &amp;rec
+                        break</span>
+                }
+        }
+
+        <span class="cov8" title="1">if soa == nil </span><span class="cov8" title="1">{
+                s.Logger.Error("AXFR failed: zone has no SOA", "zone", zone.Name)
+                s.sendTCPError(conn, request.Header.ID, 2)
+                return
+        }</span>
+
+        // Filter out the SOA record from the main list to avoid duplication if it's already there
+        <span class="cov8" title="1">var otherRecords []domain.Record
+        for _, rec := range records </span><span class="cov8" title="1">{
+                if rec.Type != domain.TypeSOA </span><span class="cov8" title="1">{
+                        otherRecords = append(otherRecords, rec)
+                }</span>
+        }
+
+        // Stream packets: SOA -&gt; [all other records] -&gt; SOA
+        <span class="cov8" title="1">stream := make([]domain.Record, 0, len(otherRecords)+2)
+        stream = append(stream, *soa)
+        stream = append(stream, otherRecords...)
+        stream = append(stream, *soa)
+
+        s.Logger.Info("AXFR starting", "zone", zone.Name, "records", len(stream))
+
+        for i, rec := range stream </span><span class="cov8" title="1">{
+                pRec, errConv := repository.ConvertDomainToPacketRecord(rec)
+                if errConv != nil </span><span class="cov0" title="0">{
+                        s.Logger.Error("AXFR failed to convert record", "type", rec.Type, "error", errConv)
+                        continue</span>
+                }
+
+                <span class="cov8" title="1">response := packet.NewDNSPacket()
+                response.Header.ID = request.Header.ID
+                response.Header.Response = true
+                response.Header.AuthoritativeAnswer = true
+                response.Questions = append(response.Questions, q)
+                response.Answers = append(response.Answers, pRec)
+
+                resBuffer := packet.GetBuffer()
+                resBuffer.HasNames = true
+                if errWrite := response.Write(resBuffer); errWrite != nil </span><span class="cov0" title="0">{
+                        s.Logger.Error("AXFR failed to write response", "error", errWrite)
+                        packet.PutBuffer(resBuffer)
+                        continue</span>
+                }
+                <span class="cov8" title="1">resData := resBuffer.Buf[:resBuffer.Position()]
+
+                resLen := uint16(len(resData)) // #nosec G115
+                fullResp := append([]byte{byte(resLen &gt;&gt; 8), byte(resLen &amp; 0xFF)}, resData...)
+                if _, errW := conn.Write(fullResp); errW != nil </span><span class="cov0" title="0">{
+                        s.Logger.Error("AXFR connection broken", "error", errW)
+                        packet.PutBuffer(resBuffer)
+                        return
+                }</span>
+                <span class="cov8" title="1">s.Logger.Debug("AXFR sent packet", "index", i, "type", pRec.Type)
+                packet.PutBuffer(resBuffer)</span>
+        }
+        <span class="cov8" title="1">s.Logger.Info("AXFR completed", "zone", zone.Name)</span>
+}
+
+func (s *Server) sendTCPError(conn net.Conn, id uint16, rcode uint8) <span class="cov8" title="1">{
+        response := packet.NewDNSPacket()
+        response.Header.ID = id
+        response.Header.Response = true
+        response.Header.ResCode = rcode
+        resBuffer := packet.GetBuffer()
+        _ = response.Write(resBuffer)
+        resData := resBuffer.Buf[:resBuffer.Position()]
+        resLen := uint16(len(resData)) // #nosec G115
+        fullResp := append([]byte{byte(resLen &gt;&gt; 8), byte(resLen &amp; 0xFF)}, resData...)
+        _, _ = conn.Write(fullResp)
+        packet.PutBuffer(resBuffer)
+}</span>
+
+func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]byte) error, protocol string) error <span class="cov8" title="1">{
+        start := time.Now()
+        defer func() </span><span class="cov8" title="1">{
+                metrics.QueryDuration.WithLabelValues("total").Observe(time.Since(start).Seconds())
+        }</span>()
+
+        <span class="cov8" title="1">var clientIP string
+        switch addr := srcAddr.(type) </span>{
+        case string:<span class="cov8" title="1">
+                clientIP, _, _ = net.SplitHostPort(addr)</span>
+        case net.Addr:<span class="cov8" title="1">
+                clientIP, _, _ = net.SplitHostPort(addr.String())</span>
+        }
+
+        <span class="cov8" title="1">if !s.limiter.Allow(clientIP) </span><span class="cov0" title="0">{
+                return nil
+        }</span>
+
+        <span class="cov8" title="1">reqBuffer := packet.GetBuffer()
+        defer packet.PutBuffer(reqBuffer)
+        reqBuffer.Load(data)
+
+        request := packet.NewDNSPacket()
+        if errParse := request.FromBuffer(reqBuffer); errParse != nil </span><span class="cov8" title="1">{
+                s.Logger.Error("failed to parse packet", "error", errParse)
+                return errParse
+        }</span>
+
+        // Default labels for metrics
+        <span class="cov8" title="1">qTypeLabel := "UNKNOWN"
+        if len(request.Questions) &gt; 0 </span><span class="cov8" title="1">{
+                qTypeLabel = request.Questions[0].QType.String()
+        }</span>
+
+        <span class="cov8" title="1">if request.Header.Opcode == packet.OpcodeUpdate </span><span class="cov8" title="1">{
+                err := s.handleUpdate(request, data, clientIP, sendFn)
+                rcode := "0"
+                if err == nil </span><span class="cov8" title="1">{
+                        rcode = fmt.Sprintf("%d", request.Header.ResCode)
+                }</span>
+                <span class="cov8" title="1">metrics.QueriesTotal.WithLabelValues("UPDATE", rcode, protocol).Inc()
+                return err</span>
+        }
+
+        <span class="cov8" title="1">if request.Header.Opcode == packet.OpcodeNotify </span><span class="cov8" title="1">{
+                err := s.handleNotify(request, clientIP, sendFn)
+                metrics.QueriesTotal.WithLabelValues("NOTIFY", "0", protocol).Inc()
+                return err
+        }</span>
+
+        <span class="cov8" title="1">if len(request.Questions) == 0 </span><span class="cov8" title="1">{
+                response := packet.NewDNSPacket()
+                response.Header.ID = request.Header.ID
+                response.Header.Response = true
+                response.Header.ResCode = 4 // FORMERR
+                metrics.QueriesTotal.WithLabelValues("NONE", "4", protocol).Inc()
+                resBuffer := packet.GetBuffer()
+                defer packet.PutBuffer(resBuffer)
+                _ = response.Write(resBuffer)
+                return sendFn(resBuffer.Buf[:resBuffer.Position()])
+        }</span>
+
+        <span class="cov8" title="1">q := request.Questions[0]
+        // 1. Handle CHAOS class queries for node identity (NSID readiness)
+        if q.QClass == ClassCHAOS </span><span class="cov0" title="0">{
+                if strings.ToLower(q.Name) == "id.server." || strings.ToLower(q.Name) == "hostname.bind." </span><span class="cov0" title="0">{
+                        response := packet.NewDNSPacket()
+                        response.Header.ID = request.Header.ID
+                        response.Header.Response = true
+                        response.Header.AuthoritativeAnswer = true
+                        response.Questions = append(response.Questions, q)
+
+                        txtRec := packet.DNSRecord{
+                                Name:  q.Name,
+                                Type:  packet.TXT,
+                                Class: ClassCHAOS,
+                                TTL:   0,
+                                Txt:   s.NodeID,
+                        }
+                        response.Answers = append(response.Answers, txtRec)
+
+                        metrics.QueriesTotal.WithLabelValues(qTypeLabel, "0", protocol).Inc()
+                        resBuffer := packet.GetBuffer()
+                        defer packet.PutBuffer(resBuffer)
+                        _ = response.Write(resBuffer)
+                        return sendFn(resBuffer.Buf[:resBuffer.Position()])
+                }</span>
+        }
+
+        // Standardize name for lookup
+        <span class="cov8" title="1">if !strings.HasSuffix(q.Name, ".") </span><span class="cov0" title="0">{
+                q.Name += "."
+        }</span>
+        <span class="cov8" title="1">cacheKey := fmt.Sprintf("%s:%d", strings.ToLower(q.Name), q.QType)
+
+        // L1/L2 Check
+        if cachedData, found := s.Cache.Get(cacheKey); found </span><span class="cov8" title="1">{
+                metrics.CacheOperations.WithLabelValues("l1", "hit").Inc()
+                metrics.QueriesTotal.WithLabelValues(qTypeLabel, "0", protocol).Inc()
+                metrics.QueryDuration.WithLabelValues("cache_l1").Observe(time.Since(start).Seconds())
+                // Rewrite Transaction ID
+                if len(cachedData) &gt;= 2 </span><span class="cov8" title="1">{
+                        cachedData[0] = byte(request.Header.ID &gt;&gt; 8)
+                        cachedData[1] = byte(request.Header.ID &amp; 0xFF)
+                }</span>
+                <span class="cov8" title="1">return sendFn(cachedData)</span>
+        }
+        <span class="cov8" title="1">metrics.CacheOperations.WithLabelValues("l1", "miss").Inc()
+
+        if s.Redis != nil </span><span class="cov0" title="0">{
+                if cachedData, found := s.Redis.Get(context.Background(), cacheKey); found </span><span class="cov0" title="0">{
+                        metrics.CacheOperations.WithLabelValues("l2", "hit").Inc()
+                        metrics.QueriesTotal.WithLabelValues(qTypeLabel, "0", protocol).Inc()
+                        metrics.QueryDuration.WithLabelValues("cache_l2").Observe(time.Since(start).Seconds())
+                        // Rewrite Transaction ID
+                        if len(cachedData) &gt;= 2 </span><span class="cov0" title="0">{
+                                cachedData[0] = byte(request.Header.ID &gt;&gt; 8)
+                                cachedData[1] = byte(request.Header.ID &amp; 0xFF)
+                        }</span>
+                        <span class="cov0" title="0">s.Cache.Set(cacheKey, cachedData, 60*time.Second)
+                        return sendFn(cachedData)</span>
+                }
+                <span class="cov0" title="0">metrics.CacheOperations.WithLabelValues("l2", "miss").Inc()</span>
+        }
+
+        // L3 Resolution
+        <span class="cov8" title="1">if s.SimulateDBLatency &gt; 0 </span><span class="cov8" title="1">{
+                // Use crypto/rand for simulation jitter (safe for G404)
+                var b [8]byte
+                _, _ = crand.Read(b[:])
+                jitter := float64(binary.LittleEndian.Uint64(b[:])) / float64(math.MaxUint64)
+                time.Sleep(time.Duration(float64(s.SimulateDBLatency) * (0.5 + jitter)))
+        }</span>
+
+        // EDNS(0) Support (RFC 6891)
+        <span class="cov8" title="1">maxSize := 512
+        dnssecOK := false
+        nsidRequested := false
+        var clientCookie []byte
+        paddingRequested := false
+
+        var clientOPT *packet.DNSRecord
+        for _, res := range request.Resources </span><span class="cov8" title="1">{
+                if res.Type == packet.OPT </span><span class="cov8" title="1">{
+                        clientOPT = &amp;res
+                        maxSize = int(res.UDPPayloadSize)
+                        if maxSize &lt; 512 </span><span class="cov8" title="1">{
+                                maxSize = 512
+                        }</span>
+                        // DO bit is the first bit of the Z field (TTL bits 15-0)
+                        <span class="cov8" title="1">dnssecOK = (res.Z &amp; 0x8000) != 0
+
+                        // Check options
+                        for _, opt := range res.Options </span><span class="cov8" title="1">{
+                                switch opt.Code </span>{
+                                case packet.EdnsOptionNSID:<span class="cov0" title="0">
+                                        nsidRequested = true</span>
+                                case packet.EdnsOptionCookie:<span class="cov8" title="1">
+                                        clientCookie = opt.Data</span>
+                                case packet.EdnsOptionPadding:<span class="cov8" title="1">
+                                        paddingRequested = true</span>
+                                }
+                        }
+                        <span class="cov8" title="1">break</span>
+                }
+        }
+
+        <span class="cov8" title="1">response := packet.NewDNSPacket()
+        response.Header.ID = request.Header.ID
+        response.Header.Response = true
+        response.Header.AuthoritativeAnswer = true
+        response.Header.RecursionAvailable = s.RecursionEnabled
+        response.Questions = append(response.Questions, q)
+
+        // If query had EDNS, response MUST have EDNS
+        if clientOPT != nil </span><span class="cov8" title="1">{
+                opt := packet.DNSRecord{
+                        Name:           ".",
+                        Type:           packet.OPT,
+                        UDPPayloadSize: 4096, // Our server's supported buffer size
+                        TTL:            0,    // Extended RCODE and Version
+                }
+                if dnssecOK </span><span class="cov8" title="1">{
+                        opt.Z = 0x8000 // Set DO bit if client set it
+                }</span>
+                <span class="cov8" title="1">if nsidRequested </span><span class="cov0" title="0">{
+                        opt.SetOption(packet.EdnsOptionNSID, []byte(s.NodeID))
+                }</span>
+                <span class="cov8" title="1">if len(clientCookie) &gt;= 8 </span><span class="cov8" title="1">{
+                        serverCookie := s.generateServerCookie(clientCookie[:8], clientIP)
+                        fullCookie := append(clientCookie[:8], serverCookie...)
+                        opt.SetOption(packet.EdnsOptionCookie, fullCookie)
+                }</span>
+                <span class="cov8" title="1">response.Resources = append(response.Resources, opt)</span>
+        }
+
+        <span class="cov8" title="1">ctx := context.Background()
+        source := "local"
+
+        // Guard against nil repository (useful for identity-only nodes or tests)
+        if s.Repo == nil </span><span class="cov0" title="0">{
+                response.Header.ResCode = packet.RcodeServFail
+                metrics.QueriesTotal.WithLabelValues(qTypeLabel, "2", protocol).Inc()
+                resBuffer := packet.GetBuffer()
+                defer packet.PutBuffer(resBuffer)
+                _ = response.Write(resBuffer)
+                return sendFn(resBuffer.Buf[:resBuffer.Position()])
+        }</span>
+
+        // 1. Find the zone for this query to include Authority/Additional records
+        <span class="cov8" title="1">zoneName := q.Name
+        var zone *domain.Zone
+        for </span><span class="cov8" title="1">{
+                z, _ := s.Repo.GetZone(ctx, zoneName)
+                if z != nil </span><span class="cov8" title="1">{
+                        zone = z
+                        break</span>
+                }
+                <span class="cov8" title="1">idx := strings.Index(zoneName, ".")
+                if idx == -1 || idx == len(zoneName)-1 </span><span class="cov8" title="1">{
+                        break</span>
+                }
+                <span class="cov8" title="1">zoneName = zoneName[idx+1:]</span>
+        }
+
+        // 2. Resolve Main Records
+        <span class="cov8" title="1">dbStart := time.Now()
+        qTypeStr := queryTypeToRecordType(q.QType)
+        records, errRepo := s.Repo.GetRecords(ctx, q.Name, qTypeStr, clientIP)
+        metrics.QueryDuration.WithLabelValues("database").Observe(time.Since(dbStart).Seconds())
+
+        if errRepo == nil &amp;&amp; len(records) &gt; 0 </span><span class="cov8" title="1">{
+                for _, rec := range records </span><span class="cov8" title="1">{
+                        pRec, errConv := repository.ConvertDomainToPacketRecord(rec)
+                        if errConv == nil </span><span class="cov8" title="1">{
+                                response.Answers = append(response.Answers, pRec)
+                        }</span>
+                }
+        } else<span class="cov8" title="1"> if zone != nil </span><span class="cov8" title="1">{
+                // Try wildcard matching if no direct records found
+                labels := strings.Split(strings.TrimSuffix(q.Name, "."), ".")
+                for i := 0; i &lt; len(labels)-1; i++ </span><span class="cov8" title="1">{
+                        wildcardName := "*." + strings.Join(labels[i+1:], ".") + "."
+                        wildcardRecords, errWildcard := s.Repo.GetRecords(ctx, wildcardName, qTypeStr, clientIP)
+                        if errWildcard == nil &amp;&amp; len(wildcardRecords) &gt; 0 </span><span class="cov8" title="1">{
+                                source = "wildcard"
+                                for _, rec := range wildcardRecords </span><span class="cov8" title="1">{
+                                        rec.Name = q.Name // RFC: Rewrite wildcard to query name
+                                        pRec, errConv := repository.ConvertDomainToPacketRecord(rec)
+                                        if errConv == nil </span><span class="cov8" title="1">{
+                                                response.Answers = append(response.Answers, pRec)
+                                        }</span>
+                                }
+                                <span class="cov8" title="1">break</span>
+                        }
+                }
+        }
+
+        // 3. Handle NXDOMAIN / No Data
+        <span class="cov8" title="1">if len(response.Answers) == 0 </span><span class="cov8" title="1">{
+                if zone != nil </span><span class="cov8" title="1">{
+                        response.Header.ResCode = 3 // NXDOMAIN
+                        // RFC: Include SOA in Authority section for negative caching
+                        soaRecords, _ := s.Repo.GetRecords(ctx, zone.Name, domain.TypeSOA, clientIP)
+                        for _, rec := range soaRecords </span><span class="cov8" title="1">{
+                                pRec, errConv := repository.ConvertDomainToPacketRecord(rec)
+                                if errConv == nil </span><span class="cov8" title="1">{
+                                        response.Authorities = append(response.Authorities, pRec)
+                                }</span>
+                        }
+
+                        // DNSSEC: If DO bit is set, include NSEC or NSEC3 record
+                        <span class="cov8" title="1">if dnssecOK </span><span class="cov8" title="1">{
+                                // Check for NSEC3PARAM to decide between NSEC and NSEC3
+                                nsec3params, _ := s.Repo.GetRecords(ctx, zone.Name, "NSEC3PARAM", "")
+                                if len(nsec3params) &gt; 0 </span><span class="cov8" title="1">{
+                                        nsec3, errNsec := s.generateNSEC3(ctx, zone, q.Name)
+                                        if errNsec == nil </span><span class="cov8" title="1">{
+                                                response.Authorities = append(response.Authorities, nsec3)
+                                        }</span>
+                                } else<span class="cov8" title="1"> {
+                                        nsec, errNsec := s.generateNSEC(ctx, zone, q.Name)
+                                        if errNsec == nil </span><span class="cov8" title="1">{
+                                                response.Authorities = append(response.Authorities, nsec)
+                                        }</span>
+                                }
+                        }
+                } else<span class="cov8" title="1"> {
+                        // Not authoritative for this zone - try recursive resolution if enabled
+                        if s.RecursionEnabled &amp;&amp; request.Header.RecursionDesired </span><span class="cov0" title="0">{
+                                s.Logger.Info("fallback to recursive resolution", "name", q.Name)
+                                recursiveResp, errRecurse := s.resolveRecursive(q.Name)
+                                if errRecurse == nil &amp;&amp; recursiveResp != nil </span><span class="cov0" title="0">{
+                                        response.Header.AuthoritativeAnswer = false
+                                        response.Header.ResCode = recursiveResp.Header.ResCode
+                                        response.Answers = recursiveResp.Answers
+                                        response.Authorities = recursiveResp.Authorities
+                                        // Internal recursion doesn't set recursion available in the response usually,
+                                        // but our upstream root hints might. We already set RA in the header earlier.
+                                }</span> else<span class="cov0" title="0"> {
+                                        s.Logger.Error("recursive resolution failed", "name", q.Name, "error", errRecurse)
+                                        response.Header.AuthoritativeAnswer = false
+                                        response.Header.ResCode = 2 // SERVFAIL
+                                }</span>
+                        } else<span class="cov8" title="1"> {
+                                response.Header.AuthoritativeAnswer = false
+                                response.Header.ResCode = 3 // NXDOMAIN
+                        }</span>
+                }
+
+                // RFC 8914: Extended DNS Error (EDE)
+                <span class="cov8" title="1">if clientOPT != nil </span><span class="cov8" title="1">{
+                        for i := range response.Resources </span><span class="cov8" title="1">{
+                                if response.Resources[i].Type == packet.OPT </span><span class="cov8" title="1">{
+                                        response.Resources[i].AddEDE(packet.EdeOther, "")
+                                }</span>
+                        }
+                }
+        } else<span class="cov8" title="1"> if zone != nil </span><span class="cov8" title="1">{
+                // 4. Populate Authority Section (NS records)
+                nsRecords, _ := s.Repo.GetRecords(ctx, zone.Name, domain.TypeNS, clientIP)
+                for _, rec := range nsRecords </span><span class="cov8" title="1">{
+                        pRec, errConv := repository.ConvertDomainToPacketRecord(rec)
+                        if errConv == nil </span><span class="cov8" title="1">{
+                                response.Authorities = append(response.Authorities, pRec)
+
+                                // 5. Populate Additional Section (Glue records)
+                                glueRecords, _ := s.Repo.GetRecords(ctx, pRec.Host, domain.TypeA, clientIP)
+                                for _, gRec := range glueRecords </span><span class="cov8" title="1">{
+                                        gpRec, errGlue := repository.ConvertDomainToPacketRecord(gRec)
+                                        if errGlue == nil </span><span class="cov8" title="1">{
+                                                response.Resources = append(response.Resources, gpRec)
+                                        }</span>
+                                }
+                        }
+                }
+        }
+
+        // Dynamic RRSIG generation if DO bit is set
+        <span class="cov8" title="1">if dnssecOK &amp;&amp; zone != nil </span><span class="cov8" title="1">{
+                s.signResponse(ctx, zone, response)
+        }</span>
+
+        // Handle Truncation
+        <span class="cov8" title="1">for _, res := range request.Resources </span><span class="cov8" title="1">{
+                if res.Type == packet.OPT </span><span class="cov8" title="1">{
+                        maxSize = int(res.UDPPayloadSize)
+                        if maxSize &lt; 512 </span><span class="cov8" title="1">{
+                                maxSize = 512
+                        }</span>
+                        <span class="cov8" title="1">break</span>
+                }
+        }
+
+        // RFC 7830 / 8467: Padding
+        <span class="cov8" title="1">if paddingRequested || protocol == "dot" || protocol == "doh" </span><span class="cov8" title="1">{
+                blockSize := 128
+                if response.Header.Response </span><span class="cov8" title="1">{
+                        blockSize = 468 // Recommended response block size
+                }</span>
+                <span class="cov8" title="1">s.padResponse(response, blockSize)</span>
+        }
+
+        <span class="cov8" title="1">resBuffer := packet.GetBuffer()
+        defer packet.PutBuffer(resBuffer)
+        resBuffer.HasNames = true // Enable Name Compression
+        _ = response.Write(resBuffer)
+
+        if resBuffer.Position() &gt; maxSize </span><span class="cov8" title="1">{
+                response.Header.TruncatedMessage = true
+                response.Answers = nil
+                response.Authorities = nil
+                response.Resources = nil
+                resBuffer.Reset()
+                resBuffer.HasNames = true
+                _ = response.Write(resBuffer)
+        }</span>
+
+        <span class="cov8" title="1">resData := resBuffer.Buf[:resBuffer.Position()]
+
+        // Cache the result
+        var ttl uint32 = 300
+        if len(response.Answers) &gt; 0 </span><span class="cov8" title="1">{
+                ttl = response.Answers[0].TTL
+        }</span> else<span class="cov8" title="1"> if len(response.Authorities) &gt; 0 </span><span class="cov8" title="1">{
+                ttl = response.Authorities[0].TTL
+        }</span>
+
+        <span class="cov8" title="1">if (response.Header.ResCode == 0 || response.Header.ResCode == 3) &amp;&amp; !response.Header.TruncatedMessage </span><span class="cov8" title="1">{
+                cacheData := make([]byte, len(resData))
+                copy(cacheData, resData)
+                s.Cache.Set(cacheKey, cacheData, time.Duration(ttl)*time.Second)
+                if s.Redis != nil </span><span class="cov0" title="0">{
+                        s.Redis.Set(ctx, cacheKey, cacheData, time.Duration(ttl)*time.Second)
+                }</span>
+        }
+
+        <span class="cov8" title="1">metrics.QueriesTotal.WithLabelValues(qTypeLabel, fmt.Sprintf("%d", response.Header.ResCode), protocol).Inc()
+        s.Logger.Info("query processed", "name", q.Name, "src", source, "lat", time.Since(start).Milliseconds())
+        return sendFn(resData)</span>
+}
+
+func (s *Server) handleNotify(request *packet.DNSPacket, clientIP string, sendFn func([]byte) error) error <span class="cov8" title="1">{
+        if len(request.Questions) == 0 </span><span class="cov8" title="1">{
+                s.Logger.Warn("received NOTIFY without questions", "from", clientIP)
+                return nil
+        }</span>
+        <span class="cov8" title="1">s.Logger.Info("received NOTIFY", "zone", request.Questions[0].Name, "from", clientIP)
+
+        response := packet.NewDNSPacket()
+        response.Header.ID = request.Header.ID
+        response.Header.Response = true
+        response.Header.Opcode = packet.OpcodeNotify
+        response.Header.AuthoritativeAnswer = true
+        response.Questions = append(response.Questions, request.Questions[0])
+
+        // Trigger async refresh if it's a slave zone
+        if !s.DisableAsync </span><span class="cov8" title="1">{
+                go func(zoneName string) </span><span class="cov8" title="1">{
+                        ctx := context.Background()
+                        zone, err := s.Repo.GetZone(ctx, zoneName)
+                        if err != nil </span><span class="cov0" title="0">{
+                                s.Logger.Error("failed to fetch zone for notify refresh", "zone", zoneName, "error", err)
+                                return
+                        }</span>
+                        <span class="cov8" title="1">if zone != nil &amp;&amp; zone.Role == "slave" </span><span class="cov0" title="0">{
+                                s.refreshZone(zone)
+                        }</span>
+                }(request.Questions[0].Name)
+        }
+
+        <span class="cov8" title="1">response.Header.ResCode = packet.RcodeNoError
+        return s.sendUpdateResponse(response, sendFn)</span>
+}
+
+func (s *Server) handleUpdate(request *packet.DNSPacket, rawData []byte, clientIP string, sendFn func([]byte) error) error <span class="cov8" title="1">{
+        s.Logger.Info("handling dynamic update", "id", request.Header.ID, "client", clientIP)
+
+        response := packet.NewDNSPacket()
+        response.Header.ID = request.Header.ID
+        response.Header.Response = true
+        response.Header.Opcode = packet.OpcodeUpdate
+
+        // 1. Validate TSIG if present
+        if request.TSIGStart != -1 </span><span class="cov8" title="1">{
+                tsig := request.Resources[len(request.Resources)-1]
+                secret, ok := s.TsigKeys[tsig.Name]
+                if !ok </span><span class="cov8" title="1">{
+                        s.Logger.Warn("update failed: unknown TSIG key", "key", tsig.Name)
+                        response.Header.ResCode = packet.RcodeNotAuth
+                        return s.sendUpdateResponse(response, sendFn)
+                }</span>
+                <span class="cov8" title="1">if errVerify := request.VerifyTSIG(rawData, request.TSIGStart, secret); errVerify != nil </span><span class="cov0" title="0">{
+                        s.Logger.Warn("update failed: TSIG verification failed", "error", errVerify)
+                        response.Header.ResCode = packet.RcodeNotAuth
+                        return s.sendUpdateResponse(response, sendFn)
+                }</span>
+        }
+
+        // 2. Validate Zone Section (ZOCOUNT must be 1)
+        <span class="cov8" title="1">if len(request.Questions) != 1 </span><span class="cov8" title="1">{
+                s.Logger.Warn("update failed: ZOCOUNT != 1", "count", len(request.Questions))
+                response.Header.ResCode = packet.RcodeFormErr
+                return s.sendUpdateResponse(response, sendFn)
+        }</span>
+
+        <span class="cov8" title="1">zone := request.Questions[0]
+        if !strings.HasSuffix(zone.Name, ".") </span><span class="cov0" title="0">{
+                zone.Name += "."
+        }</span>
+        <span class="cov8" title="1">response.Questions = append(response.Questions, zone)
+
+        ctx := context.Background()
+        dbZone, _ := s.Repo.GetZone(ctx, zone.Name)
+        if dbZone == nil </span><span class="cov8" title="1">{
+                s.Logger.Warn("update failed: not authoritative for zone", "zone", zone.Name)
+                response.Header.ResCode = packet.RcodeNotAuth
+                return s.sendUpdateResponse(response, sendFn)
+        }</span>
+
+        // 2. Prerequisite Checks (PRCOUNT)
+        <span class="cov8" title="1">for _, pr := range request.Answers </span><span class="cov8" title="1">{
+                if errPrereq := s.checkPrerequisite(ctx, pr); errPrereq != nil </span><span class="cov8" title="1">{
+                        s.Logger.Warn("update failed: prerequisite mismatch", "pr", pr.Name, "error", errPrereq)
+                        var uErr updateError
+                        if errors.As(errPrereq, &amp;uErr) </span><span class="cov8" title="1">{
+                                response.Header.ResCode = uint8(uErr.rcode) // #nosec G115
+                        }</span> else<span class="cov0" title="0"> {
+                                response.Header.ResCode = packet.RcodeServFail
+                        }</span>
+                        <span class="cov8" title="1">return s.sendUpdateResponse(response, sendFn)</span>
+                }
+        }
+
+        // 3. Prepare Updates (UPCOUNT)
+        <span class="cov8" title="1">var newSerial uint32
+        operations := make([]domain.UpdateOperation, 0, len(request.Authorities))
+        changes := make([]domain.ZoneChange, 0, len(request.Authorities))
+
+        for _, up := range request.Authorities </span><span class="cov8" title="1">{
+                upName := up.Name
+                if !strings.HasSuffix(upName, ".") </span><span class="cov0" title="0">{
+                        upName += "."
+                }</span>
+
+                <span class="cov8" title="1">op := domain.UpdateOperation{}
+                dRec, errConv := repository.ConvertPacketRecordToDomain(up, dbZone.ID)
+                if errConv != nil &amp;&amp; up.Class != 255 </span><span class="cov8" title="1">{ // Class ANY might fail conversion if RDATA is missing
+                        s.Logger.Error("update failed: conversion error", "error", errConv)
+                        response.Header.ResCode = packet.RcodeServFail
+                        return s.sendUpdateResponse(response, sendFn)
+                }</span>
+
+                <span class="cov8" title="1">switch up.Class </span>{
+                case 255:<span class="cov8" title="1"> // ANY: Delete RRset
+                        if up.Type == 255 </span><span class="cov0" title="0">{
+                                op.Action = domain.ActionDeleteAll
+                        }</span> else<span class="cov8" title="1"> {
+                                op.Action = domain.ActionDeleteRRSet
+                        }</span>
+                        <span class="cov8" title="1">op.Record = domain.Record{
+                                ZoneID: dbZone.ID,
+                                Name:   upName,
+                                Type:   domain.RecordType(up.Type.String()),
+                        }</span>
+                case 254:<span class="cov8" title="1"> // NONE: Delete specific record
+                        op.Action = domain.ActionDeleteSpecific
+                        op.Record = dRec</span>
+                default:<span class="cov8" title="1"> // Add record
+                        op.Action = domain.ActionAdd
+                        if dRec.ID == "" </span><span class="cov8" title="1">{
+                                var bid [16]byte
+                                _, _ = crand.Read(bid[:])
+                                dRec.ID = fmt.Sprintf("%d-%x", time.Now().UnixNano(), bid)
+                        }</span>
+                        <span class="cov8" title="1">if dRec.CreatedAt.IsZero() </span><span class="cov8" title="1">{
+                                dRec.CreatedAt = time.Now()
+                                dRec.UpdatedAt = time.Now()
+                        }</span>
+                        <span class="cov8" title="1">op.Record = dRec</span>
+                }
+                <span class="cov8" title="1">operations = append(operations, op)
+
+                // Prepare historical change record for IXFR
+                var rb [8]byte
+                _, _ = crand.Read(rb[:])
+                randomPart := binary.LittleEndian.Uint64(rb[:])
+                change := domain.ZoneChange{
+                        ID:        fmt.Sprintf("%d-%x", time.Now().UnixNano(), randomPart),
+                        ZoneID:    dbZone.ID,
+                        Name:      upName,
+                        Type:      domain.RecordType(up.Type.String()),
+                        TTL:       int(up.TTL),
+                        CreatedAt: time.Now(),
+                }
+                if op.Action == domain.ActionAdd </span><span class="cov8" title="1">{
+                        change.Action = "ADD"
+                        change.Content = op.Record.Content
+                        change.Priority = op.Record.Priority
+                }</span> else<span class="cov8" title="1"> {
+                        change.Action = "DELETE"
+                        if op.Action == domain.ActionDeleteSpecific </span><span class="cov8" title="1">{
+                                change.Content = op.Record.Content
+                        }</span>
+                }
+                <span class="cov8" title="1">changes = append(changes, change)</span>
+        }
+
+        // 4. Handle Serial Increment and Atomic Apply
+        <span class="cov8" title="1">if len(changes) &gt; 0 </span><span class="cov8" title="1">{
+                soaRecords, err := s.Repo.GetRecords(ctx, dbZone.Name, domain.TypeSOA, "")
+                if err == nil &amp;&amp; len(soaRecords) &gt; 0 </span><span class="cov8" title="1">{
+                        oldSOA := soaRecords[0]
+                        parts := strings.Fields(oldSOA.Content)
+                        if len(parts) &gt;= 3 </span><span class="cov8" title="1">{
+                                var currentSerial uint32
+                                if _, errParse := fmt.Sscanf(parts[2], "%d", &amp;currentSerial); errParse == nil </span><span class="cov8" title="1">{
+                                        newSerial = currentSerial + 1
+                                        parts[2] = fmt.Sprintf("%d", newSerial)
+                                        newSOAContent := strings.Join(parts, " ")
+                                        updatedSOA := oldSOA
+                                        updatedSOA.Content = newSOAContent
+                                        updatedSOA.UpdatedAt = time.Now()
+
+                                        // Add SOA changes to atomic transaction
+                                        // 1. Delete Old SOA from historical log
+                                        changes = append([]domain.ZoneChange{{
+                                                ID:        fmt.Sprintf("%d-soa-old", time.Now().UnixNano()),
+                                                ZoneID:    dbZone.ID,
+                                                Action:    "DELETE",
+                                                Name:      oldSOA.Name,
+                                                Type:      domain.TypeSOA,
+                                                Content:   oldSOA.Content,
+                                                TTL:       oldSOA.TTL,
+                                                CreatedAt: time.Now(),
+                                        }}, changes...)
+
+                                        // 2. Add New SOA to historical log
+                                        changes = append(changes, domain.ZoneChange{
+                                                ID:        fmt.Sprintf("%d-soa-new", time.Now().UnixNano()),
+                                                ZoneID:    dbZone.ID,
+                                                Action:    "ADD",
+                                                Name:      updatedSOA.Name,
+                                                Type:      domain.TypeSOA,
+                                                Content:   newSOAContent,
+                                                TTL:       updatedSOA.TTL,
+                                                CreatedAt: time.Now(),
+                                        })
+
+                                        // 3. Add SOA updates to operations
+                                        operations = append(operations, domain.UpdateOperation{
+                                                Action: domain.ActionDeleteSpecific,
+                                                Record: oldSOA,
+                                        }, domain.UpdateOperation{
+                                                Action: domain.ActionAdd,
+                                                Record: updatedSOA,
+                                        })
+                                }</span> else<span class="cov8" title="1"> {
+                                        s.Logger.Error("failed to parse SOA serial during update", "zone", dbZone.Name, "error", errParse)
+                                        response.Header.ResCode = packet.RcodeServFail
+                                        return s.sendUpdateResponse(response, sendFn)
+                                }</span>
+                        } else<span class="cov0" title="0"> {
+                                s.Logger.Error("failed to process SOA for update: malformed content", "zone", dbZone.Name)
+                                response.Header.ResCode = packet.RcodeServFail
+                                return s.sendUpdateResponse(response, sendFn)
+                        }</span>
+                } else<span class="cov8" title="1"> if err != nil </span><span class="cov8" title="1">{
+                        s.Logger.Error("failed to fetch SOA for update", "zone", dbZone.Name, "error", err)
+                        response.Header.ResCode = packet.RcodeServFail
+                        return s.sendUpdateResponse(response, sendFn)
+                }</span>
+
+                // Apply everything in a single transaction
+                <span class="cov8" title="1">if errApply := s.Repo.ApplyZoneUpdate(ctx, dbZone.ID, operations, newSerial, changes); errApply != nil </span><span class="cov8" title="1">{
+                        s.Logger.Error("atomic update failed", "zone", dbZone.Name, "error", errApply)
+                        response.Header.ResCode = packet.RcodeServFail
+                        return s.sendUpdateResponse(response, sendFn)
+                }</span>
+
+                <span class="cov8" title="1">if newSerial &gt; 0 </span><span class="cov8" title="1">{
+                        s.Logger.Info("dynamic update successful", "zone", zone.Name, "new_serial", newSerial)
+                }</span> else<span class="cov8" title="1"> {
+                        s.Logger.Info("dynamic update applied without serial increment (no SOA found)", "zone", zone.Name)
+                }</span>
+
+                <span class="cov8" title="1">s.Cache.Flush()
+                if !s.DisableAsync </span><span class="cov8" title="1">{
+                        go s.notifySlaves(zone.Name)
+                }</span>
+                <span class="cov8" title="1">response.Header.ResCode = packet.RcodeNoError
+                return s.sendUpdateResponse(response, sendFn)</span>
+        }
+
+        // 5. Success (no changes)
+        <span class="cov8" title="1">response.Header.ResCode = packet.RcodeNoError
+        s.Logger.Info("dynamic update processed", "zone", zone.Name)
+        s.Cache.Flush()
+
+        if !s.DisableAsync </span><span class="cov8" title="1">{
+                go s.notifySlaves(zone.Name)
+        }</span>
+
+        <span class="cov8" title="1">return s.sendUpdateResponse(response, sendFn)</span>
+}
+
+func (s *Server) handleIXFR(conn net.Conn, request *packet.DNSPacket) <span class="cov8" title="1">{
+        q := request.Questions[0]
+        if !strings.HasSuffix(q.Name, ".") </span><span class="cov0" title="0">{
+                q.Name += "."
+        }</span>
+
+        // RFC 1995: The client's current SOA is in the Authority section
+        <span class="cov8" title="1">if len(request.Authorities) == 0 || request.Authorities[0].Type != packet.SOA </span><span class="cov8" title="1">{
+                s.Logger.Warn("IXFR requested without client SOA in Authority section", "name", q.Name)
+                s.sendTCPError(conn, request.Header.ID, 1) // FORMERR
+                return
+        }</span>
+        <span class="cov8" title="1">clientSOA := request.Authorities[0]
+        clientSerial := clientSOA.Serial
+
+        ctx := context.Background()
+        zone, err := s.Repo.GetZone(ctx, q.Name)
+        if err != nil || zone == nil </span><span class="cov8" title="1">{
+                s.Logger.Warn("IXFR requested for non-existent zone", "name", q.Name, "error", err)
+                s.sendTCPError(conn, request.Header.ID, 3) // NXDOMAIN
+                return
+        }</span>
+
+        // Get current SOA
+        <span class="cov8" title="1">soaRecords, err := s.Repo.GetRecords(ctx, zone.Name, domain.TypeSOA, "")
+        if err != nil || len(soaRecords) == 0 </span><span class="cov8" title="1">{
+                s.Logger.Error("IXFR failed: zone has no SOA", "zone", zone.Name, "error", err)
+                s.sendTCPError(conn, request.Header.ID, 2)
+                return
+        }</span>
+        <span class="cov8" title="1">currentSOA := soaRecords[0]
+        fields := strings.Fields(currentSOA.Content)
+        if len(fields) &lt; 3 </span><span class="cov8" title="1">{
+                s.Logger.Error("IXFR failed: malformed SOA content", "zone", zone.Name, "content", currentSOA.Content)
+                s.sendTCPError(conn, request.Header.ID, 2)
+                return
+        }</span>
+
+        <span class="cov8" title="1">var currentSerial uint32
+        if _, err := fmt.Sscanf(fields[2], "%d", &amp;currentSerial); err != nil </span><span class="cov8" title="1">{
+                s.Logger.Error("IXFR failed: invalid SOA serial", "zone", zone.Name, "serial", fields[2], "error", err)
+                s.sendTCPError(conn, request.Header.ID, 2)
+                return
+        }</span>
+
+        <span class="cov8" title="1">if clientSerial == currentSerial </span><span class="cov8" title="1">{
+                // Client is up to date, just send current SOA
+                s.Logger.Info("IXFR client is up to date", "zone", zone.Name, "serial", clientSerial)
+                pSOA, err := repository.ConvertDomainToPacketRecord(currentSOA)
+                if err == nil </span><span class="cov8" title="1">{
+                        s.sendSingleRecordResponse(conn, request.Header.ID, q, pSOA)
+                }</span>
+                <span class="cov8" title="1">return</span>
+        }
+
+        // Fetch changes since clientSerial using IXFR chain logic
+        <span class="cov8" title="1">chunks, err := s.Repo.GetIXFRChain(ctx, zone.ID, clientSerial, currentSerial)
+
+        // RFC 1995: Verify full IXFR chain continuity
+        historyValid := len(chunks) &gt; 0 &amp;&amp; chunks[0].Serial == clientSerial+1
+        if historyValid </span><span class="cov8" title="1">{
+                for i := 1; i &lt; len(chunks); i++ </span><span class="cov0" title="0">{
+                        if chunks[i].Serial != chunks[i-1].Serial+1 </span><span class="cov0" title="0">{
+                                historyValid = false
+                                break</span>
+                        }
+                }
+        }
+
+        <span class="cov8" title="1">if err != nil || !historyValid </span><span class="cov8" title="1">{
+                s.Logger.Info("IXFR history not found or gap detected, falling back to AXFR sequence",
+                        "zone", zone.Name, "client_serial", clientSerial)
+
+                // RFC 1995: If IXFR is not possible, fall back to AXFR sequence.
+                // 1. Fetch all records first to ensure we don't send partial data
+                records, errList := s.Repo.ListRecordsForZone(ctx, zone.ID, zone.TenantID)
+                if errList != nil </span><span class="cov8" title="1">{
+                        s.Logger.Error("IXFR/AXFR fallback failed to list records", "zone", zone.Name, "error", errList)
+                        s.sendTCPError(conn, request.Header.ID, 2) // SERVFAIL
+                        return
+                }</span>
+
+                <span class="cov8" title="1">pSOA, errConv := repository.ConvertDomainToPacketRecord(currentSOA)
+                if errConv != nil </span><span class="cov0" title="0">{
+                        s.Logger.Error("IXFR/AXFR fallback failed to convert SOA", "zone", zone.Name, "error", errConv)
+                        s.sendTCPError(conn, request.Header.ID, 2)
+                        return
+                }</span>
+
+                // 2. Send Current SOA (start)
+                <span class="cov8" title="1">s.sendSingleRecordResponse(conn, request.Header.ID, q, pSOA)
+
+                // 3. Send all records in the zone
+                for _, rec := range records </span><span class="cov8" title="1">{
+                        if rec.Type == domain.TypeSOA </span><span class="cov8" title="1">{
+                                continue</span>
+                        } // skip SOA, we send it as bounds
+                        <span class="cov8" title="1">pRec, errConv := repository.ConvertDomainToPacketRecord(rec)
+                        if errConv == nil </span><span class="cov8" title="1">{
+                                s.sendSingleRecordResponse(conn, request.Header.ID, q, pRec)
+                        }</span>
+                }
+
+                // 4. Send Current SOA (end)
+                <span class="cov8" title="1">s.sendSingleRecordResponse(conn, request.Header.ID, q, pSOA)
+                return</span>
+        }
+
+        <span class="cov8" title="1">s.Logger.Info("IXFR starting", "zone", zone.Name, "from", clientSerial, "to", currentSerial, "chunks", len(chunks))
+
+        // Send Current SOA (marks start of IXFR)
+        pCurrentSOA, err := repository.ConvertDomainToPacketRecord(currentSOA)
+        if err == nil </span><span class="cov8" title="1">{
+                s.sendSingleRecordResponse(conn, request.Header.ID, q, pCurrentSOA)
+        }</span>
+
+        // Send each chunk
+        <span class="cov8" title="1">for _, chunk := range chunks </span><span class="cov8" title="1">{
+                // RFC 1995: IXFR sequence is [SOA(new), (SOA(old), deleted..., SOA(new), added...)*, SOA(new)]
+                // Note: The outer handleIXFR sends the first and last SOA(new).
+
+                // 1. Send Old SOA (from deletions if available to preserve fields)
+                var oldSOA domain.Record
+                foundOld := false
+                for _, r := range chunk.Deleted </span><span class="cov8" title="1">{
+                        if r.Type == domain.TypeSOA </span><span class="cov8" title="1">{
+                                oldSOA = r
+                                foundOld = true
+                                break</span>
+                        }
+                }
+                <span class="cov8" title="1">if !foundOld </span><span class="cov8" title="1">{
+                        oldSOA = currentSOA
+                        // We don't have the original old SOA in the chunk, fallback to current but with old serial
+                        // (This shouldn't happen with our bounded delta logger)
+                        parts := strings.Fields(oldSOA.Content)
+                        if len(parts) &gt;= 3 </span><span class="cov8" title="1">{
+                                parts[2] = fmt.Sprintf("%d", clientSerial)
+                                oldSOA.Content = strings.Join(parts, " ")
+                        }</span>
+                }
+                <span class="cov8" title="1">pOldSOA, err := repository.ConvertDomainToPacketRecord(oldSOA)
+                if err == nil </span><span class="cov8" title="1">{
+                        s.sendSingleRecordResponse(conn, request.Header.ID, q, pOldSOA)
+                }</span>
+
+                // 2. Send Deletions
+                <span class="cov8" title="1">for _, rec := range chunk.Deleted </span><span class="cov8" title="1">{
+                        if rec.Type == domain.TypeSOA </span><span class="cov8" title="1">{
+                                continue</span>
+                        }
+                        <span class="cov8" title="1">pRec, errConv := repository.ConvertDomainToPacketRecord(rec)
+                        if errConv == nil </span><span class="cov8" title="1">{
+                                s.sendSingleRecordResponse(conn, request.Header.ID, q, pRec)
+                        }</span>
+                }
+
+                // 3. Send New SOA (from additions)
+                <span class="cov8" title="1">var newSOA domain.Record
+                foundNew := false
+                for _, r := range chunk.Added </span><span class="cov8" title="1">{
+                        if r.Type == domain.TypeSOA </span><span class="cov8" title="1">{
+                                newSOA = r
+                                foundNew = true
+                                break</span>
+                        }
+                }
+                <span class="cov8" title="1">if !foundNew </span><span class="cov8" title="1">{
+                        newSOA = currentSOA
+                        parts := strings.Fields(newSOA.Content)
+                        if len(parts) &gt;= 3 </span><span class="cov8" title="1">{
+                                parts[2] = fmt.Sprintf("%d", chunk.Serial)
+                                newSOA.Content = strings.Join(parts, " ")
+                        }</span>
+                }
+                <span class="cov8" title="1">pNewSOA, err := repository.ConvertDomainToPacketRecord(newSOA)
+                if err == nil </span><span class="cov8" title="1">{
+                        s.sendSingleRecordResponse(conn, request.Header.ID, q, pNewSOA)
+                }</span>
+
+                // 4. Send Additions
+                <span class="cov8" title="1">for _, rec := range chunk.Added </span><span class="cov8" title="1">{
+                        if rec.Type == domain.TypeSOA </span><span class="cov8" title="1">{
+                                continue</span>
+                        }
+                        <span class="cov8" title="1">pRec, errConv := repository.ConvertDomainToPacketRecord(rec)
+                        if errConv == nil </span><span class="cov8" title="1">{
+                                s.sendSingleRecordResponse(conn, request.Header.ID, q, pRec)
+                        }</span>
+                }
+
+                // For the next chunk, clientSerial is now this chunk's Serial
+                <span class="cov8" title="1">clientSerial = chunk.Serial</span>
+        }
+
+        // Send Current SOA (marks end of IXFR)
+        <span class="cov8" title="1">if err == nil </span><span class="cov8" title="1">{
+                s.sendSingleRecordResponse(conn, request.Header.ID, q, pCurrentSOA)
+        }</span>
+        <span class="cov8" title="1">s.Logger.Info("IXFR completed", "zone", zone.Name)</span>
+}
+
+func (s *Server) signResponse(ctx context.Context, zone *domain.Zone, response *packet.DNSPacket) <span class="cov8" title="1">{
+        // Sign Answers
+        if len(response.Answers) &gt; 0 </span><span class="cov8" title="1">{
+                groups := s.groupRecords(response.Answers)
+                for _, group := range groups </span><span class="cov8" title="1">{
+                        sigs, errSign := s.DNSSEC.SignRRSet(ctx, zone.Name, zone.ID, group)
+                        if errSign == nil </span><span class="cov8" title="1">{
+                                response.Answers = append(response.Answers, sigs...)
+                        }</span>
+                }
+        }
+        // Sign Authorities
+        <span class="cov8" title="1">if len(response.Authorities) &gt; 0 </span><span class="cov8" title="1">{
+                groups := s.groupRecords(response.Authorities)
+                for _, group := range groups </span><span class="cov8" title="1">{
+                        sigs, errSign := s.DNSSEC.SignRRSet(ctx, zone.Name, zone.ID, group)
+                        if errSign == nil </span><span class="cov8" title="1">{
+                                response.Authorities = append(response.Authorities, sigs...)
+                        }</span>
+                }
+        }
+}
+
+func (s *Server) groupRecords(records []packet.DNSRecord) [][]packet.DNSRecord <span class="cov8" title="1">{
+        groups := make(map[string][]packet.DNSRecord)
+        var keys []string
+        for _, r := range records </span><span class="cov8" title="1">{
+                if r.Type == packet.RRSIG || r.Type == packet.OPT || r.Type == packet.TSIG </span><span class="cov0" title="0">{
+                        continue</span>
+                }
+                <span class="cov8" title="1">key := fmt.Sprintf("%s:%d", strings.ToLower(r.Name), r.Type)
+                if _, ok := groups[key]; !ok </span><span class="cov8" title="1">{
+                        keys = append(keys, key)
+                }</span>
+                <span class="cov8" title="1">groups[key] = append(groups[key], r)</span>
+        }
+
+        <span class="cov8" title="1">res := make([][]packet.DNSRecord, 0, len(keys))
+        for _, k := range keys </span><span class="cov8" title="1">{
+                res = append(res, groups[k])
+        }</span>
+        <span class="cov8" title="1">return res</span>
+}
+
+func (s *Server) sendSingleRecordResponse(conn net.Conn, id uint16, q packet.DNSQuestion, rec packet.DNSRecord) <span class="cov8" title="1">{
+        resp := packet.NewDNSPacket()
+        resp.Header.ID = id
+        resp.Header.Response = true
+        resp.Header.AuthoritativeAnswer = true
+        resp.Questions = append(resp.Questions, q)
+        resp.Answers = append(resp.Answers, rec)
+
+        resBuffer := packet.GetBuffer()
+        _ = resp.Write(resBuffer)
+        resData := resBuffer.Buf[:resBuffer.Position()]
+        // TCP requires 2-byte length prefix
+        fullLen := uint16(len(resData)) // #nosec G115
+        fullResp := append([]byte{byte(fullLen &gt;&gt; 8), byte(fullLen &amp; 0xFF)}, resData...)
+        _, _ = conn.Write(fullResp)
+        packet.PutBuffer(resBuffer)
+}</span>
+
+func (s *Server) sendUpdateResponse(resp *packet.DNSPacket, sendFn func([]byte) error) error <span class="cov8" title="1">{
+        resBuffer := packet.GetBuffer()
+        defer packet.PutBuffer(resBuffer)
+        _ = resp.Write(resBuffer)
+        return sendFn(resBuffer.Buf[:resBuffer.Position()])
+}</span>
+
+type updateError struct {
+        rcode int
+        msg   string
+}
+
+func (e updateError) Error() string <span class="cov8" title="1">{ return e.msg }</span>
+
+func (s *Server) checkPrerequisite(ctx context.Context, pr packet.DNSRecord) error <span class="cov8" title="1">{
+        qTypeStr := queryTypeToRecordType(pr.Type)
+        records, errRecs := s.Repo.GetRecords(ctx, pr.Name, qTypeStr, "")
+        if errRecs != nil </span><span class="cov8" title="1">{
+                return updateError{rcode: int(packet.RcodeServFail), msg: "failed to fetch records for prerequisite check"}
+        }</span>
+
+        <span class="cov8" title="1">switch pr.Class </span>{
+        case 255:<span class="cov8" title="1"> // ANY
+                if pr.Type == 255 </span><span class="cov8" title="1">{ // ANY
+                        if len(records) == 0 </span><span class="cov8" title="1">{
+                                return updateError{rcode: int(packet.RcodeNxDomain), msg: "name not in use"}
+                        }</span>
+                } else<span class="cov8" title="1"> {
+                        if len(records) == 0 </span><span class="cov0" title="0">{
+                                return updateError{rcode: int(packet.RcodeNxRRSet), msg: "rrset does not exist"}
+                        }</span>
+                }
+        case 254:<span class="cov8" title="1"> // NONE
+                if pr.Type == 255 </span><span class="cov8" title="1">{ // ANY
+                        if len(records) &gt; 0 </span><span class="cov8" title="1">{
+                                return updateError{rcode: int(packet.RcodeYxDomain), msg: "name in use"}
+                        }</span>
+                } else<span class="cov8" title="1"> {
+                        if len(records) &gt; 0 </span><span class="cov8" title="1">{
+                                return updateError{rcode: int(packet.RcodeYxRRSet), msg: "rrset exists"}
+                        }</span>
+                }
+        default:<span class="cov8" title="1">
+                if len(records) == 0 </span><span class="cov8" title="1">{
+                        return updateError{rcode: int(packet.RcodeNxRRSet), msg: "rrset does not exist"}
+                }</span>
+        }
+
+        <span class="cov8" title="1">return nil</span>
+}
+
+// applyUpdate processes a single record update from an RFC 2136 UPDATE message.
+// It maps the DNS record class to the appropriate repository operation:
+//   - Class ANY (255): Deletes an entire RRset (by name or name+type).
+//   - Class NONE (254): Deletes a specific RR (must match name, type, and RDATA).
+//   - Default Class (IN): Adds or replaces a record.
+func (s *Server) applyUpdate(ctx context.Context, zone *domain.Zone, up packet.DNSRecord) error <span class="cov8" title="1">{
+        // Standardize name for database lookups to ensure consistency.
+        upName := up.Name
+        if !strings.HasSuffix(upName, ".") </span><span class="cov0" title="0">{
+                upName += "."
+        }</span>
+
+        <span class="cov8" title="1">switch up.Class </span>{
+        case 255:<span class="cov0" title="0"> // ANY: Delete RRset (RFC 2136 Section 2.5.2)
+                if up.Type == 255 </span><span class="cov0" title="0">{ // Type ANY: Delete all records for this name
+                        return s.Repo.DeleteRecordsByName(ctx, zone.ID, upName)
+                }</span>
+                // Delete all records of a specific type for this name
+                <span class="cov0" title="0">qTypeStr := queryTypeToRecordType(up.Type)
+                return s.Repo.DeleteRecordsByNameAndType(ctx, zone.ID, upName, qTypeStr)</span>
+
+        case 254:<span class="cov8" title="1"> // NONE: Delete specific record (RFC 2136 Section 2.5.4)
+                qTypeStr := queryTypeToRecordType(up.Type)
+                dRec, errConv := repository.ConvertPacketRecordToDomain(up, zone.ID)
+                if errConv != nil </span><span class="cov8" title="1">{
+                        return errConv
+                }</span>
+                // Matches name, type, and content (RDATA)
+                <span class="cov0" title="0">return s.Repo.DeleteRecordSpecific(ctx, zone.ID, upName, qTypeStr, dRec.Content)</span>
+
+        default:<span class="cov8" title="1"> // Add record (RFC 2136 Section 2.5.1)
+                dRec, errConv := repository.ConvertPacketRecordToDomain(up, zone.ID)
+                if errConv != nil </span><span class="cov8" title="1">{
+                        return errConv
+                }</span>
+                <span class="cov0" title="0">dRec.Name = upName
+                if dRec.ID == "" </span><span class="cov0" title="0">{
+                        // Generate a cryptographically secure ID for new records.
+                        var bid [16]byte
+                        _, _ = crand.Read(bid[:])
+                        dRec.ID = fmt.Sprintf("%d-%x", time.Now().UnixNano(), bid)
+                }</span>
+                <span class="cov0" title="0">if dRec.CreatedAt.IsZero() </span><span class="cov0" title="0">{
+                        dRec.CreatedAt = time.Now()
+                        dRec.UpdatedAt = time.Now()
+                }</span>
+                <span class="cov0" title="0">return s.Repo.CreateRecord(ctx, &amp;dRec)</span>
+        }
+}
+
+func (s *Server) notifySlaves(zoneName string) <span class="cov8" title="1">{
+        ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+        defer cancel()
+
+        dbZone, errZone := s.Repo.GetZone(ctx, zoneName)
+        if errZone != nil || dbZone == nil </span><span class="cov0" title="0">{
+                return
+        }</span>
+
+        <span class="cov8" title="1">nsRecords, errNS := s.Repo.GetRecords(ctx, zoneName, domain.TypeNS, "")
+        if errNS != nil </span><span class="cov0" title="0">{
+                return
+        }</span>
+
+        <span class="cov8" title="1">for _, ns := range nsRecords </span><span class="cov8" title="1">{
+                ips, errIPs := s.Repo.GetIPsForName(ctx, ns.Content, "")
+                if errIPs != nil || len(ips) == 0 </span><span class="cov0" title="0">{
+                        continue</span>
+                }
+
+                <span class="cov8" title="1">for _, ip := range ips </span><span class="cov8" title="1">{
+                        // Skip logic: only skip if it's EXACTLY the same host:port
+                        targetPort := 53
+                        if s.NotifyPortOverride &gt; 0 </span><span class="cov0" title="0">{
+                                targetPort = s.NotifyPortOverride
+                        }</span>
+
+                        <span class="cov8" title="1">targetAddr := net.JoinHostPort(ip, fmt.Sprintf("%d", targetPort))
+                        if s.Addr == targetAddr </span><span class="cov0" title="0">{
+                                continue</span>
+                        }
+
+                        <span class="cov8" title="1">s.Logger.Info("sending NOTIFY", "zone", zoneName, "slave", targetAddr)
+
+                        notify := packet.NewDNSPacket()
+                        // Use crand for secure NOTIFY ID (G404)
+                        var bid [2]byte
+                        _, _ = crand.Read(bid[:])
+                        notify.Header.ID = binary.LittleEndian.Uint16(bid[:])
+
+                        notify.Header.Opcode = packet.OpcodeNotify
+                        notify.Header.AuthoritativeAnswer = true
+                        notify.Questions = append(notify.Questions, packet.DNSQuestion{
+                                Name:  zoneName,
+                                QType: packet.SOA,
+                        })
+
+                        buf := packet.GetBuffer()
+                        _ = notify.Write(buf)
+                        data := buf.Buf[:buf.Position()]
+
+                        conn, errDial := net.Dial("udp", targetAddr)
+                        if errDial == nil </span><span class="cov8" title="1">{
+                                _, _ = conn.Write(data)
+                                _ = conn.Close()
+                        }</span>
+                        <span class="cov8" title="1">packet.PutBuffer(buf)</span>
+                }
+        }
+}
+
+func (s *Server) generateNSEC(ctx context.Context, zone *domain.Zone, queryName string) (packet.DNSRecord, error) <span class="cov8" title="1">{
+        records, errZoneRecs := s.Repo.ListRecordsForZone(ctx, zone.ID, zone.TenantID)
+        if errZoneRecs != nil </span><span class="cov8" title="1">{
+                return packet.DNSRecord{}, errZoneRecs
+        }</span>
+
+        <span class="cov8" title="1">master.SortRecordsCanonically(records)
+
+        nameToTypes := make(map[string][]domain.RecordType)
+        var uniqueNames []string
+        seen := make(map[string]bool)
+        for _, r := range records </span><span class="cov8" title="1">{
+                if !seen[r.Name] </span><span class="cov8" title="1">{
+                        uniqueNames = append(uniqueNames, r.Name)
+                        seen[r.Name] = true
+                }</span>
+                <span class="cov8" title="1">nameToTypes[r.Name] = append(nameToTypes[r.Name], r.Type)</span>
+        }
+
+        <span class="cov8" title="1">if len(uniqueNames) == 0 </span><span class="cov8" title="1">{
+                return packet.DNSRecord{}, fmt.Errorf("no records in zone")
+        }</span>
+
+        <span class="cov8" title="1">var ownerName, nextName string
+        found := false
+        for i := 0; i &lt; len(uniqueNames); i++ </span><span class="cov8" title="1">{
+                cmp := master.CompareNamesCanonically(queryName, uniqueNames[i])
+                if cmp &lt; 0 </span><span class="cov8" title="1">{
+                        if i == 0 </span><span class="cov0" title="0">{
+                                ownerName = uniqueNames[len(uniqueNames)-1]
+                                nextName = uniqueNames[0]
+                        }</span> else<span class="cov8" title="1"> {
+                                ownerName = uniqueNames[i-1]
+                                nextName = uniqueNames[i]
+                        }</span>
+                        <span class="cov8" title="1">found = true
+                        break</span>
+                }
+                <span class="cov8" title="1">if cmp == 0 </span><span class="cov0" title="0">{
+                        ownerName = uniqueNames[i]
+                        if i == len(uniqueNames)-1 </span><span class="cov0" title="0">{
+                                nextName = uniqueNames[0]
+                        }</span> else<span class="cov0" title="0"> {
+                                nextName = uniqueNames[i+1]
+                        }</span>
+                        <span class="cov0" title="0">found = true
+                        break</span>
+                }
+        }
+
+        <span class="cov8" title="1">if !found </span><span class="cov8" title="1">{
+                ownerName = uniqueNames[len(uniqueNames)-1]
+                nextName = uniqueNames[0]
+        }</span>
+
+        <span class="cov8" title="1">types := nameToTypes[ownerName]
+        types = append(types, "NSEC")
+        bitmap := s.generateTypeBitMap(types)
+
+        nsec := packet.DNSRecord{
+                Name:       ownerName,
+                Type:       packet.NSEC,
+                Class:      1,
+                TTL:        300,
+                NextName:   nextName,
+                TypeBitMap: bitmap,
+        }
+
+        return nsec, nil</span>
+}
+
+func (s *Server) generateNSEC3(ctx context.Context, zone *domain.Zone, queryName string) (packet.DNSRecord, error) <span class="cov8" title="1">{
+        params, errParams := s.Repo.GetRecords(ctx, zone.Name, "NSEC3PARAM", "")
+        if errParams != nil || len(params) == 0 </span><span class="cov8" title="1">{
+                return packet.DNSRecord{}, fmt.Errorf("no NSEC3PARAM")
+        }</span>
+
+        <span class="cov8" title="1">parts := strings.Fields(params[0].Content)
+        if len(parts) &lt; 4 </span><span class="cov8" title="1">{
+                return packet.DNSRecord{}, fmt.Errorf("invalid NSEC3PARAM")
+        }</span>
+
+        <span class="cov8" title="1">var alg, flags uint8
+        var iterations uint16
+        _, _ = fmt.Sscanf(parts[0], "%d", &amp;alg)
+        _, _ = fmt.Sscanf(parts[1], "%d", &amp;flags)
+        _, _ = fmt.Sscanf(parts[2], "%d", &amp;iterations)
+        salt := parts[3]
+        if salt == "-" </span><span class="cov8" title="1">{
+                salt = ""
+        }</span>
+
+        <span class="cov8" title="1">records, _ := s.Repo.ListRecordsForZone(ctx, zone.ID, zone.TenantID)
+        nameToTypes := make(map[string][]domain.RecordType)
+        var ownerNames []string
+        seen := make(map[string]bool)
+        for _, r := range records </span><span class="cov8" title="1">{
+                if !seen[r.Name] </span><span class="cov8" title="1">{
+                        ownerNames = append(ownerNames, r.Name)
+                        seen[r.Name] = true
+                }</span>
+                <span class="cov8" title="1">nameToTypes[r.Name] = append(nameToTypes[r.Name], r.Type)</span>
+        }
+
+        <span class="cov8" title="1">hashes := make([]hashEntry, 0, len(ownerNames))
+        for _, name := range ownerNames </span><span class="cov8" title="1">{
+                h := packet.HashName(name, alg, iterations, []byte(salt))
+                hashes = append(hashes, hashEntry{name: name, hash: h})
+        }</span>
+
+        <span class="cov8" title="1">if len(hashes) == 0 </span><span class="cov8" title="1">{
+                return packet.DNSRecord{}, fmt.Errorf("no records to hash for NSEC3")
+        }</span>
+
+        <span class="cov8" title="1">sort.Slice(hashes, func(i, j int) bool </span><span class="cov8" title="1">{
+                return bytes.Compare(hashes[i].hash, hashes[j].hash) &lt; 0
+        }</span>)
+
+        <span class="cov8" title="1">qHash := packet.HashName(queryName, alg, iterations, []byte(salt))
+        var ownerEntry, nextEntry hashEntry
+        found := false
+        for i := 0; i &lt; len(hashes); i++ </span><span class="cov8" title="1">{
+                cmp := bytes.Compare(qHash, hashes[i].hash)
+                if cmp &lt; 0 </span><span class="cov8" title="1">{
+                        if i == 0 </span><span class="cov8" title="1">{
+                                ownerEntry = hashes[len(hashes)-1]
+                                nextEntry = hashes[0]
+                        }</span> else<span class="cov0" title="0"> {
+                                ownerEntry = hashes[i-1]
+                                nextEntry = hashes[i]
+                        }</span>
+                        <span class="cov8" title="1">found = true
+                        break</span>
+                }
+                <span class="cov8" title="1">if cmp == 0 </span><span class="cov8" title="1">{
+                        ownerEntry = hashes[i]
+                        if i == len(hashes)-1 </span><span class="cov0" title="0">{
+                                nextEntry = hashes[0]
+                        }</span> else<span class="cov8" title="1"> {
+                                nextEntry = hashes[i+1]
+                        }</span>
+                        <span class="cov8" title="1">found = true
+                        break</span>
+                }
+        }
+        <span class="cov8" title="1">if !found </span><span class="cov8" title="1">{
+                ownerEntry = hashes[len(hashes)-1]
+                nextEntry = hashes[0]
+        }</span>
+
+        <span class="cov8" title="1">types := nameToTypes[ownerEntry.name]
+        types = append(types, "NSEC3")
+        bitmap := s.generateTypeBitMap(types)
+
+        nsec3 := packet.DNSRecord{
+                Name:       packet.Base32Encode(ownerEntry.hash) + "." + zone.Name,
+                Type:       packet.NSEC3,
+                Class:      1,
+                TTL:        300,
+                HashAlg:    alg,
+                Flags:      uint16(flags),
+                Iterations: iterations,
+                Salt:       []byte(salt),
+                NextHash:   nextEntry.hash,
+                TypeBitMap: bitmap,
+        }
+
+        return nsec3, nil</span>
+}
+
+type hashEntry struct {
+        name string
+        hash []byte
+}
+
+func (s *Server) generateTypeBitMap(types []domain.RecordType) []byte <span class="cov8" title="1">{
+        bits := make([]byte, 32)
+        maxType := 0
+        for _, t := range types </span><span class="cov8" title="1">{
+                qt := master.RecordTypeToQueryType(t)
+                if qt == 0 </span><span class="cov8" title="1">{
+                        if t == "NSEC" </span><span class="cov8" title="1">{
+                                qt = 47
+                        }</span>
+                        <span class="cov8" title="1">if t == "NSEC3" </span><span class="cov8" title="1">{
+                                qt = 50
+                        }</span>
+                }
+                <span class="cov8" title="1">if qt == 0 || qt &gt; 255 </span><span class="cov8" title="1">{
+                        continue</span>
+                }
+
+                <span class="cov8" title="1">byteIdx := qt / 8
+                bitIdx := 7 - (qt % 8)
+                bits[byteIdx] |= (1 &lt;&lt; bitIdx) // #nosec G602
+                if int(byteIdx) &gt; maxType </span><span class="cov8" title="1">{
+                        maxType = int(byteIdx)
+                }</span>
+        }
+
+        <span class="cov8" title="1">res := make([]byte, 0, 2+(maxType+1))
+        res = append(res, 0, byte(maxType+1))
+        res = append(res, bits[:maxType+1]...)
+        return res</span>
+}
+
+func queryTypeToRecordType(qType packet.QueryType) domain.RecordType <span class="cov8" title="1">{
+        switch qType </span>{
+        case packet.A:<span class="cov8" title="1">
+                return domain.TypeA</span>
+        case packet.AAAA:<span class="cov8" title="1">
+                return domain.TypeAAAA</span>
+        case packet.CNAME:<span class="cov8" title="1">
+                return domain.TypeCNAME</span>
+        case packet.NS:<span class="cov8" title="1">
+                return domain.TypeNS</span>
+        case packet.MX:<span class="cov8" title="1">
+                return domain.TypeMX</span>
+        case packet.SOA:<span class="cov8" title="1">
+                return domain.TypeSOA</span>
+        case packet.TXT:<span class="cov8" title="1">
+                return domain.TypeTXT</span>
+        case packet.SRV:<span class="cov8" title="1">
+                return domain.TypeSRV</span>
+        case packet.PTR:<span class="cov8" title="1">
+                return domain.TypePTR</span>
+        case packet.DS:<span class="cov8" title="1">
+                return domain.RecordType("DS")</span>
+        case packet.DNSKEY:<span class="cov8" title="1">
+                return domain.RecordType("DNSKEY")</span>
+        case packet.RRSIG:<span class="cov8" title="1">
+                return domain.RecordType("RRSIG")</span>
+        case packet.NSEC:<span class="cov8" title="1">
+                return domain.RecordType("NSEC")</span>
+        case packet.NSEC3:<span class="cov8" title="1">
+                return domain.RecordType("NSEC3")</span>
+        case packet.ANY:<span class="cov8" title="1">
+                return ""</span>
+        default:<span class="cov8" title="1">
+                return ""</span>
+        }
+}
+</pre>
+		
+		</div>
+	</body>
+	<script>
+	(function() {
+		var files = document.getElementById('files');
+		var visible;
+		files.addEventListener('change', onChange, false);
+		function select(part) {
+			if (visible)
+				visible.style.display = 'none';
+			visible = document.getElementById(part);
+			if (!visible)
+				return;
+			files.value = part;
+			visible.style.display = 'block';
+			location.hash = part;
+		}
+		function onChange() {
+			select(files.value);
+			window.scrollTo(0, 0);
+		}
+		if (location.hash != "") {
+			select(location.hash.substr(1));
+		}
+		if (!visible) {
+			select("file0");
+		}
+	})();
+	</script>
+</html>

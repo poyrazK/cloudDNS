@@ -81,6 +81,26 @@ type Record struct {
 	HealthStatus      HealthStatus    `json:"health_status,omitempty"`
 }
 
+// UpdateAction defines the type of change to apply in an atomic update.
+type UpdateAction string
+
+const (
+	// ActionAdd adds a new record to the zone.
+	ActionAdd UpdateAction = "ADD"
+	// ActionDeleteRRSet deletes all records of a specific type for a name.
+	ActionDeleteRRSet UpdateAction = "DELETE_RRSET"
+	// ActionDeleteAll deletes all records for a specific name.
+	ActionDeleteAll UpdateAction = "DELETE_ALL"
+	// ActionDeleteSpecific deletes a specific record matching name, type, and content.
+	ActionDeleteSpecific UpdateAction = "DELETE_SPECIFIC"
+)
+
+// UpdateOperation represents a single change in a dynamic update transaction.
+type UpdateOperation struct {
+	Action UpdateAction
+	Record Record
+}
+
 // ZoneChange represents a historical change to a DNS zone, used for IXFR and auditing.
 type ZoneChange struct {
 	ID        string     `json:"id"`

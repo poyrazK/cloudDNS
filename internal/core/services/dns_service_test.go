@@ -149,6 +149,10 @@ func (m *mockRepo) GetIXFRChain(_ context.Context, _ string, _, _ uint32) ([]dom
 	return nil, m.err
 }
 
+func (m *mockRepo) ApplyZoneUpdate(_ context.Context, _ string, _ []domain.UpdateOperation, _ uint32, _ []domain.ZoneChange) error {
+	return m.err
+}
+
 func (m *mockRepo) SaveAuditLog(_ context.Context, _ *domain.AuditLog) error { return m.err }
 func (m *mockRepo) GetAuditLogs(_ context.Context, _ string) ([]domain.AuditLog, error) {
 	return nil, m.err
@@ -411,5 +415,5 @@ func TestResolve_SmartEngine(t *testing.T) {
 	if len(recs) != 2 {
 		t.Errorf("Expected fallback to return all 2 records, got %d", len(recs))
 	}
-	}
+}
 
