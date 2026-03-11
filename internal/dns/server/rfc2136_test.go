@@ -151,10 +151,11 @@ func TestHandleUpdatePrerequisiteFail(t *testing.T) {
 	data := buffer.Buf[:buffer.Position()]
 
 	var capturedResp []byte
-	if err := srv.handlePacket(data, "127.0.0.1:12345", func(resp []byte) error {
+	err := srv.handlePacket(data, "127.0.0.1:12345", func(resp []byte) error {
 		capturedResp = resp
 		return nil
-	}, "udp"); err != nil {
+	}, "udp")
+	if err != nil {
 		t.Fatalf("handlePacket failed: %v", err)
 	}
 
@@ -582,7 +583,7 @@ func TestHandleUpdate_SOADeleteError(t *testing.T) {
 		records: []domain.Record{
 			{ZoneID: "z1", Name: "soadel.test.", Type: domain.TypeSOA, Content: "ns1. ns2. 1 2 3 4 5"},
 		},
-		failDeleteRecord: true,
+		failDeleteSOA: true,
 	}
 	srv := NewServer(":0", repo, nil)
 
