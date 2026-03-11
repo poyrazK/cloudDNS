@@ -4,7 +4,7 @@ A high-performance, authoritative and recursive DNS server built from scratch in
 
 ## 1. Core DNS Engine (Manual RFC 1035)
 Unlike standard implementations that rely on generic libraries, cloudDNS uses a custom-built packet parser and serializer for maximum control and efficiency.
-*   **Wire Format Mastery**: Full support for A, AAAA, CNAME, MX, TXT, NS, SOA, SRV, and PTR record types.
+*   **Wire Format Mastery**: Full support for A, AAAA, CNAME, MX, TXT, NS, SOA, SRV, PTR, and CAA record types.
 *   **EDNS(0) Support**: Handles extended DNS payloads and flags.
 *   **CHAOS Class**: Support for `id.server.` and `hostname.bind.` queries for node identification.
 
