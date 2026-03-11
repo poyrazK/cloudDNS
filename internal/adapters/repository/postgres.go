@@ -845,6 +845,9 @@ func ConvertPacketRecordToDomain(pRec packet.DNSRecord, zoneID string) (domain.R
 		// Using Hex for NextHash as per the read function for consistency in this internal format
 		rec.Content = fmt.Sprintf("%d %d %d %s %s %s",
 			pRec.HashAlg, pRec.Flags, pRec.Iterations, hex.EncodeToString(pRec.Salt), hex.EncodeToString(pRec.NextHash), hex.EncodeToString(pRec.TypeBitMap))
+	case packet.CAA:
+		rec.Type = domain.TypeCAA
+		rec.Content = fmt.Sprintf("%d %s \"%s\"", pRec.CAAFlag, pRec.CAATag, pRec.CAAValue)
 	default:
 		return rec, fmt.Errorf("unsupported record type for conversion: %d", pRec.Type)
 	}
