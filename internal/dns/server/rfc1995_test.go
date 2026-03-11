@@ -180,65 +180,46 @@ func TestHandleIXFR_ZoneNotFound(t *testing.T) {
 	}
 }
 
-func TestHandleIXFR_MalformedSOAContent(t *testing.T) {
-	repo := &mockServerRepo{
-		zones: []domain.Zone{{ID: "z1", Name: "malformed.test."}},
-		records: []domain.Record{
-			{ZoneID: "z1", Name: "malformed.test.", Type: domain.TypeSOA, Content: "ns1. ns2."}, // Missing serial
-		},
-	}
-	srv := NewServer(":0", repo, nil)
-
-	req := packet.NewDNSPacket()
-	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "malformed.test.", QType: packet.IXFR})
-	req.Authorities = append(req.Authorities, packet.DNSRecord{
-		Name: "malformed.test.", Type: packet.SOA, Class: 1, Serial: 1,
-	})
-
-	conn := &mockTCPConn{}
-	srv.handleIXFR(conn, req)
-
-	if len(conn.captured) != 1 {
-		t.Fatalf("expected exactly 1 TCP response for malformed SOA content IXFR, got %d", len(conn.captured))
+func TestHandleIXFR_InvalidSOA(t *testing.T) {
+	tests := []struct {
+		name       string
+		soaContent string
+	}{
+		{"too_few_fields", "ns1. ns2."},
+		{"non_numeric_serial", "ns1. ns2. not-a-number 3600 600 604800 300"},
 	}
 
-	resp := packet.NewDNSPacket()
-	pb := packet.NewBytePacketBuffer()
-	pb.Load(conn.captured[0])
-	_ = resp.FromBuffer(pb)
-	if resp.Header.ResCode != packet.RcodeServFail {
-		t.Errorf("Expected SERVFAIL for malformed SOA, got %d", resp.Header.ResCode)
-	}
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &mockServerRepo{
+				zones: []domain.Zone{{ID: "z1", Name: "invalid.test."}},
+				records: []domain.Record{
+					{ZoneID: "z1", Name: "invalid.test.", Type: domain.TypeSOA, Content: tt.soaContent},
+				},
+			}
+			srv := NewServer(":0", repo, nil)
 
-func TestHandleIXFR_InvalidSOASerial(t *testing.T) {
-	repo := &mockServerRepo{
-		zones: []domain.Zone{{ID: "z1", Name: "invalid.test."}},
-		records: []domain.Record{
-			{ZoneID: "z1", Name: "invalid.test.", Type: domain.TypeSOA, Content: "ns1. ns2. not-a-number 3600 600 604800 300"},
-		},
-	}
-	srv := NewServer(":0", repo, nil)
+			req := packet.NewDNSPacket()
+			req.Questions = append(req.Questions, packet.DNSQuestion{Name: "invalid.test.", QType: packet.IXFR})
+			req.Authorities = append(req.Authorities, packet.DNSRecord{
+				Name: "invalid.test.", Type: packet.SOA, Class: 1, Serial: 1,
+			})
 
-	req := packet.NewDNSPacket()
-	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "invalid.test.", QType: packet.IXFR})
-	req.Authorities = append(req.Authorities, packet.DNSRecord{
-		Name: "invalid.test.", Type: packet.SOA, Class: 1, Serial: 1,
-	})
+			conn := &mockTCPConn{}
+			srv.handleIXFR(conn, req)
 
-	conn := &mockTCPConn{}
-	srv.handleIXFR(conn, req)
+			if len(conn.captured) != 1 {
+				t.Fatalf("Expected exactly 1 SERVFAIL response for invalid SOA, got %d", len(conn.captured))
+			}
 
-	if len(conn.captured) != 1 {
-		t.Fatalf("expected exactly 1 TCP response for invalid SOA serial IXFR, got %d", len(conn.captured))
-	}
-
-	resp := packet.NewDNSPacket()
-	pb := packet.NewBytePacketBuffer()
-	pb.Load(conn.captured[0])
-	_ = resp.FromBuffer(pb)
-	if resp.Header.ResCode != packet.RcodeServFail {
-		t.Errorf("Expected SERVFAIL for invalid serial, got %d", resp.Header.ResCode)
+			resp := packet.NewDNSPacket()
+			pb := packet.NewBytePacketBuffer()
+			pb.Load(conn.captured[0])
+			_ = resp.FromBuffer(pb)
+			if resp.Header.ResCode != packet.RcodeServFail {
+				t.Errorf("Expected SERVFAIL, got %d", resp.Header.ResCode)
+			}
+		})
 	}
 }
 
@@ -315,129 +296,48 @@ func TestHandleIXFR_GapInHistoryFallback(t *testing.T) {
 	}
 }
 
-func TestHandleIXFR_ListRecordsError(t *testing.T) {
-	repo := &mockServerRepo{
-		zones: []domain.Zone{{ID: "z1", Name: "listerror.test."}},
-		records: []domain.Record{
-			{ZoneID: "z1", Name: "listerror.test.", Type: domain.TypeSOA, Content: "ns1. ns2. 10 3600 600 604800 300"},
-		},
-		failListRecords: true, // Trigger failure during AXFR fallback
-	}
-	srv := NewServer(":0", repo, nil)
-
-	req := packet.NewDNSPacket()
-	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "listerror.test.", QType: packet.IXFR})
-	req.Authorities = append(req.Authorities, packet.DNSRecord{
-		Name: "listerror.test.", Type: packet.SOA, Class: 1, Serial: 1,
-	})
-
-	conn := &mockTCPConn{}
-	srv.handleIXFR(conn, req)
-
-	if len(conn.captured) != 1 {
-		t.Fatalf("expected exactly 1 TCP response for list records failure during fallback, got %d", len(conn.captured))
+func TestHandleIXFR_ListRecordsErrors(t *testing.T) {
+	tests := []struct {
+		name   string
+		zone   string
+		serial uint32
+	}{
+		{"fallback_gap", "fallbackerr.test.", 50},
+		{"fallback_initial", "listerror.test.", 1},
 	}
 
-	resp := packet.NewDNSPacket()
-	pb := packet.NewBytePacketBuffer()
-	pb.Load(conn.captured[0])
-	_ = resp.FromBuffer(pb)
-	if resp.Header.ResCode != packet.RcodeServFail {
-		t.Errorf("Expected SERVFAIL for list records failure, got %d", resp.Header.ResCode)
-	}
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &mockServerRepo{
+				zones: []domain.Zone{{ID: "z1", Name: tt.zone}},
+				records: []domain.Record{
+					{ZoneID: "z1", Name: tt.zone, Type: domain.TypeSOA, Content: "ns1. ns2. 100 3600 600 604800 300"},
+				},
+				failListRecords: true,
+			}
+			srv := NewServer(":0", repo, nil)
 
-func TestHandleIXFR_MalformedSOA(t *testing.T) {
-	repo := &mockServerRepo{
-		zones: []domain.Zone{{ID: "z1", Name: "malformed.test."}},
-		records: []domain.Record{
-			{ZoneID: "z1", Name: "malformed.test.", Type: domain.TypeSOA, Content: "short soa"},
-		},
-	}
-	srv := NewServer(":0", repo, nil)
+			req := packet.NewDNSPacket()
+			req.Questions = append(req.Questions, packet.DNSQuestion{Name: tt.zone, QType: packet.IXFR})
+			req.Authorities = append(req.Authorities, packet.DNSRecord{
+				Name: tt.zone, Type: packet.SOA, Class: 1, Serial: tt.serial,
+			})
 
-	req := packet.NewDNSPacket()
-	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "malformed.test.", QType: packet.IXFR})
-	req.Authorities = append(req.Authorities, packet.DNSRecord{
-		Name: "malformed.test.", Type: packet.SOA, Serial: 1,
-	})
+			conn := &mockTCPConn{}
+			srv.handleIXFR(conn, req)
 
-	conn := &mockTCPConn{}
-	srv.handleIXFR(conn, req)
+			if len(conn.captured) != 1 {
+				t.Fatalf("Expected exactly 1 SERVFAIL response for list records failure, got %d", len(conn.captured))
+			}
 
-	if len(conn.captured) != 1 {
-		t.Fatalf("expected exactly 1 TCP response for malformed SOA IXFR, got %d", len(conn.captured))
-	}
-
-	resp := packet.NewDNSPacket()
-	pb := packet.NewBytePacketBuffer()
-	pb.Load(conn.captured[0])
-	_ = resp.FromBuffer(pb)
-	if resp.Header.ResCode != packet.RcodeServFail {
-		t.Errorf("Expected SERVFAIL (2), got %d", resp.Header.ResCode)
-	}
-}
-
-func TestHandleIXFR_InvalidSerial(t *testing.T) {
-	repo := &mockServerRepo{
-		zones: []domain.Zone{{ID: "z1", Name: "badserial.test."}},
-		records: []domain.Record{
-			{ZoneID: "z1", Name: "badserial.test.", Type: domain.TypeSOA, Content: "ns1. ns2. not-a-number 3600 600"},
-		},
-	}
-	srv := NewServer(":0", repo, nil)
-
-	req := packet.NewDNSPacket()
-	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "badserial.test.", QType: packet.IXFR})
-	req.Authorities = append(req.Authorities, packet.DNSRecord{
-		Name: "badserial.test.", Type: packet.SOA, Serial: 1,
-	})
-
-	conn := &mockTCPConn{}
-	srv.handleIXFR(conn, req)
-
-	if len(conn.captured) != 1 {
-		t.Fatalf("Expected exactly 1 SERVFAIL response for invalid SOA serial, got %d", len(conn.captured))
-	}
-	
-	resp := packet.NewDNSPacket()
-	pb := packet.NewBytePacketBuffer()
-	pb.Load(conn.captured[0])
-	_ = resp.FromBuffer(pb)
-	if resp.Header.ResCode != packet.RcodeServFail {
-		t.Errorf("Expected SERVFAIL, got %d", resp.Header.ResCode)
-	}
-}
-
-func TestHandleIXFR_FallbackListError(t *testing.T) {
-	repo := &mockServerRepo{
-		zones: []domain.Zone{{ID: "z1", Name: "fallbackerr.test."}},
-		records: []domain.Record{
-			{ZoneID: "z1", Name: "fallbackerr.test.", Type: domain.TypeSOA, Content: "ns1. ns2. 100 3600 600"},
-		},
-		failListRecords: true,
-	}
-	srv := NewServer(":0", repo, nil)
-
-	req := packet.NewDNSPacket()
-	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "fallbackerr.test.", QType: packet.IXFR})
-	req.Authorities = append(req.Authorities, packet.DNSRecord{
-		Name: "fallbackerr.test.", Type: packet.SOA, Serial: 50, // History missing -> fallback
-	})
-
-	conn := &mockTCPConn{}
-	srv.handleIXFR(conn, req)
-
-	if len(conn.captured) != 1 {
-		t.Fatalf("Expected exactly 1 SERVFAIL response for fallback list error, got %d", len(conn.captured))
-	}
-	
-	resp := packet.NewDNSPacket()
-	pb := packet.NewBytePacketBuffer()
-	pb.Load(conn.captured[0])
-	_ = resp.FromBuffer(pb)
-	if resp.Header.ResCode != packet.RcodeServFail {
-		t.Errorf("Expected SERVFAIL, got %d", resp.Header.ResCode)
+			resp := packet.NewDNSPacket()
+			pb := packet.NewBytePacketBuffer()
+			pb.Load(conn.captured[0])
+			_ = resp.FromBuffer(pb)
+			if resp.Header.ResCode != packet.RcodeServFail {
+				t.Errorf("Expected SERVFAIL, got %d", resp.Header.ResCode)
+			}
+		})
 	}
 }
 

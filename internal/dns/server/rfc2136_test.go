@@ -528,6 +528,7 @@ func TestHandleUpdateDeleteRRSetSpecific(t *testing.T) {
 	repo := &mockServerRepo{
 		zones: []domain.Zone{{ID: "z1", Name: "spec.test."}},
 		records: []domain.Record{
+			{ID: "soa1", ZoneID: "z1", Name: "spec.test.", Type: domain.TypeSOA, Content: "ns1. ns2. 1 3600 600 604800 300"},
 			{ZoneID: "z1", Name: "www.spec.test.", Type: domain.TypeA, Content: "1.1.1.1"},
 			{ZoneID: "z1", Name: "www.spec.test.", Type: domain.TypeTXT, Content: "keep me"},
 		},
@@ -541,7 +542,19 @@ func TestHandleUpdateDeleteRRSetSpecific(t *testing.T) {
 		Name: "www.spec.test.", Type: packet.A, Class: 255,
 	})
 
-	_ = srv.handleUpdate(req, nil, "127.0.0.1", func(_ []byte) error { return nil })
+	err := srv.handleUpdate(req, nil, "127.0.0.1", func(resp []byte) error {
+		res := packet.NewDNSPacket()
+		pb := packet.NewBytePacketBuffer()
+		pb.Load(resp)
+		_ = res.FromBuffer(pb)
+		if res.Header.ResCode != packet.RcodeNoError {
+			t.Errorf("Expected NOERROR for RRSet delete update, got %d", res.Header.ResCode)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("handleUpdate failed: %v", err)
+	}
 
 	for _, r := range repo.records {
 		if r.Name == "www.spec.test." && r.Type == domain.TypeA {
