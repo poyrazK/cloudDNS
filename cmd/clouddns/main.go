@@ -38,7 +38,7 @@ func run(ctx context.Context) error {
 	logLevel := slog.LevelInfo
 	if lvl := os.Getenv("LOG_LEVEL"); lvl != "" {
 		if err := logLevel.UnmarshalText([]byte(lvl)); err != nil {
-			fmt.Printf("invalid LOG_LEVEL %q, defaulting to INFO\n", lvl)
+			fmt.Fprintf(os.Stderr, "invalid LOG_LEVEL %q, defaulting to INFO\n", lvl)
 		}
 	}
 
@@ -217,7 +217,6 @@ func run(ctx context.Context) error {
 	logger.Info("cloudDNS services starting",
 		"dns_addr", dnsAddr,
 		"api_addr", apiAddr,
-		"node_id", dnsServer.NodeID,
 	)
 
 	s := &http.Server{
