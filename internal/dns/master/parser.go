@@ -194,6 +194,8 @@ func RecordTypeToQueryType(t domain.RecordType) uint16 {
 	case domain.TypeTXT: return 16
 	case domain.TypeAAAA: return 28
 	case domain.TypePTR: return 12
+	case domain.TypeSRV: return 33
+	case domain.TypeCAA: return 257
 	default: return 0
 	}
 }
