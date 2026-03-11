@@ -2,15 +2,8 @@
 package packet
 
 import (
-	"bytes"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/binary"
 	"fmt"
-	"io"
 	"net"
-	"strings"
-	"time"
 
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
 )
