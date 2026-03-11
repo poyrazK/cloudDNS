@@ -1141,6 +1141,18 @@ func ConvertDomainToPacketRecord(rec domain.Record) (packet.DNSRecord, error) {
 				pRec.TypeBitMap = bitmap
 			}
 		}
+	case domain.TypeCAA:
+		pRec.Type = packet.CAA
+		// CAA content format: "[flag] [tag] \"[value]\""
+		parts := strings.Fields(rec.Content)
+		if len(parts) >= 3 {
+			var flag uint16
+			if _, err := fmt.Sscanf(parts[0], "%d", &flag); err == nil {
+				pRec.CAAFlag = uint8(flag) // #nosec G115
+			}
+			pRec.CAATag = parts[1]
+			pRec.CAAValue = strings.Trim(parts[2], "\"")
+		}
 	default:
 		return pRec, fmt.Errorf("unsupported record type: %s", rec.Type)
 	}
