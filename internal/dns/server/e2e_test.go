@@ -86,6 +86,7 @@ func TestEndToEndDNSAdvanced(t *testing.T) {
 	records := []domain.Record{
 		{Name: "a.advanced.test.", Type: domain.TypeA, Content: "1.1.1.1", TTL: 300, ZoneID: createdZone.ID},
 		{Name: "*.advanced.test.", Type: domain.TypeTXT, Content: "wildcard", TTL: 300, ZoneID: createdZone.ID},
+		{Name: "advanced.test.", Type: domain.TypeCAA, Content: "0 issue \"letsencrypt.org\"", TTL: 300, ZoneID: createdZone.ID},
 	}
 	for _, r := range records {
 		b, err := json.Marshal(r)
@@ -141,6 +142,41 @@ func TestEndToEndDNSAdvanced(t *testing.T) {
 	if cerr := conn.Close(); cerr != nil {
 		t.Fatalf("Failed to close TCP conn: %v", cerr)
 	}
+
+	// 3b. Test CAA Resolution
+	queryCAA := packet.NewDNSPacket()
+	queryCAA.Questions = append(queryCAA.Questions, packet.DNSQuestion{Name: "advanced.test.", QType: packet.CAA})
+	qBufCAA := packet.NewBytePacketBuffer()
+	if err := queryCAA.Write(qBufCAA); err != nil {
+		t.Fatalf("Failed to write to buffer: %v", err)
+	}
+
+	connCAA, err := net.Dial("udp", dnsAddr)
+	if err != nil {
+		t.Fatalf("Failed to connect to DNS for CAA: %v", err)
+	}
+	if _, err := connCAA.Write(qBufCAA.Buf[:qBufCAA.Position()]); err != nil {
+		t.Fatalf("Failed to write udp for CAA: %v", err)
+	}
+	nCAA, err := connCAA.Read(resBuf)
+	if err != nil {
+		t.Fatalf("Failed to read udp res for CAA: %v", err)
+	}
+
+	resCAA := packet.NewDNSPacket()
+	pBufCAA := packet.NewBytePacketBuffer()
+	pBufCAA.Load(resBuf[:nCAA])
+	if err := resCAA.FromBuffer(pBufCAA); err != nil {
+		t.Fatalf("Failed to parse CAA packet: %v", err)
+	}
+
+	if len(resCAA.Answers) == 0 {
+		t.Fatalf("CAA E2E failed: no answer")
+	}
+	if resCAA.Answers[0].CAAValue != "letsencrypt.org" {
+		t.Errorf("CAA E2E failed: got value %s, want letsencrypt.org", resCAA.Answers[0].CAAValue)
+	}
+	_ = connCAA.Close()
 
 	// 4. Test AXFR over TCP
 	tcpConn, err := net.Dial("tcp", dnsAddr)

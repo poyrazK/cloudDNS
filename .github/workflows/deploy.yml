@@ -132,26 +132,60 @@ jobs:
           echo "❌ Health check failed after 20 attempts"
           exit 1
 
-      # DNS Verification: Live recursive lookups
+      # DNS Verification: Live recursive lookups for multiple record types
       - name: DNS Smoke Test
         run: |
           DNS_IP=$(kubectl get svc clouddns-lb-udp -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
           echo "Testing DNS resolution at $DNS_IP..."
           
-          echo "--- Testing google.com ---"
+          echo "--- Testing google.com (A) ---"
           DIG_OUT=$(dig @$DNS_IP google.com +short +timeout=5 +tries=2)
           if [[ -z "$DIG_OUT" ]]; then
-            echo "❌ Failed to resolve google.com"
+            echo "❌ Failed to resolve A record for google.com"
             exit 1
           fi
           echo "Result: $DIG_OUT"
           
-          echo "--- Testing example.com ---"
-          DIG_OUT=$(dig @$DNS_IP example.com +short +timeout=5 +tries=2)
+          echo "--- Testing google.com (AAAA) ---"
+          DIG_OUT=$(dig @$DNS_IP google.com AAAA +short +timeout=5 +tries=2)
           if [[ -z "$DIG_OUT" ]]; then
-            echo "❌ Failed to resolve example.com"
+            echo "❌ Failed to resolve AAAA record for google.com"
             exit 1
           fi
           echo "Result: $DIG_OUT"
+
+          echo "--- Testing google.com (MX) ---"
+          DIG_OUT=$(dig @$DNS_IP google.com MX +short +timeout=5 +tries=2)
+          if [[ -z "$DIG_OUT" ]]; then
+            echo "❌ Failed to resolve MX record for google.com"
+            exit 1
+          fi
+          echo "Result: $DIG_OUT"
+
+          echo "--- Testing google.com (TXT) ---"
+          DIG_OUT=$(dig @$DNS_IP google.com TXT +short +timeout=5 +tries=2)
+          if [[ -z "$DIG_OUT" ]]; then
+            echo "❌ Failed to resolve TXT record for google.com"
+            exit 1
+          fi
+          echo "Result: $DIG_OUT"
+
+          echo "--- Testing CAA Record (google.com) ---"
+          CAA_OUT=$(dig @$DNS_IP google.com CAA +short +timeout=5 +tries=2)
+          if [[ -z "$CAA_OUT" ]]; then
+            echo "❌ Failed to resolve CAA for google.com"
+            exit 1
+          fi
+          echo "Result: $CAA_OUT"
+
+          echo "--- Testing SRV Record (_sip._udp.google.com) ---"
+          # Some public domains might not have these, but we check if we get ANY response (even NO DATA)
+          # versus a timeout or server error.
+          SRV_OUT=$(dig @$DNS_IP _sip._udp.google.com SRV +timeout=5 +tries=2)
+          if [[ "$SRV_OUT" == *"SERVFAIL"* ]] || [[ "$SRV_OUT" == *"connection timed out"* ]]; then
+            echo "❌ SRV resolution failed with server error"
+            exit 1
+          fi
+          echo "SRV Test Passed (No Server Failure)"
           
           echo "✅ DNS Smoke Test Passed!"

@@ -75,6 +75,18 @@ func TestDNSSECConverters_Extra(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "CAA",
+			domain: domain.Record{
+				Type:    domain.TypeCAA,
+				Content: "0 issue \"letsencrypt.org\"",
+			},
+			validate: func(t *testing.T, p packet.DNSRecord) {
+				if p.Type != packet.CAA || p.CAAFlag != 0 || p.CAATag != "issue" || p.CAAValue != "letsencrypt.org" {
+					t.Errorf("CAA conversion failed: %+v", p)
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {

@@ -103,3 +103,33 @@ func TestDNSRecord_ReadWrite_OPT_Options(t *testing.T) {
 		t.Errorf("OPT Options mismatch: %+v", parsed.Options)
 	}
 }
+
+func TestDNSRecord_ReadWrite_CAA(t *testing.T) {
+	record := DNSRecord{
+		Name:     "caa.test.",
+		Type:     CAA,
+		TTL:      300,
+		CAAFlag:  0,
+		CAATag:   "issue",
+		CAAValue: "letsencrypt.org",
+	}
+
+	buffer := NewBytePacketBuffer()
+	_, err := record.Write(buffer)
+	if err != nil {
+		t.Fatalf("Write CAA failed: %v", err)
+	}
+	_ = buffer.Seek(0)
+
+	parsed := DNSRecord{}
+	err = parsed.Read(buffer)
+	if err != nil {
+		t.Fatalf("Read CAA failed: %v", err)
+	}
+
+	if parsed.CAAFlag != record.CAAFlag || parsed.CAATag != record.CAATag || parsed.CAAValue != record.CAAValue {
+		t.Errorf("CAA mismatch: got flag=%d tag=%s val=%s, want flag=%d tag=%s val=%s",
+			parsed.CAAFlag, parsed.CAATag, parsed.CAAValue,
+			record.CAAFlag, record.CAATag, record.CAAValue)
+	}
+}

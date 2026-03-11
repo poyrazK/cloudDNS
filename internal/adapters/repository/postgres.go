@@ -845,6 +845,9 @@ func ConvertPacketRecordToDomain(pRec packet.DNSRecord, zoneID string) (domain.R
 		// Using Hex for NextHash as per the read function for consistency in this internal format
 		rec.Content = fmt.Sprintf("%d %d %d %s %s %s",
 			pRec.HashAlg, pRec.Flags, pRec.Iterations, hex.EncodeToString(pRec.Salt), hex.EncodeToString(pRec.NextHash), hex.EncodeToString(pRec.TypeBitMap))
+	case packet.CAA:
+		rec.Type = domain.TypeCAA
+		rec.Content = fmt.Sprintf("%d %s \"%s\"", pRec.CAAFlag, pRec.CAATag, pRec.CAAValue)
 	default:
 		return rec, fmt.Errorf("unsupported record type for conversion: %d", pRec.Type)
 	}
@@ -1137,6 +1140,20 @@ func ConvertDomainToPacketRecord(rec domain.Record) (packet.DNSRecord, error) {
 			if bitmap, err := hex.DecodeString(parts[5]); err == nil {
 				pRec.TypeBitMap = bitmap
 			}
+		}
+	case "CAA":
+		pRec.Type = packet.CAA
+		// Content: "flag tag \"value\""
+		parts := strings.Fields(rec.Content)
+		if len(parts) >= 3 {
+			var flag uint16
+			if _, err := fmt.Sscanf(parts[0], "%d", &flag); err == nil {
+				pRec.CAAFlag = uint8(flag) // #nosec G115
+			}
+			pRec.CAATag = parts[1]
+			// Value might contain spaces, so join remaining and trim quotes
+			val := strings.Join(parts[2:], " ")
+			pRec.CAAValue = strings.Trim(val, "\"")
 		}
 	default:
 		return pRec, fmt.Errorf("unsupported record type: %s", rec.Type)

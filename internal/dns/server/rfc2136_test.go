@@ -650,22 +650,79 @@ func TestHandleUpdate_SOACreateError(t *testing.T) {
 	})
 }
 
-func TestHandleUpdate_ZoneNotFound(t *testing.T) {
-	repo := &mockServerRepo{}
+// TestHandleUpdateCAA verifies that CAA records can be added and deleted via dynamic updates.
+func TestHandleUpdateCAA(t *testing.T) {
+	repo := &mockServerRepo{
+		zones: []domain.Zone{{ID: "z1", Name: "caa.test."}},
+		records: []domain.Record{
+			{ID: "soa1", ZoneID: "z1", Name: "caa.test.", Type: domain.TypeSOA, Content: "ns1. ns2. 1 3600 600 604800 300"},
+		},
+	}
 	srv := NewServer(":0", repo, nil)
 
+	// 1. Add CAA record
 	req := packet.NewDNSPacket()
 	req.Header.Opcode = packet.OpcodeUpdate
-	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "nonexistent.test.", QType: packet.SOA})
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "caa.test.", QType: packet.SOA})
+	req.Authorities = append(req.Authorities, packet.DNSRecord{
+		Name:     "caa.test.",
+		Type:     packet.CAA,
+		Class:    1,
+		TTL:      300,
+		CAAFlag:  0,
+		CAATag:   "issue",
+		CAAValue: "letsencrypt.org",
+	})
 
-	_ = srv.handleUpdate(req, nil, "127.0.0.1", func(resp []byte) error {
+	err := srv.handleUpdate(req, nil, "127.0.0.1", func(resp []byte) error {
 		res := packet.NewDNSPacket()
 		pb := packet.NewBytePacketBuffer()
 		pb.Load(resp)
 		_ = res.FromBuffer(pb)
-		if res.Header.ResCode != packet.RcodeNotAuth {
-			t.Errorf("Expected NOTAUTH for unknown zone, got %d", res.Header.ResCode)
+		if res.Header.ResCode != packet.RcodeNoError {
+			t.Errorf("Expected NOERROR for CAA add update, got %d", res.Header.ResCode)
 		}
 		return nil
 	})
+	if err != nil {
+		t.Fatalf("handleUpdate failed: %v", err)
+	}
+
+	found := false
+	for _, r := range repo.records {
+		if r.Type == domain.TypeCAA && r.Content == "0 issue \"letsencrypt.org\"" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("CAA record was not added to repo")
+	}
+
+	// 2. Delete CAA record
+	reqDel := packet.NewDNSPacket()
+	reqDel.Header.Opcode = packet.OpcodeUpdate
+	reqDel.Questions = append(reqDel.Questions, packet.DNSQuestion{Name: "caa.test.", QType: packet.SOA})
+	reqDel.Authorities = append(reqDel.Authorities, packet.DNSRecord{
+		Name:  "caa.test.",
+		Type:  packet.CAA,
+		Class: 255, // ANY -> Delete RRset
+	})
+
+	_ = srv.handleUpdate(reqDel, nil, "127.0.0.1", func(resp []byte) error {
+		res := packet.NewDNSPacket()
+		pb := packet.NewBytePacketBuffer()
+		pb.Load(resp)
+		_ = res.FromBuffer(pb)
+		if res.Header.ResCode != packet.RcodeNoError {
+			t.Errorf("Expected NOERROR for CAA delete update, got %d", res.Header.ResCode)
+		}
+		return nil
+	})
+
+	for _, r := range repo.records {
+		if r.Type == domain.TypeCAA {
+			t.Errorf("CAA record was not deleted")
+		}
+	}
 }

@@ -536,10 +536,12 @@ func TestHandlePacketLocalHit(t *testing.T) {
 	repo := &mockServerRepo{
 		records: []domain.Record{
 			{Name: "local.test.", Type: domain.TypeA, Content: "1.1.1.1", TTL: 60},
+			{Name: "local.test.", Type: domain.TypeCAA, Content: "0 issue \"letsencrypt.org\"", TTL: 60},
 		},
 	}
 	srv := NewServer("127.0.0.1:0", repo, nil)
 
+	// 1. Test A
 	req := packet.NewDNSPacket()
 	req.Header.ID = 123
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "local.test.", QType: packet.A})
@@ -553,7 +555,7 @@ func TestHandlePacketLocalHit(t *testing.T) {
 		capturedResp = resp
 		return nil
 	}, "udp"); err != nil {
-		t.Fatalf("HandlePacket failed: %v", err)
+		t.Fatalf("HandlePacket failed for A: %v", err)
 	}
 
 	resBuf := packet.NewBytePacketBuffer()
@@ -561,11 +563,32 @@ func TestHandlePacketLocalHit(t *testing.T) {
 	resp := packet.NewDNSPacket()
 	_ = resp.FromBuffer(resBuf)
 
-	if len(resp.Answers) != 1 {
-		t.Fatalf("Expected 1 answer, got %d", len(resp.Answers))
+	if len(resp.Answers) != 1 || resp.Answers[0].IP.String() != "1.1.1.1" {
+		t.Errorf("Expected 1.1.1.1, got %+v", resp.Answers)
 	}
-	if resp.Answers[0].IP.String() != "1.1.1.1" {
-		t.Errorf("Expected 1.1.1.1, got %s", resp.Answers[0].IP.String())
+
+	// 2. Test CAA
+	req2 := packet.NewDNSPacket()
+	req2.Header.ID = 456
+	req2.Questions = append(req2.Questions, packet.DNSQuestion{Name: "local.test.", QType: packet.CAA})
+	buffer2 := packet.NewBytePacketBuffer()
+	_ = req2.Write(buffer2)
+	data2 := buffer2.Buf[:buffer2.Position()]
+
+	if err := srv.handlePacket(data2, &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
+		capturedResp = resp
+		return nil
+	}, "udp"); err != nil {
+		t.Fatalf("HandlePacket failed for CAA: %v", err)
+	}
+
+	resBuf2 := packet.NewBytePacketBuffer()
+	resBuf2.Load(capturedResp)
+	resp2 := packet.NewDNSPacket()
+	_ = resp2.FromBuffer(resBuf2)
+
+	if len(resp2.Answers) != 1 || resp2.Answers[0].CAAValue != "letsencrypt.org" {
+		t.Errorf("CAA resolution failed in server test: got %+v", resp2.Answers)
 	}
 }
 

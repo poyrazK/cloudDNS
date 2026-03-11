@@ -138,6 +138,24 @@ func TestConvertPacketRecordToDomain(t *testing.T) {
 			},
 		},
 		{
+			name: "CAA record",
+			pRec: packet.DNSRecord{
+				Name:     "test.",
+				Type:     packet.CAA,
+				TTL:      3600,
+				CAAFlag:  0,
+				CAATag:   "issue",
+				CAAValue: "letsencrypt.org",
+			},
+			want: domain.Record{
+				ZoneID:  zoneID,
+				Name:    "test.",
+				Type:    domain.TypeCAA,
+				Content: "0 issue \"letsencrypt.org\"",
+				TTL:     3600,
+			},
+		},
+		{
 			name: "Unsupported type",
 			pRec: packet.DNSRecord{
 				Type: packet.QueryType(999),
@@ -284,6 +302,23 @@ func TestConvertDomainToPacketRecord(t *testing.T) {
 				Retry:   600,
 				Expire:  604800,
 				Minimum: 300,
+			},
+		},
+		{
+			name: "CAA record",
+			rec: domain.Record{
+				Name:    "test",
+				Type:    domain.TypeCAA,
+				Content: "0 issue \"letsencrypt.org\"",
+				TTL:     3600,
+			},
+			want: packet.DNSRecord{
+				Name:     "test.",
+				Type:     packet.CAA,
+				CAAFlag:  0,
+				CAATag:   "issue",
+				CAAValue: "letsencrypt.org",
+				TTL:      3600,
 			},
 		},
 		{

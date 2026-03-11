@@ -71,6 +71,8 @@ const (
 	OPT        QueryType = 41
 	// TSIG represents a transaction signature record (RFC 2845).
 	TSIG       QueryType = 250
+	// CAA represents a certification authority authorization record (RFC 6844).
+	CAA        QueryType = 257
 )
 
 // EDNS0 Option Codes
@@ -133,6 +135,7 @@ func RecordTypeToQueryType(t domain.RecordType) QueryType {
 	case domain.TypeAAAA: return AAAA
 	case domain.TypePTR: return PTR
 	case domain.TypeSRV: return SRV
+	case domain.TypeCAA: return CAA
 	default: return UNKNOWN
 	}
 }
@@ -160,6 +163,7 @@ func (t QueryType) String() string {
 	case OPT: return "OPT"
 	case TSIG: return "TSIG"
 	case PTR: return "PTR"
+	case CAA: return "CAA"
 	default: return fmt.Sprintf("TYPE%d", t)
 	}
 }
@@ -414,6 +418,10 @@ type DNSRecord struct {
 	OriginalID    uint16
 	Error         uint16
 	Other         []byte
+	// CAA
+	CAAFlag  uint8
+	CAATag   string
+	CAAValue string
 }
 
 // AddEDE adds an Extended DNS Error (RFC 8914) option to an OPT record.
@@ -598,6 +606,23 @@ func (r *DNSRecord) Read(buffer *BytePacketBuffer) error {
 		if errReadOther != nil { return errReadOther }
 		if r.Other, err = buffer.ReadRange(buffer.Position(), int(otherLen)); err != nil { return err }
 		if errStep2 := buffer.Step(int(otherLen)); errStep2 != nil { return errStep2 }
+	case CAA:
+		r.CAAFlag, err = buffer.Read()
+		if err != nil { return err }
+		tagLen, errReadTagLen := buffer.Read()
+		if errReadTagLen != nil { return errReadTagLen }
+		tagData, errReadTag := buffer.ReadRange(buffer.Position(), int(tagLen))
+		if errReadTag != nil { return errReadTag }
+		r.CAATag = string(tagData)
+		if errStep := buffer.Step(int(tagLen)); errStep != nil { return errStep }
+		
+		valLen := int(dataLen) - 2 - int(tagLen)
+		if valLen > 0 {
+			valData, errReadVal := buffer.ReadRange(buffer.Position(), valLen)
+			if errReadVal != nil { return errReadVal }
+			r.CAAValue = string(valData)
+			if errStep2 := buffer.Step(valLen); errStep2 != nil { return errStep2 }
+		}
 	case OPT:
 		r.UDPPayloadSize = r.Class
 		r.ExtendedRcode = uint8(r.TTL >> 24) // #nosec G115
@@ -851,6 +876,21 @@ func (r *DNSRecord) Write(buffer *BytePacketBuffer) (int, error) {
 		for _, b := range r.Digest {
 			if err := buffer.Write(b); err != nil { return 0, err }
 		}
+	case CAA:
+		lenPos := buffer.Position()
+		if err := buffer.Writeu16(0); err != nil { return 0, err } // Placeholder for RDLENGTH
+		if err := buffer.Write(r.CAAFlag); err != nil { return 0, err }
+		if err := buffer.Write(uint8(len(r.CAATag))); err != nil { return 0, err } // #nosec G115
+		for i := 0; i < len(r.CAATag); i++ {
+			if err := buffer.Write(r.CAATag[i]); err != nil { return 0, err }
+		}
+		for i := 0; i < len(r.CAAValue); i++ {
+			if err := buffer.Write(r.CAAValue[i]); err != nil { return 0, err }
+		}
+		currPos := buffer.Position()
+		if err := buffer.Seek(lenPos); err != nil { return 0, err }
+		if err := buffer.Writeu16(uint16(currPos - (lenPos + 2))); err != nil { return 0, err } // #nosec G115
+		if err := buffer.Seek(currPos); err != nil { return 0, err }
 	default:
 		// RFC 2136: Delete RRset (ANY/ANY) or record (NONE/type) has RDLENGTH = 0
 		if len(r.Data) == 0 && (r.Class == 255 || r.Class == 254) {

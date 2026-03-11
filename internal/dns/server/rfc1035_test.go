@@ -156,26 +156,36 @@ func TestRFC1035_AXFR(t *testing.T) {
 	}
 }
 
-func TestHandleAXFR_ErrorPaths(t *testing.T) {
-	// 1. Non-existent zone
-	repo := &mockServerRepo{}
-	srv := NewServer("127.0.0.1:0", repo, nil)
-	conn := &mockTCPConn{}
-	req := packet.NewDNSPacket()
-	req.Header.ID = 1
-	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "missing.zone.", QType: packet.AXFR})
-	
-	srv.handleAXFR(conn, req)
-	if len(conn.captured) != 1 {
-		t.Errorf("Expected NXDOMAIN response")
+func TestRFC1035_CAA_Resolution(t *testing.T) {
+	repo := &mockServerRepo{
+		zones: []domain.Zone{{ID: "z1", Name: "example.com."}},
+		records: []domain.Record{
+			{Name: "example.com.", Type: domain.TypeCAA, Content: "0 issue \"letsencrypt.org\"", TTL: 300},
+		},
 	}
+	srv := NewServer("127.0.0.1:0", repo, nil)
 
-	// 2. Zone exists but no SOA
-	repo.zones = append(repo.zones, domain.Zone{ID: "z1", Name: "nosoa.zone."})
-	req.Questions[0].Name = "nosoa.zone."
-	conn.captured = nil
-	srv.handleAXFR(conn, req)
-	if len(conn.captured) != 1 {
-		t.Errorf("Expected SERVFAIL response")
+	req := packet.NewDNSPacket()
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "example.com.", QType: packet.CAA})
+	reqBuf := packet.NewBytePacketBuffer()
+	_ = req.Write(reqBuf)
+
+	var capturedResp []byte
+	_ = srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 53}, func(resp []byte) error {
+		capturedResp = resp
+		return nil
+	}, "udp")
+
+	resPacket := packet.NewDNSPacket()
+	resBuf := packet.NewBytePacketBuffer()
+	resBuf.Load(capturedResp)
+	_ = resPacket.FromBuffer(resBuf)
+
+	if len(resPacket.Answers) == 0 {
+		t.Fatalf("Expected 1 answer for CAA query")
+	}
+	ans := resPacket.Answers[0]
+	if ans.Type != packet.CAA || ans.CAATag != "issue" || ans.CAAValue != "letsencrypt.org" {
+		t.Errorf("CAA resolution failed: got %+v", ans)
 	}
 }

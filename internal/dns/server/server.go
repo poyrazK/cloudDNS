@@ -1837,6 +1837,8 @@ func queryTypeToRecordType(qType packet.QueryType) domain.RecordType {
 		return domain.RecordType("NSEC")
 	case packet.NSEC3:
 		return domain.RecordType("NSEC3")
+	case packet.CAA:
+		return domain.TypeCAA
 	case packet.ANY:
 		return ""
 	default:

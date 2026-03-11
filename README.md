@@ -28,6 +28,7 @@ cloudDNS is a high-performance, authoritative, and recursive DNS server built fr
 *   **Dynamic Updates (RFC 2136)**: Secure, atomic updates to zone records at runtime.
 *   **Incremental Zone Transfer (IXFR - RFC 1995)**: Efficient replication that transfers only changes, not the entire zone.
 *   **DNS NOTIFY (RFC 1996)**: Real-time notification to secondary servers upon zone changes.
+*   **CAA Records (RFC 6844)**: Support for Certification Authority Authorization to control certificate issuance.
 *   **DNSSEC (RFC 4034/4035/5155)**:
     *   **Automated Lifecycle**: Background worker handles Key (KSK/ZSK) generation and rotation.
     *   **Double-Signature Rollover**: Zero-downtime key rotation orchestration.
