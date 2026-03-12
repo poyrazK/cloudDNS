@@ -72,6 +72,13 @@ func (s *Server) resolveRecursive(name string, qType packet.QueryType) (*packet.
 				break 
 			}
 
+			s.Logger.Debug("recursive response received", 
+				"ns", ns, 
+				"rcode", resp.Header.ResCode, 
+				"answers", len(resp.Answers),
+				"auths", len(resp.Authorities),
+				"extras", len(resp.Resources))
+
 			// If we got a valid answer with NOERROR, we are done
 			if len(resp.Answers) > 0 && resp.Header.ResCode == 0 {
 				// Check for CNAME in answers
@@ -87,7 +94,7 @@ func (s *Server) resolveRecursive(name string, qType packet.QueryType) (*packet.
 					s.Logger.Info("following CNAME referral", "from", currentName, "to", cnameTarget)
 					currentName = cnameTarget
 					// Reset ns to root for the new name
-					ns = roots[0] // or re-shuffle if we want to be more resilient
+					ns = roots[0]
 					continue
 				}
 
@@ -101,10 +108,12 @@ func (s *Server) resolveRecursive(name string, qType packet.QueryType) (*packet.
 
 			// Follow the referral chain: check Authority section for the next NS
 			if nsIP, found := s.findNextNS(resp); found {
+				s.Logger.Debug("following referral", "next_ns", nsIP)
 				ns = nsIP
 				continue
 			}
 
+			s.Logger.Info("recursion reached end of chain", "name", currentName, "rcode", resp.Header.ResCode)
 			// No more referrals or answers, return what we have
 			return resp, nil
 		}
@@ -168,9 +177,9 @@ func (s *Server) sendQuery(server string, name string, qType packet.QueryType) (
 }
 
 func (s *Server) findNextNS(resp *packet.DNSPacket) (string, bool) {
+	// 1. Look for NS records in the Authority section and their corresponding glue in Additional
 	for _, auth := range resp.Authorities {
 		if auth.Type == packet.NS {
-			// Look for glue record in Additional section
 			for _, res := range resp.Resources {
 				if strings.EqualFold(res.Name, auth.Host) && res.Type == packet.A {
 					return res.IP.String(), true
@@ -178,11 +187,17 @@ func (s *Server) findNextNS(resp *packet.DNSPacket) (string, bool) {
 			}
 		}
 	}
-	// Fallback: just pick any A record if available (less common but possible)
+
+	// 2. If no glue was found, but we have an NS record, we'd need to resolve THAT NS first.
+	// For now, let's see if we can find any other A record in the additional section that might be useful.
 	for _, res := range resp.Resources {
 		if res.Type == packet.A {
 			return res.IP.String(), true
 		}
 	}
+
+	// 3. Fallback: Check if there's an NS record and we can resolve it iteratively?
+	// (This implementation is currently simplified and relies on glue records)
+	
 	return "", false
 }
