@@ -89,7 +89,21 @@ func (s *Server) resolveRecursive(name string, qType packet.QueryType) (*packet.
 				"rcode", resp.Header.ResCode, 
 				"answers", len(resp.Answers),
 				"auths", len(resp.Authorities),
-				"extras", len(resp.Resources))
+				"extras", len(resp.Resources),
+				"truncated", resp.Header.TruncatedMessage)
+
+			// Handle Truncation (TC bit) - Fallback to TCP
+			if resp.Header.TruncatedMessage {
+				s.Logger.Info("response truncated, falling back to TCP", "ns", ns)
+				tcpResp, errTCP := s.sendTCPQuery(serverAddr, currentName, qType)
+				if errTCP == nil {
+					resp = tcpResp
+				} else {
+					s.Logger.Warn("TCP fallback failed", "ns", ns, "error", errTCP)
+					// Continue with truncated response if TCP failed? 
+					// Usually better to try next NS or fallback.
+				}
+			}
 
 			// If we got a valid answer with NOERROR, we are done
 			if len(resp.Answers) > 0 && resp.Header.ResCode == 0 {
@@ -184,14 +198,12 @@ func (s *Server) sendQueryInternal(server string, name string, qType packet.Quer
 	resBuffer := packet.NewBytePacketBuffer()
 	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	
-	// Read into a temporary buffer first
 	tmp := make([]byte, packet.MaxPacketSize)
 	n, errRead := conn.Read(tmp)
 	if errRead != nil {
 		return nil, errRead
 	}
 	
-	// Use Load() to correctly update resBuffer.Len and parsing flag
 	resBuffer.Load(tmp[:n])
 
 	resp := packet.NewDNSPacket()
@@ -201,6 +213,53 @@ func (s *Server) sendQueryInternal(server string, name string, qType packet.Quer
 
 	if resp.Header.ID != req.Header.ID {
 		return nil, fmt.Errorf("transaction ID mismatch: expected %d, got %d", req.Header.ID, resp.Header.ID)
+	}
+
+	return resp, nil
+}
+
+func (s *Server) sendTCPQuery(server string, name string, qType packet.QueryType) (*packet.DNSPacket, error) {
+	conn, err := net.DialTimeout("tcp", server, 5*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = conn.Close() }()
+
+	req := packet.NewDNSPacket()
+	req.Header.ID = generateTransactionID()
+	req.Header.Questions = 1
+	req.Header.RecursionDesired = false
+	req.Questions = append(req.Questions, *packet.NewDNSQuestion(name, qType))
+
+	buffer := packet.NewBytePacketBuffer()
+	if errWrite := req.Write(buffer); errWrite != nil {
+		return nil, errWrite
+	}
+
+	data := buffer.Buf[:buffer.Position()]
+	fullData := append([]byte{byte(len(data) >> 8), byte(len(data) & 0xFF)}, data...)
+	
+	if _, err := conn.Write(fullData); err != nil {
+		return nil, err
+	}
+
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	lenBuf := make([]byte, 2)
+	if _, err := conn.Read(lenBuf); err != nil {
+		return nil, err
+	}
+	
+	resLen := uint16(lenBuf[0])<<8 | uint16(lenBuf[1])
+	resData := make([]byte, resLen)
+	if _, err := conn.Read(resData); err != nil {
+		return nil, err
+	}
+
+	resBuffer := packet.NewBytePacketBuffer()
+	resBuffer.Load(resData)
+	resp := packet.NewDNSPacket()
+	if errFromBuf := resp.FromBuffer(resBuffer); errFromBuf != nil {
+		return nil, errFromBuf
 	}
 
 	return resp, nil
