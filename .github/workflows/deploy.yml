@@ -167,8 +167,8 @@ jobs:
           fi
           
           # CAA
-          echo "--- Testing CAA (letsencrypt.org) ---"
-          if ! dig @$DNS_IP letsencrypt.org CAA +short +timeout=10 | grep -q 'issue'; then
+          echo "--- Testing CAA (google.com) ---"
+          if ! dig @$DNS_IP google.com CAA +short +timeout=10 | grep -q 'pki.goog'; then
             echo "❌ Failed to resolve CAA record"
             exit 1
           fi
