@@ -612,6 +612,11 @@ func (r *DNSRecord) Read(buffer *BytePacketBuffer) error {
 		if err != nil { return err }
 		tagLen, errReadTagLen := buffer.Read()
 		if errReadTagLen != nil { return errReadTagLen }
+		
+		if int(dataLen) < 2+int(tagLen) {
+			return fmt.Errorf("CAA data length too short for tag")
+		}
+
 		tagData, errReadTag := buffer.ReadRange(buffer.Position(), int(tagLen))
 		if errReadTag != nil { return errReadTag }
 		r.CAATag = string(tagData)
@@ -878,6 +883,9 @@ func (r *DNSRecord) Write(buffer *BytePacketBuffer) (int, error) {
 			if err := buffer.Write(b); err != nil { return 0, err }
 		}
 	case CAA:
+		if len(r.CAATag) > 255 {
+			return 0, fmt.Errorf("CAA tag too long: %d", len(r.CAATag))
+		}
 		lenPos := buffer.Position()
 		if err := buffer.Writeu16(0); err != nil { return 0, err } // Placeholder for RDLENGTH
 		if err := buffer.Write(r.CAAFlag); err != nil { return 0, err }
@@ -976,12 +984,8 @@ func (p *DNSPacket) Write(buffer *BytePacketBuffer) error {
 	for _, a := range p.Authorities {
 		if _, err := a.Write(buffer); err != nil { return err }
 	}
-	for _, a := range p.Authorities {
-		if _, err := a.Write(buffer); err != nil { return err }
-	}
 	for _, a := range p.Resources {
 		if _, err := a.Write(buffer); err != nil { return err }
 	}
 	return nil
-	}
-
+}
