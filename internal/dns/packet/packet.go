@@ -4,6 +4,7 @@ package packet
 import (
 	"fmt"
 	"net"
+	"strings"
 
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
 )
@@ -502,12 +503,22 @@ func (r *DNSRecord) Read(buffer *BytePacketBuffer) error {
 		if r.Port, err = buffer.Readu16(); err != nil { return err }
 		if r.Host, err = buffer.ReadName(); err != nil { return err }
 	case TXT:
-		txtLen, errReadTxt := buffer.Read()
-		if errReadTxt != nil { return errReadTxt }
-		txtData, errRange := buffer.ReadRange(buffer.Position(), int(txtLen))
-		if errRange != nil { return errRange }
-		r.Txt = string(txtData)
-		if errStep := buffer.Step(int(txtLen)); errStep != nil { return errStep }
+		remaining := int(dataLen)
+		var txtParts []string
+		for remaining > 0 {
+			txtLen, errReadTxt := buffer.Read()
+			if errReadTxt != nil { return errReadTxt }
+			remaining--
+			if int(txtLen) > remaining {
+				return fmt.Errorf("TXT record string length exceeds RDATA length")
+			}
+			txtData, errRange := buffer.ReadRange(buffer.Position(), int(txtLen))
+			if errRange != nil { return errRange }
+			txtParts = append(txtParts, string(txtData))
+			if errStep := buffer.Step(int(txtLen)); errStep != nil { return errStep }
+			remaining -= int(txtLen)
+		}
+		r.Txt = strings.Join(txtParts, "")
 	case SOA:
 		if r.MName, err = buffer.ReadName(); err != nil { return err }
 		if r.RName, err = buffer.ReadName(); err != nil { return err }
@@ -523,12 +534,19 @@ func (r *DNSRecord) Read(buffer *BytePacketBuffer) error {
 		if errRange != nil { return errRange }
 		r.CPU = string(cpu)
 		if errStep := buffer.Step(int(cpuLen)); errStep != nil { return errStep }
+		
 		osLen, errReadOS := buffer.Read()
 		if errReadOS != nil { return errReadOS }
 		osData, errRange2 := buffer.ReadRange(buffer.Position(), int(osLen))
 		if errRange2 != nil { return errRange2 }
 		r.OS = string(osData)
 		if errStep2 := buffer.Step(int(osLen)); errStep2 != nil { return errStep2 }
+
+		// Consume any trailing padding/bytes to stay aligned with dataLen
+		consumed := buffer.Position() - startPos
+		if consumed < int(dataLen) {
+			if errStep := buffer.Step(int(dataLen) - consumed); errStep != nil { return errStep }
+		}
 	case MINFO:
 		if r.RMailBX, err = buffer.ReadName(); err != nil { return err }
 		if r.EMailBX, err = buffer.ReadName(); err != nil { return err }
@@ -674,7 +692,11 @@ func (r *DNSRecord) Write(buffer *BytePacketBuffer) (int, error) {
 	}
 
 	if r.Type == TSIG {
+		if r.Type == RRSIG || r.Type == NSEC || r.Type == DNSKEY || r.Type == DS {
+		if err := buffer.WriteNameUncompressed(r.Name); err != nil { return 0, err }
+	} else {
 		if err := buffer.WriteName(r.Name); err != nil { return 0, err }
+	}
 		if err := buffer.Writeu16(uint16(r.Type)); err != nil { return 0, err }
 		if err := buffer.Writeu16(r.Class); err != nil { return 0, err }
 		if err := buffer.Writeu32(r.TTL); err != nil { return 0, err }
@@ -701,7 +723,11 @@ func (r *DNSRecord) Write(buffer *BytePacketBuffer) (int, error) {
 		return currPos - startPos, nil
 	}
 	
-	if err := buffer.WriteName(r.Name); err != nil { return 0, err }
+	if r.Type == RRSIG || r.Type == NSEC || r.Type == DNSKEY || r.Type == DS {
+		if err := buffer.WriteNameUncompressed(r.Name); err != nil { return 0, err }
+	} else {
+		if err := buffer.WriteName(r.Name); err != nil { return 0, err }
+	}
 	if err := buffer.Writeu16(uint16(r.Type)); err != nil { return 0, err }
 	if err := buffer.Writeu16(r.Class); err != nil { return 0, err }
 	if err := buffer.Writeu32(r.TTL); err != nil { return 0, err }
