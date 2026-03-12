@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"regexp"
 	"sort"
 	"net"
 	"strings"
@@ -1144,15 +1145,18 @@ func ConvertDomainToPacketRecord(rec domain.Record) (packet.DNSRecord, error) {
 	case domain.TypeCAA:
 		pRec.Type = packet.CAA
 		// CAA content format: "[flag] [tag] \"[value]\""
-		parts := strings.Fields(rec.Content)
-		if len(parts) >= 3 {
+		// Value can contain spaces, so Fields is not enough.
+		re := regexp.MustCompile(`^(\d+)\s+([a-zA-Z0-9]+)\s+"(.*)"$`)
+		matches := re.FindStringSubmatch(rec.Content)
+		if len(matches) == 4 {
 			var flag uint16
-			if _, err := fmt.Sscanf(parts[0], "%d", &flag); err == nil {
+			if _, err := fmt.Sscanf(matches[1], "%d", &flag); err == nil {
 				pRec.CAAFlag = uint8(flag) // #nosec G115
 			}
-			pRec.CAATag = parts[1]
-			pRec.CAAValue = strings.Trim(parts[2], "\"")
+			pRec.CAATag = matches[2]
+			pRec.CAAValue = matches[3]
 		}
+
 	default:
 		return pRec, fmt.Errorf("unsupported record type: %s", rec.Type)
 	}
