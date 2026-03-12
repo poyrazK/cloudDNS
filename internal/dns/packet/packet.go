@@ -802,7 +802,7 @@ func (r *DNSRecord) Write(buffer *BytePacketBuffer) (int, error) {
 	case NSEC:
 		lenPos := buffer.Position()
 		if err := buffer.Writeu16(0); err != nil { return 0, err }
-		if err := buffer.WriteName(r.NextName); err != nil { return 0, err }
+		if err := buffer.WriteNameUncompressed(r.NextName); err != nil { return 0, err }
 		for _, b := range r.TypeBitMap {
 			if err := buffer.Write(b); err != nil { return 0, err }
 		}
@@ -810,6 +810,7 @@ func (r *DNSRecord) Write(buffer *BytePacketBuffer) (int, error) {
 		if err := buffer.Seek(lenPos); err != nil { return 0, err }
 		if err := buffer.Writeu16(uint16(currPos - (lenPos + 2))); err != nil { return 0, err } // #nosec G115
 		if err := buffer.Seek(currPos); err != nil { return 0, err }
+		return currPos - startPos, nil
 	case DNSKEY:
 		if err := buffer.Writeu16(uint16(4 + len(r.PublicKey))); err != nil { return 0, err } // #nosec G115
 		if err := buffer.Writeu16(r.Flags); err != nil { return 0, err }
@@ -828,7 +829,7 @@ func (r *DNSRecord) Write(buffer *BytePacketBuffer) (int, error) {
 		if err := buffer.Writeu32(r.Expiration); err != nil { return 0, err }
 		if err := buffer.Writeu32(r.Inception); err != nil { return 0, err }
 		if err := buffer.Writeu16(r.KeyTag); err != nil { return 0, err }
-		if err := buffer.WriteName(r.SignerName); err != nil { return 0, err }
+		if err := buffer.WriteNameUncompressed(r.SignerName); err != nil { return 0, err }
 		for _, b := range r.Signature {
 			if err := buffer.Write(b); err != nil { return 0, err }
 		}

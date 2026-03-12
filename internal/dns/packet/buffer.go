@@ -332,6 +332,45 @@ func (b *BytePacketBuffer) WriteName(name string) error {
 	}
 }
 
+// WriteNameUncompressed writes a domain name without compression
+func (b *BytePacketBuffer) WriteNameUncompressed(name string) error {
+	if name == "" || name == "." {
+		return b.Write(0)
+	}
+
+	if !strings.HasSuffix(name, ".") {
+		name += "."
+	}
+
+	curr := name
+	for {
+		if curr == "" || curr == "." {
+			return b.Write(0)
+		}
+
+		dotIdx := strings.IndexByte(curr, '.')
+		if dotIdx == -1 {
+			return b.Write(0)
+		}
+
+		label := curr[:dotIdx]
+		if len(label) > 63 {
+			return errors.New("label too long")
+		}
+		if len(label) > 0 {
+			if err := b.Write(byte(len(label))); err != nil {
+				return err
+			}
+			for i := 0; i < len(label); i++ {
+				if err := b.Write(label[i]); err != nil {
+					return err
+				}
+			}
+		}
+		curr = curr[dotIdx+1:]
+	}
+}
+
 // WriteRange writes a slice of bytes at a specific position
 func (b *BytePacketBuffer) WriteRange(start int, data []byte) error {
 	if start+len(data) > MaxPacketSize {
