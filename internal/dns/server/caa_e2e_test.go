@@ -12,7 +12,7 @@ import (
 
 func TestCAAEndToEnd(t *testing.T) {
 	repo := &mockServerRepo{}
-	dnsAddr := "127.0.0.1:10057"
+	dnsAddr := GetFreeAddr()
 	dnsSrv := NewServer(dnsAddr, repo, nil)
 	
 	ctx, cancel := context.WithCancel(context.Background())
@@ -54,18 +54,6 @@ func TestCAAEndToEnd(t *testing.T) {
 		Name:  zoneName,
 		QType: packet.CAA,
 	})
-
-	// Debug: Check if repo has the record
-	recs, _ := repo.GetRecords(context.Background(), zoneName, domain.TypeCAA, "")
-	if len(recs) == 0 {
-		t.Logf("Repo is empty for CAA query on %s", zoneName)
-		allRecs, _ := repo.ListRecordsForZone(context.Background(), "zone-caa", "")
-		for _, r := range allRecs {
-			t.Logf("Found record in zone: %s %s %s", r.Name, r.Type, r.Content)
-		}
-	} else {
-		t.Logf("Repo returned %d records for CAA", len(recs))
-	}
 
 	buf := packet.GetBuffer()
 	_ = query.Write(buf)
@@ -117,7 +105,7 @@ func TestCAAEndToEnd(t *testing.T) {
 
 func TestCAAUpdateEndToEnd(t *testing.T) {
 	repo := &mockServerRepo{}
-	dnsAddr := "127.0.0.1:10058"
+	dnsAddr := GetFreeAddr()
 	dnsSrv := NewServer(dnsAddr, repo, nil)
 	dnsSrv.DisableAsync = true
 	
