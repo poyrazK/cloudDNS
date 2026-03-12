@@ -100,8 +100,6 @@ func (s *Server) resolveRecursive(name string, qType packet.QueryType) (*packet.
 					resp = tcpResp
 				} else {
 					s.Logger.Warn("TCP fallback failed", "ns", ns, "error", errTCP)
-					// Continue with truncated response if TCP failed? 
-					// Usually better to try next NS or fallback.
 				}
 			}
 
@@ -137,6 +135,11 @@ func (s *Server) resolveRecursive(name string, qType packet.QueryType) (*packet.
 				s.Logger.Debug("following referral", "next_ns", nsIP)
 				ns = nsIP
 				continue
+			}
+
+			// Special case for CAA: it often returns 0 answers with NOERROR if not present
+			if qType == packet.CAA && resp.Header.ResCode == 0 && len(resp.Answers) == 0 {
+				return resp, nil
 			}
 
 			s.Logger.Info("recursion reached end of chain without conclusive answer", "name", currentName, "rcode", resp.Header.ResCode)
@@ -245,13 +248,13 @@ func (s *Server) sendTCPQuery(server string, name string, qType packet.QueryType
 
 	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	lenBuf := make([]byte, 2)
-	if _, err := conn.Read(lenBuf); err != nil {
+	if _, err := io.ReadFull(conn, lenBuf); err != nil {
 		return nil, err
 	}
 	
 	resLen := uint16(lenBuf[0])<<8 | uint16(lenBuf[1])
 	resData := make([]byte, resLen)
-	if _, err := conn.Read(resData); err != nil {
+	if _, err := io.ReadFull(conn, resData); err != nil {
 		return nil, err
 	}
 
