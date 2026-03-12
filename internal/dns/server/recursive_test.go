@@ -48,7 +48,7 @@ func TestResolveRecursive(t *testing.T) {
 		return resp, nil
 	}
 
-	resp, err := s.resolveRecursive("test.com.")
+	resp, err := s.resolveRecursive("test.com.", packet.A)
 	if err != nil {
 		t.Fatalf("Recursive resolve failed: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestResolveRecursive_NXDOMAIN(t *testing.T) {
 		return resp, nil
 	}
 
-	resp, err := s.resolveRecursive("nonexistent.io.")
+	resp, err := s.resolveRecursive("nonexistent.io.", packet.A)
 	if err != nil {
 		t.Fatalf("Expected no error for NXDOMAIN, got %v", err)
 	}
@@ -90,7 +90,7 @@ func TestRecursive_NoNextNS(t *testing.T) {
 		return resp, nil
 	}
 
-	resp, err := s.resolveRecursive("deadend.test.")
+	resp, err := s.resolveRecursive("deadend.test.", packet.A)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
