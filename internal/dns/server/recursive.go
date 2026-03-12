@@ -14,6 +14,7 @@ import (
 
 type recursiveResolver struct {
 	rootHints []string
+	fallbacks []string
 }
 
 func newRecursiveResolver() *recursiveResolver {
@@ -32,6 +33,10 @@ func newRecursiveResolver() *recursiveResolver {
 			"193.0.14.129",   // k.root-servers.net
 			"199.7.83.42",    // l.root-servers.net
 			"202.12.27.33",   // m.root-servers.net
+		},
+		fallbacks: []string{
+			"8.8.8.8", // Google
+			"1.1.1.1", // Cloudflare
 		},
 	}
 }
@@ -58,8 +63,10 @@ func (s *Server) resolveRecursive(name string, qType packet.QueryType) (*packet.
 	for _, rootNS := range roots {
 		ns := rootNS
 		currentName := name
+		depth := 0
 		
-		for {
+		for depth < 10 { // Prevent infinite loops
+			depth++
 			s.Logger.Info("recursive lookup", "name", currentName, "type", qType, "ns", ns)
 
 			// Query the current authoritative name server
@@ -115,11 +122,22 @@ func (s *Server) resolveRecursive(name string, qType packet.QueryType) (*packet.
 
 			s.Logger.Info("recursion reached end of chain", "name", currentName, "rcode", resp.Header.ResCode)
 			// No more referrals or answers, return what we have
+			break
+		}
+	}
+
+	// Fallback to upstream resolvers if iterative resolution failed or hit a dead end
+	s.Logger.Info("iterative resolution failed or hit dead end, trying fallbacks", "name", name)
+	for _, fallback := range resolver.fallbacks {
+		serverAddr := net.JoinHostPort(fallback, "53")
+		resp, err := s.sendQueryInternal(serverAddr, name, qType, true)
+		if err == nil && (resp.Header.ResCode == 0 || resp.Header.ResCode == 3) {
+			s.Logger.Info("fallback resolution successful", "name", name, "fallback", fallback)
 			return resp, nil
 		}
 	}
 
-	return nil, fmt.Errorf("recursion failed after trying all roots: %w", lastErr)
+	return nil, fmt.Errorf("recursion failed after trying roots and fallbacks: %w", lastErr)
 }
 
 func generateTransactionID() uint16 {
@@ -129,6 +147,10 @@ func generateTransactionID() uint16 {
 }
 
 func (s *Server) sendQuery(server string, name string, qType packet.QueryType) (*packet.DNSPacket, error) {
+	return s.sendQueryInternal(server, name, qType, false)
+}
+
+func (s *Server) sendQueryInternal(server string, name string, qType packet.QueryType, recursive bool) (*packet.DNSPacket, error) {
 	conn, err := net.DialTimeout("udp", server, 5*time.Second)
 	if err != nil {
 		return nil, err
@@ -138,7 +160,7 @@ func (s *Server) sendQuery(server string, name string, qType packet.QueryType) (
 	req := packet.NewDNSPacket()
 	req.Header.ID = generateTransactionID()
 	req.Header.Questions = 1
-	req.Header.RecursionDesired = false // Iterative
+	req.Header.RecursionDesired = recursive
 	req.Questions = append(req.Questions, *packet.NewDNSQuestion(name, qType))
 
 	buffer := packet.NewBytePacketBuffer()
