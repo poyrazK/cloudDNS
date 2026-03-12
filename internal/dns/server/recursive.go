@@ -45,7 +45,7 @@ func (r *recursiveResolver) getShuffledRoots() []string {
 	return shuffled
 }
 
-func (s *Server) resolveRecursive(name string) (*packet.DNSPacket, error) {
+func (s *Server) resolveRecursive(name string, qType packet.QueryType) (*packet.DNSPacket, error) {
 	// Start with a random root server for load balancing and resilience.
 	resolver := newRecursiveResolver()
 	roots := resolver.getShuffledRoots()
@@ -58,11 +58,11 @@ func (s *Server) resolveRecursive(name string) (*packet.DNSPacket, error) {
 		ns := rootNS
 		
 		for {
-			s.Logger.Info("recursive lookup", "name", name, "ns", ns)
+			s.Logger.Info("recursive lookup", "name", name, "type", qType, "ns", ns)
 
 			// Query the current authoritative name server
 			serverAddr := net.JoinHostPort(ns, "53")
-			resp, err := s.queryFn(serverAddr, name, packet.A)
+			resp, err := s.queryFn(serverAddr, name, qType)
 			if err != nil {
 				// Record the error and break the inner loop to try the next root server
 				lastErr = err
@@ -100,7 +100,7 @@ func generateTransactionID() uint16 {
 	return id
 }
 
-func (s *Server) sendQuery(server string, name string, _ packet.QueryType) (*packet.DNSPacket, error) {
+func (s *Server) sendQuery(server string, name string, qType packet.QueryType) (*packet.DNSPacket, error) {
 	conn, err := net.DialTimeout("udp", server, 5*time.Second)
 	if err != nil {
 		return nil, err
@@ -111,7 +111,7 @@ func (s *Server) sendQuery(server string, name string, _ packet.QueryType) (*pac
 	req.Header.ID = generateTransactionID()
 	req.Header.Questions = 1
 	req.Header.RecursionDesired = false // Iterative
-	req.Questions = append(req.Questions, *packet.NewDNSQuestion(name, packet.A))
+	req.Questions = append(req.Questions, *packet.NewDNSQuestion(name, qType))
 
 	buffer := packet.NewBytePacketBuffer()
 	if errWrite := req.Write(buffer); errWrite != nil {

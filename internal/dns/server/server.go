@@ -833,8 +833,8 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 		} else {
 			// Not authoritative for this zone - try recursive resolution if enabled
 			if s.RecursionEnabled && request.Header.RecursionDesired {
-				s.Logger.Info("fallback to recursive resolution", "name", q.Name)
-				recursiveResp, errRecurse := s.resolveRecursive(q.Name)
+				s.Logger.Info("fallback to recursive resolution", "name", q.Name, "type", q.QType)
+				recursiveResp, errRecurse := s.resolveRecursive(q.Name, q.QType)
 				if errRecurse == nil && recursiveResp != nil {
 					response.Header.AuthoritativeAnswer = false
 					response.Header.ResCode = recursiveResp.Header.ResCode
