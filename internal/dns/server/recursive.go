@@ -58,9 +58,14 @@ func (s *Server) resolveRecursive(name string, qType packet.QueryType) (*packet.
 
 	var lastErr error
 
-	// Failover logic: Iterate through all available root servers.
-	// If one fails (timeout, unreachable), proceed to the next.
-	for _, rootNS := range roots {
+	// Failover logic: Iterate through available root servers (limit to 3 for performance)
+	maxRoots := 3
+	if len(roots) < maxRoots {
+		maxRoots = len(roots)
+	}
+
+	for i := 0; i < maxRoots; i++ {
+		rootNS := roots[i]
 		ns := rootNS
 		currentName := name
 		depth := 0
@@ -100,7 +105,7 @@ func (s *Server) resolveRecursive(name string, qType packet.QueryType) (*packet.
 				if cnameTarget != "" && qType != packet.CNAME {
 					s.Logger.Info("following CNAME referral", "from", currentName, "to", cnameTarget)
 					currentName = cnameTarget
-					// Reset ns to root for the new name
+					// Restart from a root for the new name
 					ns = roots[0]
 					continue
 				}
@@ -120,20 +125,23 @@ func (s *Server) resolveRecursive(name string, qType packet.QueryType) (*packet.
 				continue
 			}
 
-			s.Logger.Info("recursion reached end of chain", "name", currentName, "rcode", resp.Header.ResCode)
-			// No more referrals or answers, return what we have
+			s.Logger.Info("recursion reached end of chain without conclusive answer", "name", currentName, "rcode", resp.Header.ResCode)
 			break
 		}
 	}
 
-	// Fallback to upstream resolvers if iterative resolution failed or hit a dead end
-	s.Logger.Info("iterative resolution failed or hit dead end, trying fallbacks", "name", name)
+	// 2. Fallback Strategy: Use reliable upstream resolvers if iterative resolution failed
+	s.Logger.Info("iterative resolution failed or inconclusive, trying fallbacks", "name", name)
 	for _, fallback := range resolver.fallbacks {
 		serverAddr := net.JoinHostPort(fallback, "53")
+		// Use sendQueryInternal with RecursionDesired=true for fallbacks
 		resp, err := s.sendQueryInternal(serverAddr, name, qType, true)
 		if err == nil && (resp.Header.ResCode == 0 || resp.Header.ResCode == 3) {
 			s.Logger.Info("fallback resolution successful", "name", name, "fallback", fallback)
 			return resp, nil
+		}
+		if err != nil {
+			s.Logger.Warn("fallback query failed", "fallback", fallback, "error", err)
 		}
 	}
 
@@ -218,8 +226,5 @@ func (s *Server) findNextNS(resp *packet.DNSPacket) (string, bool) {
 		}
 	}
 
-	// 3. Fallback: Check if there's an NS record and we can resolve it iteratively?
-	// (This implementation is currently simplified and relies on glue records)
-	
 	return "", false
 }
