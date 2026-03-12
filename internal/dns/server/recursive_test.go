@@ -99,6 +99,47 @@ func TestRecursive_NoNextNS(t *testing.T) {
 	}
 }
 
+func TestResolveRecursive_CNAME(t *testing.T) {
+	s := NewServer(":0", nil, nil)
+
+	// Mock queryFn to simulate CNAME referral:
+	// 1. root ->ns1.root.net (referral to alias.test.)
+	// 2. alias.test. -> real.test. (CNAME)
+	// 3. real.test. -> 1.2.3.4 (A)
+	s.queryFn = func(server string, name string, qtype packet.QueryType) (*packet.DNSPacket, error) {
+		resp := packet.NewDNSPacket()
+		resp.Header.Response = true
+
+		if name == "alias.test." {
+			resp.Answers = append(resp.Answers, packet.DNSRecord{
+				Name: "alias.test.", Type: packet.CNAME, Host: "real.test.",
+			})
+		} else if name == "real.test." {
+			resp.Answers = append(resp.Answers, packet.DNSRecord{
+				Name: "real.test.", Type: packet.A, IP: net.ParseIP("1.2.3.4"),
+			})
+		} else {
+			// Initial root referral
+			resp.Authorities = append(resp.Authorities, packet.DNSRecord{
+				Name: "test.", Type: packet.NS, Host: "ns1.root.net.",
+			})
+			resp.Resources = append(resp.Resources, packet.DNSRecord{
+				Name: "ns1.root.net.", Type: packet.A, IP: net.ParseIP("1.1.1.1"),
+			})
+		}
+		return resp, nil
+	}
+
+	resp, err := s.resolveRecursive("alias.test.", packet.A)
+	if err != nil {
+		t.Fatalf("Recursive resolve failed: %v", err)
+	}
+
+	if len(resp.Answers) == 0 || resp.Answers[0].IP.String() != "1.2.3.4" {
+		t.Errorf("Failed to follow CNAME to final answer, got: %v", resp.Answers)
+	}
+}
+
 func TestSendQuery(t *testing.T) {
 	// 1. Start a mock UDP DNS server
 	addr, err := net.ResolveUDPAddr("udp", "127.0.0.1:0")

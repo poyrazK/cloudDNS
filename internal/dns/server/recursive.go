@@ -6,6 +6,7 @@ import (
 	"fmt"
 	mrand "math/rand"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/poyrazK/cloudDNS/internal/dns/packet"
@@ -56,13 +57,14 @@ func (s *Server) resolveRecursive(name string, qType packet.QueryType) (*packet.
 	// If one fails (timeout, unreachable), proceed to the next.
 	for _, rootNS := range roots {
 		ns := rootNS
+		currentName := name
 		
 		for {
-			s.Logger.Info("recursive lookup", "name", name, "type", qType, "ns", ns)
+			s.Logger.Info("recursive lookup", "name", currentName, "type", qType, "ns", ns)
 
 			// Query the current authoritative name server
 			serverAddr := net.JoinHostPort(ns, "53")
-			resp, err := s.queryFn(serverAddr, name, qType)
+			resp, err := s.queryFn(serverAddr, currentName, qType)
 			if err != nil {
 				// Record the error and break the inner loop to try the next root server
 				lastErr = err
@@ -72,6 +74,23 @@ func (s *Server) resolveRecursive(name string, qType packet.QueryType) (*packet.
 
 			// If we got a valid answer with NOERROR, we are done
 			if len(resp.Answers) > 0 && resp.Header.ResCode == 0 {
+				// Check for CNAME in answers
+				var cnameTarget string
+				for _, ans := range resp.Answers {
+					if ans.Type == packet.CNAME {
+						cnameTarget = ans.Host
+						break
+					}
+				}
+
+				if cnameTarget != "" && qType != packet.CNAME {
+					s.Logger.Info("following CNAME referral", "from", currentName, "to", cnameTarget)
+					currentName = cnameTarget
+					// Reset ns to root for the new name
+					ns = roots[0] // or re-shuffle if we want to be more resilient
+					continue
+				}
+
 				return resp, nil
 			}
 
@@ -151,13 +170,15 @@ func (s *Server) sendQuery(server string, name string, qType packet.QueryType) (
 func (s *Server) findNextNS(resp *packet.DNSPacket) (string, bool) {
 	for _, auth := range resp.Authorities {
 		if auth.Type == packet.NS {
+			// Look for glue record in Additional section
 			for _, res := range resp.Resources {
-				if res.Name == auth.Host && res.Type == packet.A {
+				if strings.EqualFold(res.Name, auth.Host) && res.Type == packet.A {
 					return res.IP.String(), true
 				}
 			}
 		}
 	}
+	// Fallback: just pick any A record if available (less common but possible)
 	for _, res := range resp.Resources {
 		if res.Type == packet.A {
 			return res.IP.String(), true
