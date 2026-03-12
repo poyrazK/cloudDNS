@@ -26,6 +26,8 @@ const (
 	TypePTR RecordType = "PTR"
 	// TypeSRV represents a service locator record (RFC 2782).
 	TypeSRV RecordType = "SRV"
+	// TypeCAA represents a certification authority authorization record (RFC 6844).
+	TypeCAA RecordType = "CAA"
 )
 
 // HealthCheckType represents the method used to verify endpoint health.

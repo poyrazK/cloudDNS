@@ -132,26 +132,52 @@ jobs:
           echo "❌ Health check failed after 20 attempts"
           exit 1
 
-      # DNS Verification: Live recursive lookups
+      # DNS Verification: Live recursive lookups for multiple record types
       - name: DNS Smoke Test
         run: |
           DNS_IP=$(kubectl get svc clouddns-lb-udp -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
           echo "Testing DNS resolution at $DNS_IP..."
           
-          echo "--- Testing google.com ---"
-          DIG_OUT=$(dig @$DNS_IP google.com +short +timeout=5 +tries=2)
-          if [[ -z "$DIG_OUT" ]]; then
-            echo "❌ Failed to resolve google.com"
+          # A
+          echo "--- Testing A (google.com) ---"
+          if ! dig @$DNS_IP google.com A +short +timeout=5 | grep -q '^[0-9]'; then
+            echo "❌ Failed to resolve A record"
             exit 1
           fi
-          echo "Result: $DIG_OUT"
           
-          echo "--- Testing example.com ---"
-          DIG_OUT=$(dig @$DNS_IP example.com +short +timeout=5 +tries=2)
-          if [[ -z "$DIG_OUT" ]]; then
-            echo "❌ Failed to resolve example.com"
+          # AAAA
+          echo "--- Testing AAAA (google.com) ---"
+          if ! dig @$DNS_IP google.com AAAA +short +timeout=5 | grep -q ':'; then
+            echo "❌ Failed to resolve AAAA record"
             exit 1
           fi
-          echo "Result: $DIG_OUT"
+          
+          # MX
+          echo "--- Testing MX (google.com) ---"
+          if ! dig @$DNS_IP google.com MX +short +timeout=5 | grep -q 'google.com'; then
+            echo "❌ Failed to resolve MX record"
+            exit 1
+          fi
+          
+          # TXT
+          echo "--- Testing TXT (google.com) ---"
+          if ! dig @$DNS_IP google.com TXT +short +timeout=5 | grep -q 'v=spf1'; then
+            echo "❌ Failed to resolve TXT record"
+            exit 1
+          fi
+          
+          # CAA
+          echo "--- Testing CAA (letsencrypt.org) ---"
+          if ! dig @$DNS_IP letsencrypt.org CAA +short +timeout=5 | grep -q 'issue'; then
+            echo "❌ Failed to resolve CAA record"
+            exit 1
+          fi
+          
+          # SRV
+          echo "--- Testing SRV (_xmpp-server._tcp.google.com) ---"
+          if ! dig @$DNS_IP _xmpp-server._tcp.google.com SRV +short +timeout=5 | grep -q 'google.com'; then
+            echo "❌ Failed to resolve SRV record"
+            exit 1
+          fi
           
           echo "✅ DNS Smoke Test Passed!"

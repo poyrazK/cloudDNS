@@ -23,8 +23,8 @@ func TestEndToEnd_Protocols(t *testing.T) {
 	// 1. Setup Stack
 	repo := &mockServerRepo{}
 	svc := services.NewDNSService(repo, nil)
-	dnsAddr := "127.0.0.1:10058"
-	apiAddr := "127.0.0.1:18083"
+	dnsAddr := GetFreeAddr()
+	apiAddr := GetFreeAddr()
 
 	// Use unprivileged port for DoH tests
 	t.Setenv("DOH_PORT", "10443")
@@ -98,11 +98,17 @@ func TestEndToEnd_Protocols(t *testing.T) {
 	_, _ = conn.Write(qb.Buf[:qb.Position()])
 
 	rb := make([]byte, 1024)
-	n, _ := conn.Read(rb)
+	n, errRead := conn.Read(rb)
+	if errRead != nil {
+		t.Fatalf("Failed to read from UDP: %v", errRead)
+	}
 	res := packet.NewDNSPacket()
 	pb := packet.NewBytePacketBuffer()
 	pb.Load(rb[:n])
-	_ = res.FromBuffer(pb)
+	errParse := res.FromBuffer(pb)
+	if errParse != nil {
+		t.Fatalf("Failed to parse UDP response: %v", errParse)
+	}
 	if len(res.Answers) == 0 || res.Answers[0].IP.String() != "1.2.3.4" {
 		t.Errorf("UDP E2E failed")
 	}

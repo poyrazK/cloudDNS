@@ -138,6 +138,24 @@ func TestConvertPacketRecordToDomain(t *testing.T) {
 			},
 		},
 		{
+			name: "CAA record",
+			pRec: packet.DNSRecord{
+				Name:     "test.",
+				Type:     packet.CAA,
+				TTL:      3600,
+				CAAFlag:  0,
+				CAATag:   "issue",
+				CAAValue: "letsencrypt.org",
+			},
+			want: domain.Record{
+				ZoneID:  zoneID,
+				Name:    "test.",
+				Type:    domain.TypeCAA,
+				Content: "0 issue \"letsencrypt.org\"",
+				TTL:     3600,
+			},
+		},
+		{
 			name: "Unsupported type",
 			pRec: packet.DNSRecord{
 				Type: packet.QueryType(999),
@@ -287,6 +305,23 @@ func TestConvertDomainToPacketRecord(t *testing.T) {
 			},
 		},
 		{
+			name: "CAA record",
+			rec: domain.Record{
+				Name:    "test",
+				Type:    domain.TypeCAA,
+				Content: "0 issue \"letsencrypt.org\"",
+				TTL:     3600,
+			},
+			want: packet.DNSRecord{
+				Name:     "test.",
+				Type:     packet.CAA,
+				CAAFlag:  0,
+				CAATag:   "issue",
+				CAAValue: "letsencrypt.org",
+				TTL:      3600,
+			},
+		},
+		{
 			name: "Unsupported type",
 			rec: domain.Record{
 				Type: "UNKNOWN",
@@ -315,6 +350,11 @@ func TestConvertDomainToPacketRecord(t *testing.T) {
 				if got.Type == packet.SOA {
 					if got.MName != tt.want.MName || got.RName != tt.want.RName || got.Serial != tt.want.Serial {
 						t.Errorf("SOA field mismatch: got %+v, want %+v", got, tt.want)
+					}
+				}
+				if got.Type == packet.CAA {
+					if got.CAAFlag != tt.want.CAAFlag || got.CAATag != tt.want.CAATag || got.CAAValue != tt.want.CAAValue {
+						t.Errorf("CAA field mismatch: got %+v, want %+v", got, tt.want)
 					}
 				}
 			}
@@ -384,6 +424,22 @@ func TestConvertDomainToPacketRecord_AllTypes(t *testing.T) {
 				Txt:  "simple text",
 			},
 		},
+		{
+			name: "CAA record",
+			rec: domain.Record{
+				Name:    "test.",
+				Type:    domain.TypeCAA,
+				Content: "0 issue \"sectigo.com\"",
+				TTL:     3600,
+			},
+			want: packet.DNSRecord{
+				Name:     "test.",
+				Type:     packet.CAA,
+				CAAFlag:  0,
+				CAATag:   "issue",
+				CAAValue: "sectigo.com",
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -403,6 +459,11 @@ func TestConvertDomainToPacketRecord_AllTypes(t *testing.T) {
 			}
 			if tt.want.Txt != "" && got.Txt != tt.want.Txt {
 				t.Errorf("TXT mismatch")
+			}
+			if got.Type == packet.CAA {
+				if got.CAAFlag != tt.want.CAAFlag || got.CAATag != tt.want.CAATag || got.CAAValue != tt.want.CAAValue {
+					t.Errorf("CAA mismatch")
+				}
 			}
 		})
 	}
