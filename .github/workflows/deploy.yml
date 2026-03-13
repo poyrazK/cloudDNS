@@ -174,8 +174,8 @@ jobs:
           fi
           
           # SRV
-          echo "--- Testing SRV (_xmpp-server._tcp.google.com) ---"
-          if ! dig @$DNS_IP _xmpp-server._tcp.google.com SRV +short +timeout=5 | grep -q 'google.com'; then
+          echo "--- Testing SRV (_sip._tcp.google.com) ---"
+          if ! dig @$DNS_IP _sip._tcp.google.com SRV +short +timeout=10 | grep -q 'google.com'; then
             echo "❌ Failed to resolve SRV record"
             exit 1
           fi
