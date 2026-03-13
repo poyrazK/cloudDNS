@@ -71,7 +71,7 @@ func (s *Server) resolveRecursive(name string, qType packet.QueryType) (*packet.
 		currentName := name
 		depth := 0
 		
-		for depth < 10 { // Prevent infinite loops
+		for depth < 15 { // Increase depth for deep SRV/CNAME chains
 			depth++
 			s.Logger.Info("recursive lookup", "name", currentName, "type", qType, "ns", ns)
 
@@ -138,8 +138,8 @@ func (s *Server) resolveRecursive(name string, qType packet.QueryType) (*packet.
 				continue
 			}
 
-			// Special case for CAA: it often returns 0 answers with NOERROR if not present
-			if qType == packet.CAA && resp.Header.ResCode == 0 && len(resp.Answers) == 0 {
+			// Special case for record types that might return 0 answers with NOERROR (CAA, SRV)
+			if (qType == packet.CAA || qType == packet.SRV) && resp.Header.ResCode == 0 && len(resp.Answers) == 0 {
 				return resp, nil
 			}
 
@@ -202,12 +202,14 @@ func (s *Server) sendQueryInternal(server string, name string, qType packet.Quer
 	resBuffer := packet.NewBytePacketBuffer()
 	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	
+	// Read into a temporary buffer first
 	tmp := make([]byte, packet.MaxPacketSize)
 	n, errRead := conn.Read(tmp)
 	if errRead != nil {
 		return nil, errRead
 	}
 	
+	// Use Load() to correctly update resBuffer.Len and parsing flag
 	resBuffer.Load(tmp[:n])
 
 	resp := packet.NewDNSPacket()
