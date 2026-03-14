@@ -155,7 +155,10 @@ func (m *mockRepo) ApplyZoneUpdate(_ context.Context, _ string, _ []domain.Updat
 
 func (m *mockRepo) SaveAuditLog(_ context.Context, _ *domain.AuditLog) error { return m.err }
 func (m *mockRepo) GetAuditLogs(_ context.Context, _ string) ([]domain.AuditLog, error) {
-	return nil, m.err
+	if m.err != nil {
+		return nil, m.err
+	}
+	return []domain.AuditLog{{ID: "audit-1"}}, nil
 }
 func (m *mockRepo) Ping(_ context.Context) error { return m.err }
 
@@ -175,11 +178,63 @@ func (m *mockRepo) ListAPIKeys(_ context.Context, _ string) ([]domain.APIKey, er
 func (m *mockRepo) DeleteAPIKey(_ context.Context, _ string, _ string) error { return m.err }
 
 func (m *mockRepo) GetRecordsToProbe(_ context.Context) ([]domain.Record, error) {
-	return nil, m.err
+	if m.err != nil {
+		return nil, m.err
+	}
+	return []domain.Record{{ID: "probe-1"}}, nil
 }
 
 func (m *mockRepo) UpdateRecordHealth(_ context.Context, _ string, _ domain.HealthStatus, _ string) error {
 	return m.err
+}
+
+func TestDNSService_ExtraMethods(t *testing.T) {
+	repo := &mockRepo{}
+	svc := NewDNSService(repo, nil)
+	ctx := context.Background()
+
+	// 1. Test ListAuditLogs
+	logs, err := svc.ListAuditLogs(ctx, "t1")
+	if err != nil || len(logs) != 1 {
+		t.Errorf("ListAuditLogs failed: %v", err)
+	}
+
+	// 2. Test GetRecordsToProbe
+	probes, err := svc.GetRecordsToProbe(ctx)
+	if err != nil || len(probes) != 1 {
+		t.Errorf("GetRecordsToProbe failed: %v", err)
+	}
+
+	// 3. Test UpdateRecordHealth
+	err = svc.UpdateRecordHealth(ctx, "r1", domain.HealthStatusHealthy, "")
+	if err != nil {
+		t.Errorf("UpdateRecordHealth failed: %v", err)
+	}
+
+	// 4. Test HealthCheck (Repo Ping)
+	checks := svc.HealthCheck(ctx)
+	if err, ok := checks["postgres"]; !ok || err != nil {
+		t.Errorf("HealthCheck failed: %v", err)
+	}
+
+	// 5. Test Error paths
+	repo.err = errors.New("db error")
+	_, err = svc.ListAuditLogs(ctx, "t1")
+	if err == nil {
+		t.Error("Expected error for ListAuditLogs")
+	}
+	_, err = svc.GetRecordsToProbe(ctx)
+	if err == nil {
+		t.Error("Expected error for GetRecordsToProbe")
+	}
+	err = svc.UpdateRecordHealth(ctx, "r1", domain.HealthStatusHealthy, "")
+	if err == nil {
+		t.Error("Expected error for UpdateRecordHealth")
+	}
+	checks = svc.HealthCheck(ctx)
+	if err, ok := checks["postgres"]; !ok || err == nil {
+		t.Error("Expected error for HealthCheck")
+	}
 }
 
 func TestCreateZone(t *testing.T) {
