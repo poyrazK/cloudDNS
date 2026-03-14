@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -75,135 +76,141 @@ func setupTestDB(t *testing.T) (*sql.DB, func()) {
 	if containerErr != nil {
 		t.Fatalf("failed to setup global test container: %v", containerErr)
 	}
-return testDB, func() {
-	// We don't terminate the global container here,
-	// just clean up data if needed. For now, we trust tests to be clean.
-	_, _ = testDB.Exec("TRUNCATE dns_records, dns_zones, audit_logs, dns_zone_changes, api_keys, dnssec_keys CASCADE")
-}
+	return testDB, func() {
+		// Surface failures to reset the DB
+		if _, err := testDB.Exec("TRUNCATE dns_records, dns_zones, audit_logs, dns_zone_changes, api_keys, dnssec_keys CASCADE"); err != nil {
+			panic(fmt.Sprintf("failed to truncate test database: %v", err))
+		}
+	}
 }
 
 func TestPostgresRepository_IXFR_And_Updates(t *testing.T) {
-if testing.Short() || !dockerAvailable() {
-	t.Skip("skipping integration test")
-}
-db, cleanup := setupTestDB(t)
-defer cleanup()
-repo := NewPostgresRepository(db)
-ctx := context.Background()
+	if testing.Short() || !dockerAvailable() {
+		t.Skip("skipping integration test")
+	}
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+	repo := NewPostgresRepository(db)
+	ctx := context.Background()
 
-// 1. Setup Zone
-zID := "550e8400-e29b-41d4-a716-446655440011"
-zoneName := "ixfr.test."
-zone := &domain.Zone{ID: zID, Name: zoneName, TenantID: "t1"}
-if err := repo.CreateZone(ctx, zone); err != nil {
-	t.Fatalf("CreateZone failed: %v", err)
-}
+	// 1. Setup Zone
+	zID := "550e8400-e29b-41d4-a716-446655440011"
+	zoneName := "ixfr.test."
+	zone := &domain.Zone{ID: zID, Name: zoneName, TenantID: "t1"}
+	if err := repo.CreateZone(ctx, zone); err != nil {
+		t.Fatalf("CreateZone failed: %v", err)
+	}
 
-// 2. Initial Records
-rec1 := domain.Record{
-	ID: "550e8400-e29b-41d4-a716-446655440012", ZoneID: zID, Name: "www.ixfr.test.", 
-	Type: domain.TypeA, Content: "1.1.1.1", TTL: 60, CreatedAt: time.Now(), UpdatedAt: time.Now(),
-}
-if err := repo.CreateRecord(ctx, &rec1); err != nil {
-	t.Fatalf("CreateRecord failed: %v", err)
-}
+	// 2. Initial Records
+	rec1 := domain.Record{
+		ID: "550e8400-e29b-41d4-a716-446655440012", ZoneID: zID, Name: "www.ixfr.test.", 
+		Type: domain.TypeA, Content: "1.1.1.1", TTL: 60, CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	if err := repo.CreateRecord(ctx, &rec1); err != nil {
+		t.Fatalf("CreateRecord failed: %v", err)
+	}
 
-// 3. Apply Zone Update (Serial 2)
-// Add one, delete one RRset
-opAdd := domain.UpdateOperation{
-	Action: domain.ActionAdd,
-	Record: domain.Record{
-		ID: "550e8400-e29b-41d4-a716-446655440013", ZoneID: zID, Name: "mail.ixfr.test.",
-		Type: domain.TypeA, Content: "2.2.2.2", TTL: 60, CreatedAt: time.Now(), UpdatedAt: time.Now(),
-	},
-}
-opDel := domain.UpdateOperation{
-	Action: domain.ActionDeleteRRSet,
-	Record: domain.Record{Name: "www.ixfr.test.", Type: domain.TypeA},
-}
+	// 3. Apply Zone Update (Serial 2)
+	// Add one, delete one RRset
+	opAdd := domain.UpdateOperation{
+		Action: domain.ActionAdd,
+		Record: domain.Record{
+			ID: "550e8400-e29b-41d4-a716-446655440013", ZoneID: zID, Name: "mail.ixfr.test.",
+			Type: domain.TypeA, Content: "2.2.2.2", TTL: 60, CreatedAt: time.Now(), UpdatedAt: time.Now(),
+		},
+	}
+	opDel := domain.UpdateOperation{
+		Action: domain.ActionDeleteRRSet,
+		Record: domain.Record{Name: "www.ixfr.test.", Type: domain.TypeA},
+	}
 
 	changes := []domain.ZoneChange{
 		{ID: "550e8400-e29b-41d4-a716-446655440014", ZoneID: zID, Action: "ADD", Name: "mail.ixfr.test.", Type: domain.TypeA, Content: "2.2.2.2", TTL: 60, CreatedAt: time.Now()},
 		{ID: "550e8400-e29b-41d4-a716-446655440015", ZoneID: zID, Action: "DELETE", Name: "www.ixfr.test.", Type: domain.TypeA, CreatedAt: time.Now()},
 	}
 
-if err := repo.ApplyZoneUpdate(ctx, zID, []domain.UpdateOperation{opAdd, opDel}, 2, changes); err != nil {
-	t.Fatalf("ApplyZoneUpdate failed: %v", err)
-}
-
-// 4. Verify Records after update
-recs, err := repo.ListRecordsForZone(ctx, zID, "t1")
-if err != nil {
-	t.Fatalf("ListRecordsForZone failed: %v", err)
-}
-foundMail := false
-for _, r := range recs {
-	if r.Name == "mail.ixfr.test." {
-		foundMail = true
+	if err := repo.ApplyZoneUpdate(ctx, zID, []domain.UpdateOperation{opAdd, opDel}, 2, changes); err != nil {
+		t.Fatalf("ApplyZoneUpdate failed: %v", err)
 	}
-	if r.Name == "www.ixfr.test." {
-		t.Errorf("www.ixfr.test. should have been deleted")
+
+	// 4. Verify Records after update
+	recs, err := repo.ListRecordsForZone(ctx, zID, "t1")
+	if err != nil {
+		t.Fatalf("ListRecordsForZone failed: %v", err)
 	}
-}
-if !foundMail {
-	t.Errorf("mail.ixfr.test. should have been added")
-}
-
-// 5. Test ListZoneChanges
-history, err := repo.ListZoneChanges(ctx, zID, 0)
-if err != nil {
-	t.Fatalf("ListZoneChanges failed: %v", err)
-}
-if len(history) != 2 {
-	t.Errorf("Expected 2 history records, got %d", len(history))
-}
-
-// 6. Test GetIXFRChain (from serial 1 to 2)
-chunks, err := repo.GetIXFRChain(ctx, zID, 1, 2)
-if err != nil {
-	t.Fatalf("GetIXFRChain failed: %v", err)
-}
-if len(chunks) != 1 || chunks[0].Serial != 2 {
-	t.Fatalf("Expected 1 chunk for serial 2, got %+v", chunks)
-}
-if len(chunks[0].Added) != 1 || chunks[0].Added[0].Name != "mail.ixfr.test." {
-	t.Errorf("Incorrect added records in IXFR chunk")
-}
-if len(chunks[0].Deleted) != 1 || chunks[0].Deleted[0].Name != "www.ixfr.test." {
-	t.Errorf("Incorrect deleted records in IXFR chunk")
-}
-
-// 7. Test DeleteRecordsForZone
-if err := repo.DeleteRecordsForZone(ctx, zID); err != nil {
-	t.Fatalf("DeleteRecordsForZone failed: %v", err)
-}
-recs, _ = repo.ListRecordsForZone(ctx, zID, "t1")
-if len(recs) != 0 {
-	t.Errorf("Expected 0 records after DeleteRecordsForZone, got %d", len(recs))
-}
-
-// 8. Test GetRecordsToProbe
-// Create a record with health check
-recHC := domain.Record{
-	ID: "550e8400-e29b-41d4-a716-446655440016", ZoneID: zID, Name: "hc.test.",
-	Type: domain.TypeA, Content: "3.3.3.3", TTL: 60,
-	HealthCheckType: "HTTP", HealthCheckTarget: "http://example.com/health",
-}
-_ = repo.CreateRecord(ctx, &recHC)
-probes, err := repo.GetRecordsToProbe(ctx)
-if err != nil {
-	t.Fatalf("GetRecordsToProbe failed: %v", err)
-}
-foundHC := false
-for _, p := range probes {
-	if p.ID == recHC.ID {
-		foundHC = true
-		break
+	foundMail := false
+	for _, r := range recs {
+		if r.Name == "mail.ixfr.test." {
+			foundMail = true
+		}
+		if r.Name == "www.ixfr.test." {
+			t.Errorf("www.ixfr.test. should have been deleted")
+		}
 	}
-}
-if !foundHC {
-	t.Errorf("Record with health check not found in probes")
-}
+	if !foundMail {
+		t.Errorf("mail.ixfr.test. should have been added")
+	}
+
+	// 5. Test ListZoneChanges
+	history, err := repo.ListZoneChanges(ctx, zID, 0)
+	if err != nil {
+		t.Fatalf("ListZoneChanges failed: %v", err)
+	}
+	if len(history) != 2 {
+		t.Errorf("Expected 2 history records, got %d", len(history))
+	}
+
+	// 6. Test GetIXFRChain (from serial 1 to 2)
+	chunks, err := repo.GetIXFRChain(ctx, zID, 1, 2)
+	if err != nil {
+		t.Fatalf("GetIXFRChain failed: %v", err)
+	}
+	if len(chunks) != 1 || chunks[0].Serial != 2 {
+		t.Fatalf("Expected 1 chunk for serial 2, got %+v", chunks)
+	}
+	if len(chunks[0].Added) != 1 || chunks[0].Added[0].Name != "mail.ixfr.test." {
+		t.Errorf("Incorrect added records in IXFR chunk")
+	}
+	if len(chunks[0].Deleted) != 1 || chunks[0].Deleted[0].Name != "www.ixfr.test." {
+		t.Errorf("Incorrect deleted records in IXFR chunk")
+	}
+
+	// 7. Test DeleteRecordsForZone
+	if err := repo.DeleteRecordsForZone(ctx, zID); err != nil {
+		t.Fatalf("DeleteRecordsForZone failed: %v", err)
+	}
+	recs, err = repo.ListRecordsForZone(ctx, zID, "t1")
+	if err != nil {
+		t.Fatalf("ListRecordsForZone failed after delete: %v", err)
+	}
+	if len(recs) != 0 {
+		t.Errorf("Expected 0 records after DeleteRecordsForZone, got %d", len(recs))
+	}
+
+	// 8. Test GetRecordsToProbe
+	// Create a record with health check within the zone
+	recHC := domain.Record{
+		ID: "550e8400-e29b-41d4-a716-446655440016", ZoneID: zID, Name: "hc.ixfr.test.",
+		Type: domain.TypeA, Content: "3.3.3.3", TTL: 60,
+		HealthCheckType: "HTTP", HealthCheckTarget: "http://example.com/health",
+	}
+	if err := repo.CreateRecord(ctx, &recHC); err != nil {
+		t.Fatalf("CreateRecord failed for recHC: %v", err)
+	}
+	probes, err := repo.GetRecordsToProbe(ctx)
+	if err != nil {
+		t.Fatalf("GetRecordsToProbe failed: %v", err)
+	}
+	foundHC := false
+	for _, p := range probes {
+		if p.ID == recHC.ID {
+			foundHC = true
+			break
+		}
+	}
+	if !foundHC {
+		t.Errorf("Record with health check not found in probes")
+	}
 }
 
 func TestPostgresRepositoryIntegration(t *testing.T) {
