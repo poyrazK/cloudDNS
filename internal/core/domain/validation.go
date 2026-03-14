@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"net"
 	"regexp"
 	"strconv"
 	"strings"
@@ -37,6 +38,43 @@ func ValidateZoneName(name string) error {
 			return fmt.Errorf("label '%s' contains invalid characters or format", label)
 		}
 	}
+	return nil
+}
+
+// ValidateRecord performs general validation for a DNS record.
+func ValidateRecord(r *Record) error {
+	if r.Name == "" {
+		return fmt.Errorf("record name cannot be empty")
+	}
+	if !strings.HasSuffix(r.Name, ".") {
+		return fmt.Errorf("record name must be a FQDN (end with a dot)")
+	}
+
+	switch r.Type {
+	case TypeA:
+		if net.ParseIP(r.Content).To4() == nil {
+			return fmt.Errorf("invalid IPv4 address: %s", r.Content)
+		}
+	case TypeAAAA:
+		if net.ParseIP(r.Content).To16() == nil || net.ParseIP(r.Content).To4() != nil {
+			return fmt.Errorf("invalid IPv6 address: %s", r.Content)
+		}
+	case TypeCNAME, TypeNS, TypePTR:
+		if !strings.HasSuffix(r.Content, ".") {
+			return fmt.Errorf("%s target must be a FQDN (end with a dot)", r.Type)
+		}
+	case TypeSRV:
+		return ValidateSRVFields(r.Priority, r.Weight, r.Port, r.Content)
+	case TypeCAA:
+		return ValidateCAAContent(r.Content)
+	case TypeTXT, TypeMX, TypeSOA:
+		// Basic types that currently rely on service-layer or repository-layer specific format validation
+		// but are known types.
+		return nil
+	default:
+		return fmt.Errorf("unsupported record type: %s", r.Type)
+	}
+
 	return nil
 }
 
