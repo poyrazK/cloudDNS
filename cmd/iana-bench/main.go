@@ -19,10 +19,19 @@ import (
 )
 
 func main() {
-	target := flag.String("server", "127.0.0.1:10053", "DNS server to test")
-	count := flag.Int("n", 10000, "Total number of queries to send")
-	concurrency := flag.Int("c", 50, "Number of concurrent workers")
-	flag.Parse()
+	if err := Run(os.Args); err != nil {
+		log.Fatalf("iana-bench failed: %v", err)
+	}
+}
+
+func Run(args []string) error {
+	fs := flag.NewFlagSet("iana-bench", flag.ContinueOnError)
+	target := fs.String("server", "127.0.0.1:10053", "DNS server to test")
+	count := fs.Int("n", 10000, "Total number of queries to send")
+	concurrency := fs.Int("c", 50, "Number of concurrent workers")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
 
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
@@ -31,7 +40,7 @@ func main() {
 
 	db, err := sql.Open("pgx", dbURL)
 	if err != nil {
-		log.Fatalf("failed to connect to database: %v", err)
+		return fmt.Errorf("failed to connect to database: %w", err)
 	}
 	defer func() {
 		if errClose := db.Close(); errClose != nil {
@@ -39,9 +48,7 @@ func main() {
 		}
 	}()
 
-	if err := RunBench(db, *target, *count, *concurrency); err != nil {
-		log.Fatalf("benchmark failed: %v", err)
-	}
+	return RunBench(db, *target, *count, *concurrency)
 }
 
 func RunBench(db *sql.DB, target string, count, concurrency int) error {
@@ -74,6 +81,9 @@ func RunBench(db *sql.DB, target string, count, concurrency int) error {
 	var wg sync.WaitGroup
 	start := time.Now()
 
+	if concurrency <= 0 {
+		concurrency = 1
+	}
 	queriesPerWorker := count / concurrency
 
 	for i := 0; i < concurrency; i++ {
