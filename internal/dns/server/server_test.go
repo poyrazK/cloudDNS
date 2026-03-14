@@ -831,9 +831,10 @@ func TestServer_Run_ContextCancel(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
+	// Run should block on context then return nil
 	err := srv.Run(ctx)
-	if err != nil && !errors.Is(err, context.DeadlineExceeded) {
-		t.Errorf("Unexpected error from Run: %v", err)
+	if err != nil {
+		t.Errorf("Expected nil error from Run on cancel, got %v", err)
 	}
 }
 
@@ -850,14 +851,13 @@ func TestHandleUDPConnection_Error(t *testing.T) {
 	repo := &mockServerRepo{}
 	srv := NewServer("127.0.0.1:0", repo, nil)
 	
-	// Malformed data to trigger handlePacket error
+	// This test ensures that handleUDPConnection does not panic when encountering 
+	// malformed data or write errors.
 	pc := &errorPacketConn{}
 	addr := &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}
 	
-	// Should log error but not crash
 	srv.handleUDPConnection(pc, addr, []byte("invalid"))
 	
-	// Valid data but write error
 	q := packet.NewDNSPacket()
 	q.Questions = append(q.Questions, packet.DNSQuestion{Name: "test.com.", QType: packet.A})
 	buf := packet.NewBytePacketBuffer()
@@ -995,9 +995,17 @@ func TestHandleAXFR_NoSOA(t *testing.T) {
 	if len(conn.captured) != 1 {
 		t.Fatalf("Expected 1 error packet, got %d", len(conn.captured))
 	}
+	
+	res := packet.NewDNSPacket()
+	pb := packet.NewBytePacketBuffer()
+	pb.Load(conn.captured[0])
+	_ = res.FromBuffer(pb)
+	if res.Header.ResCode != packet.RcodeServFail {
+		t.Errorf("Expected SERVFAIL (2), got %d", res.Header.ResCode)
+	}
 }
 
-func TestServer_Run_TCPError(t *testing.T) {
+func TestServer_Run_NonBlockingOnTCPDoTFailure(t *testing.T) {
 	// Bind to a port first to force TCP error in Run
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -1007,15 +1015,16 @@ func TestServer_Run_TCPError(t *testing.T) {
 	addr := l.Addr().String()
 
 	srv := NewServer(addr, nil, nil)
-	srv.TLSConfig = &tls.Config{} // Enable DoT path
+	// Intentional minimal TLS config to exercise DoT path in tests only
+	srv.TLSConfig = &tls.Config{} 
 
 	// Context that expires quickly
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
-	// Should not block indefinitely even if listeners fail
+	// Should not block indefinitely even if listeners fail to bind (e.g. port already in use)
 	err = srv.Run(ctx)
-	if err != nil && !errors.Is(err, context.DeadlineExceeded) {
+	if err != nil {
 		t.Logf("Run returned: %v", err)
 	}
 }
