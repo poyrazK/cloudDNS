@@ -297,7 +297,7 @@ func TestCreateRecordInternalError(t *testing.T) {
 	repo := &testutil.MockRepo{}
 	handler := NewAPIHandler(svc, repo)
 
-	rec := domain.Record{Name: "www"}
+	rec := domain.Record{Name: "www.test.com.", Type: domain.TypeA, Content: "1.2.3.4", TTL: 300}
 	body, _ := json.Marshal(rec)
 	req := httptest.NewRequest("POST", recordsPath, bytes.NewBuffer(body))
 	req = withTenant(req, testTenantID)
@@ -373,6 +373,155 @@ func TestDeleteRecordInternalError(t *testing.T) {
 
 	if w.Code != http.StatusInternalServerError {
 		t.Errorf(status500Err, w.Code)
+	}
+}
+
+func TestListAuditLogsSuccess(t *testing.T) {
+	svc := &mockDNSService{}
+	repo := &testutil.MockRepo{}
+	handler := NewAPIHandler(svc, repo)
+
+	req := httptest.NewRequest("GET", "/audit", nil)
+	req = withTenant(req, testTenantID)
+	w := httptest.NewRecorder()
+
+	handler.ListAuditLogs(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf(status200Err, w.Code)
+	}
+}
+
+func TestListAuditLogsInternalError(t *testing.T) {
+	svc := &mockDNSService{err: errors.New("fail")}
+	repo := &testutil.MockRepo{}
+	handler := NewAPIHandler(svc, repo)
+
+	req := httptest.NewRequest("GET", "/audit", nil)
+	req = withTenant(req, testTenantID)
+	w := httptest.NewRecorder()
+
+	handler.ListAuditLogs(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf(status500Err, w.Code)
+	}
+}
+
+func TestCreateRecordSuccess(t *testing.T) {
+	svc := &mockDNSService{}
+	repo := &testutil.MockRepo{}
+	handler := NewAPIHandler(svc, repo)
+
+	rec := domain.Record{Name: "www.test.com.", Type: domain.TypeA, Content: "1.2.3.4", TTL: 300}
+	body, _ := json.Marshal(rec)
+	req := httptest.NewRequest("POST", recordsPath, bytes.NewBuffer(body))
+	req = withTenant(req, testTenantID)
+	w := httptest.NewRecorder()
+
+	handler.CreateRecord(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("Expected status 201, got %d", w.Code)
+	}
+}
+
+func TestCreateRecordValidation(t *testing.T) {
+	svc := &mockDNSService{}
+	repo := &testutil.MockRepo{}
+	handler := NewAPIHandler(svc, repo)
+
+	tests := []struct {
+		name    string
+		payload string
+		want    int
+	}{
+		{"Valid A", `{"name": "www.test.com.", "type": "A", "content": "1.2.3.4"}`, http.StatusCreated},
+		{"Invalid IP", `{"name": "www.test.com.", "type": "A", "content": "invalid"}`, http.StatusBadRequest},
+		{"Invalid Type", `{"name": "www.test.com.", "type": "INVALID", "content": "1.2.3.4"}`, http.StatusBadRequest},
+		{"Missing Name", `{"type": "A", "content": "1.2.3.4"}`, http.StatusBadRequest},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("POST", recordsPath, bytes.NewBuffer([]byte(tt.payload)))
+			req = withTenant(req, testTenantID)
+			w := httptest.NewRecorder()
+			handler.CreateRecord(w, req)
+			if w.Code != tt.want {
+				t.Errorf("CreateRecord(%s) status = %d, want %d", tt.name, w.Code, tt.want)
+			}
+		})
+	}
+}
+
+func TestDeleteZoneSuccess(t *testing.T) {
+	svc := &mockDNSService{}
+	repo := &testutil.MockRepo{}
+	handler := NewAPIHandler(svc, repo)
+
+	req := httptest.NewRequest("DELETE", "/zones/z1", nil)
+	req = withTenant(req, testTenantID)
+	w := httptest.NewRecorder()
+
+	handler.DeleteZone(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Errorf("Expected status 204, got %d", w.Code)
+	}
+}
+
+func TestDeleteRecordSuccess(t *testing.T) {
+	svc := &mockDNSService{}
+	repo := &testutil.MockRepo{}
+	handler := NewAPIHandler(svc, repo)
+
+	req := httptest.NewRequest("DELETE", "/zones/z1/records/r1", nil)
+	req = withTenant(req, testTenantID)
+	w := httptest.NewRecorder()
+
+	handler.DeleteRecord(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Errorf("Expected status 204, got %d", w.Code)
+	}
+}
+
+func TestUnauthorizedAccess(t *testing.T) {
+	svc := &mockDNSService{}
+	repo := &testutil.MockRepo{}
+	handler := NewAPIHandler(svc, repo)
+
+	endpoints := []struct {
+		name   string
+		method string
+		path   string
+		body   string
+		fn     http.HandlerFunc
+	}{
+		{"CreateZone", "POST", "/zones", `{"name": "example.com."}`, handler.CreateZone},
+		{"ListZones", "GET", "/zones", "", handler.ListZones},
+		{"ListRecords", "GET", "/zones/z1/records", "", handler.ListRecordsForZone},
+		{"DeleteZone", "DELETE", "/zones/z1", "", handler.DeleteZone},
+		{"CreateRecord", "POST", "/zones/z1/records", `{"name": "www.example.com.", "type": "A", "content": "1.2.3.4"}`, handler.CreateRecord},
+		{"DeleteRecord", "DELETE", "/zones/z1/records/r1", "", handler.DeleteRecord},
+		{"ListAudit", "GET", "/audit", "", handler.ListAuditLogs},
+	}
+
+	for _, tt := range endpoints {
+		t.Run(tt.name, func(t *testing.T) {
+			var body io.Reader
+			if tt.body != "" {
+				body = bytes.NewBuffer([]byte(tt.body))
+			}
+			req := httptest.NewRequest(tt.method, tt.path, body)
+			// No tenant context
+			w := httptest.NewRecorder()
+			tt.fn(w, req)
+			if w.Code != http.StatusUnauthorized {
+				t.Errorf("%s: Expected 401, got %d. Body: %s", tt.name, w.Code, w.Body.String())
+			}
+		})
 	}
 }
 
