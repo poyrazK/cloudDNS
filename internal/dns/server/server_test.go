@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"errors"
 	"net"
 	"net/http"
@@ -825,6 +826,46 @@ func TestServer_RunError(t *testing.T) {
 	}
 }
 
+func TestServer_Run_ContextCancel(t *testing.T) {
+	srv := NewServer("127.0.0.1:0", nil, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	err := srv.Run(ctx)
+	if err != nil && !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("Unexpected error from Run: %v", err)
+	}
+}
+
+type errorPacketConn struct {
+	net.PacketConn
+}
+
+func (e *errorPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
+	return 0, errors.New("write error")
+}
+func (e *errorPacketConn) Close() error { return nil }
+
+func TestHandleUDPConnection_Error(t *testing.T) {
+	repo := &mockServerRepo{}
+	srv := NewServer("127.0.0.1:0", repo, nil)
+	
+	// Malformed data to trigger handlePacket error
+	pc := &errorPacketConn{}
+	addr := &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}
+	
+	// Should log error but not crash
+	srv.handleUDPConnection(pc, addr, []byte("invalid"))
+	
+	// Valid data but write error
+	q := packet.NewDNSPacket()
+	q.Questions = append(q.Questions, packet.DNSQuestion{Name: "test.com.", QType: packet.A})
+	buf := packet.NewBytePacketBuffer()
+	_ = q.Write(buf)
+	
+	srv.handleUDPConnection(pc, addr, buf.Buf[:buf.Position()])
+}
+
 type mockResponseWriter struct {
 	http.ResponseWriter
 	code   int
@@ -936,4 +977,45 @@ func TestHandleUpdate_IncrementSerialError(t *testing.T) {
 		}
 		return nil
 	})
+}
+
+func TestHandleAXFR_NoSOA(t *testing.T) {
+	repo := &mockServerRepo{
+		zones: []domain.Zone{{ID: "z1", Name: "nosoa.test."}},
+		// No records
+	}
+	srv := NewServer(":0", repo, nil)
+
+	req := packet.NewDNSPacket()
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "nosoa.test.", QType: packet.AXFR})
+
+	conn := &mockTCPConn{}
+	srv.handleAXFR(conn, req)
+
+	if len(conn.captured) != 1 {
+		t.Fatalf("Expected 1 error packet, got %d", len(conn.captured))
+	}
+}
+
+func TestServer_Run_TCPError(t *testing.T) {
+	// Bind to a port first to force TCP error in Run
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	addr := l.Addr().String()
+
+	srv := NewServer(addr, nil, nil)
+	srv.TLSConfig = &tls.Config{} // Enable DoT path
+
+	// Context that expires quickly
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	// Should not block indefinitely even if listeners fail
+	err = srv.Run(ctx)
+	if err != nil && !errors.Is(err, context.DeadlineExceeded) {
+		t.Logf("Run returned: %v", err)
+	}
 }
