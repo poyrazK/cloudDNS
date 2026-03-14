@@ -101,7 +101,7 @@ func TestWriteNameUncompressed(t *testing.T) {
 		t.Fatalf("WriteNameUncompressed failed: %v", err)
 	}
 
-	buf.Seek(0)
+	_ = buf.Seek(0)
 	got, err := buf.ReadName()
 	if err != nil {
 		t.Fatalf("ReadName failed: %v", err)

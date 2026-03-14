@@ -70,7 +70,7 @@ func TestRunBench_Success(t *testing.T) {
 func TestMain_Coverage(_ *testing.T) {
 	// Trigger main() for coverage (will likely fail on DB but hit branches)
 	go func() {
-		defer func() { recover() }()
+		defer func() { _ = recover() }()
 		main()
 	}()
 }
