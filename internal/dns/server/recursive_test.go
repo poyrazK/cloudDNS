@@ -198,3 +198,69 @@ func TestNewRecursiveResolver(t *testing.T) {
 		t.Errorf("Expected root hints to be initialized")
 	}
 }
+
+func TestSendTCPQuery(t *testing.T) {
+	// 1. Start a mock TCP DNS server
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Failed to listen: %v", err)
+	}
+	defer l.Close()
+
+	go func() {
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		// Read 2-byte length prefix
+		lenBuf := make([]byte, 2)
+		if _, err := conn.Read(lenBuf); err != nil {
+			return
+		}
+		length := uint16(lenBuf[0])<<8 | uint16(lenBuf[1])
+
+		// Read packet data
+		data := make([]byte, length)
+		if _, err := conn.Read(data); err != nil {
+			return
+		}
+
+		req := packet.NewDNSPacket()
+		pb := packet.NewBytePacketBuffer()
+		pb.Load(data)
+		_ = req.FromBuffer(pb)
+
+		// Create response
+		resp := packet.NewDNSPacket()
+		resp.Header.ID = req.Header.ID
+		resp.Header.Response = true
+		if len(req.Questions) > 0 {
+			resp.Questions = append(resp.Questions, req.Questions[0])
+			resp.Answers = append(resp.Answers, packet.DNSRecord{
+				Name: req.Questions[0].Name, Type: packet.A, IP: net.ParseIP("1.2.3.4"), TTL: 60, Class: 1,
+			})
+		}
+
+		resBuf := packet.NewBytePacketBuffer()
+		_ = resp.Write(resBuf)
+		resData := resBuf.Buf[:resBuf.Position()]
+
+		// Write 2-byte length and data
+		resLen := uint16(len(resData))
+		_, _ = conn.Write([]byte{byte(resLen >> 8), byte(resLen & 0xFF)})
+		_, _ = conn.Write(resData)
+	}()
+
+	// 2. Call sendTCPQuery
+	srv := NewServer(":0", nil, nil)
+	resp, err := srv.sendTCPQuery(l.Addr().String(), "tcp.test.", packet.A)
+	if err != nil {
+		t.Fatalf("sendTCPQuery failed: %v", err)
+	}
+
+	if len(resp.Answers) == 0 || resp.Answers[0].IP.String() != "1.2.3.4" {
+		t.Errorf("sendTCPQuery returned invalid response")
+	}
+}
