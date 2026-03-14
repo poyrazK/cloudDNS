@@ -89,6 +89,9 @@ func TestSystemVIPAdapter_OSLogic(t *testing.T) {
 }
 
 func TestRealExecutor_Run(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping TestRealExecutor_Run on Windows: uses Unix-only commands")
+	}
 	executor := &realExecutor{}
 	ctx := context.Background()
 	
