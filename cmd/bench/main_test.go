@@ -183,3 +183,23 @@ func TestMain_SeedMode(t *testing.T) {
 	defer func() { _ = recover() }()
 	main()
 }
+
+func TestRunAndCaptureScale(t *testing.T) {
+	// We test the error path if "go" fails or returns nothing.
+	res := runAndCaptureScale("127.0.0.1:53", 1, 1, 1, "Testing")
+	if res.Throughput != "N/A" {
+		t.Errorf("Expected N/A for invalid target")
+	}
+}
+
+func TestRunSeed_Direct(_ *testing.T) {
+	// Mock env to force error in connection
+	os.Setenv("DATABASE_URL", "invalid")
+	runSeed(1)
+}
+
+func TestRunScaleTest_Direct(_ *testing.T) {
+	// Just hit the entry point
+	defer func() { _ = recover() }()
+	runScaleTest(1, 1)
+}
