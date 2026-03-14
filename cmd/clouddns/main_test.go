@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"testing"
-	"time"
 )
 
 func TestGetEnvUint32(t *testing.T) {
@@ -121,11 +120,8 @@ func TestRunGSLB(t *testing.T) {
 	}
 }
 
-func TestMain_Coverage(_ *testing.T) {
-	// Trigger main() for coverage (will likely fail on DB but hit branches)
-	go func() {
-		defer func() { _ = recover() }()
-		main()
-	}()
-	time.Sleep(100 * time.Millisecond)
+func TestMain_Coverage(t *testing.T) {
+	t.Setenv("DATABASE_URL", "none")
+	t.Setenv("API_ADDR", "test-exit")
+	_ = run(context.Background())
 }
