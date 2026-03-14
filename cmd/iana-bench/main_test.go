@@ -25,6 +25,10 @@ func TestRunBench_Errors(t *testing.T) {
 	if err == nil {
 		t.Error("Expected error when no names found")
 	}
+	
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet sqlmock expectations: %v", err)
+	}
 }
 
 func TestRunBench_Success(t *testing.T) {
@@ -65,12 +69,13 @@ func TestRunBench_Success(t *testing.T) {
 	if err != nil {
 		t.Errorf("RunBench failed: %v", err)
 	}
+	
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet sqlmock expectations: %v", err)
+	}
 }
 
-func TestMain_Coverage(_ *testing.T) {
-	// Trigger main() for coverage (will likely fail on DB but hit branches)
-	go func() {
-		defer func() { _ = recover() }()
-		main()
-	}()
+func TestMain_Coverage(t *testing.T) {
+	// Call Run instead of main to avoid os.Exit
+	_ = Run([]string{"iana-bench", "-n", "1", "-c", "1"})
 }
