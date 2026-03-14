@@ -71,13 +71,4 @@ func TestRunImport_Success(t *testing.T) {
 		t.Errorf("Expected success, got error: %v", err)
 	}
 	mRepo.AssertExpectations(t)
-	}
-
-	func TestMain_Coverage(_ *testing.T) {
-	// Trigger main() for coverage (will likely fail on DB but hit branches)
-	go func() {
-		defer func() { _ = recover() }()
-		main()
-	}()
-	}
-
+}
