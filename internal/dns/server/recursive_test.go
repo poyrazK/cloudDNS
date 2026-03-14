@@ -1,6 +1,7 @@
 package server
 
 import (
+	"io"
 	"net"
 	"strings"
 	"testing"
@@ -216,14 +217,14 @@ func TestSendTCPQuery(t *testing.T) {
 
 		// Read 2-byte length prefix
 		lenBuf := make([]byte, 2)
-		if _, err := conn.Read(lenBuf); err != nil {
+		if _, err := io.ReadFull(conn, lenBuf); err != nil {
 			return
 		}
 		length := uint16(lenBuf[0])<<8 | uint16(lenBuf[1])
 
 		// Read packet data
 		data := make([]byte, length)
-		if _, err := conn.Read(data); err != nil {
+		if _, err := io.ReadFull(conn, data); err != nil {
 			return
 		}
 
