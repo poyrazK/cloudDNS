@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
 )
@@ -154,11 +155,18 @@ func (m *mockRepo) ApplyZoneUpdate(_ context.Context, _ string, _ []domain.Updat
 }
 
 func (m *mockRepo) SaveAuditLog(_ context.Context, _ *domain.AuditLog) error { return m.err }
-func (m *mockRepo) GetAuditLogs(_ context.Context, _ string) ([]domain.AuditLog, error) {
+func (m *mockRepo) GetAuditLogs(_ context.Context, tenantID string) ([]domain.AuditLog, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
-	return []domain.AuditLog{{ID: "audit-1"}}, nil
+	return []domain.AuditLog{{
+		ID:           "audit-1",
+		TenantID:     tenantID,
+		Action:       "CREATE_ZONE",
+		ResourceType: "ZONE",
+		ResourceID:   "zone-123",
+		CreatedAt:    time.Now(),
+	}}, nil
 }
 func (m *mockRepo) Ping(_ context.Context) error { return m.err }
 
