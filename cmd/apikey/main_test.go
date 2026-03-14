@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"io"
 	"testing"
 
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
@@ -30,10 +31,11 @@ func TestGenerateKey(t *testing.T) {
 func TestGenerateKey_Error(t *testing.T) {
 	mockRepo := new(testutil.MockRepo)
 	mockRepo.On("CreateAPIKey", mock.Anything).Return(errors.New("db fail"))
-	err := generateKey(mockRepo, "t1", "admin", "k1", 1, ioDiscard)
+	err := generateKey(mockRepo, "t1", "admin", "k1", 1, io.Discard)
 	if err == nil {
 		t.Error("expected error")
 	}
+	mockRepo.AssertExpectations(t)
 }
 
 func TestListKeys(t *testing.T) {
@@ -59,10 +61,11 @@ func TestListKeys(t *testing.T) {
 func TestListKeys_Error(t *testing.T) {
 	mockRepo := new(testutil.MockRepo)
 	mockRepo.On("ListAPIKeys", "t1").Return([]domain.APIKey{}, errors.New("fail"))
-	err := listKeys(mockRepo, "t1", ioDiscard)
+	err := listKeys(mockRepo, "t1", io.Discard)
 	if err == nil {
 		t.Error("expected error")
 	}
+	mockRepo.AssertExpectations(t)
 }
 
 func TestRevokeKey(t *testing.T) {
@@ -85,10 +88,11 @@ func TestRevokeKey(t *testing.T) {
 func TestRevokeKey_Error(t *testing.T) {
 	mockRepo := new(testutil.MockRepo)
 	mockRepo.On("DeleteAPIKey", "t1", "id1").Return(errors.New("fail"))
-	err := revokeKey(mockRepo, "t1", "id1", ioDiscard)
+	err := revokeKey(mockRepo, "t1", "id1", io.Discard)
 	if err == nil {
 		t.Error("expected error")
 	}
+	mockRepo.AssertExpectations(t)
 }
 
 func TestRunCommand(t *testing.T) {
@@ -128,15 +132,19 @@ func TestRunCommand(t *testing.T) {
 	if err != nil {
 		t.Errorf("Unexpected error for revoke: %v", err)
 	}
+	mockRepo.AssertExpectations(t)
 }
 
 func TestMain_Coverage(t *testing.T) {
+	// main() calls os.Exit which terminates the test runner.
+	// Instead, we ensure 'run' is fully covered which is the core of main.
 	mockRepo := new(testutil.MockRepo)
 	out := &bytes.Buffer{}
 	
+	// We already have TestRunCommand covering most paths.
+	// This dummy test just ensures we consider the entry point logic.
 	args := []string{"apikey", "list"}
 	mockRepo.On("ListAPIKeys", "default-tenant").Return([]domain.APIKey{}, nil).Once()
 	_ = run(args, out, mockRepo)
+	mockRepo.AssertExpectations(t)
 }
-
-var ioDiscard = &bytes.Buffer{}
