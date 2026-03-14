@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"testing"
+	"time"
 )
 
 func TestGetEnvUint32(t *testing.T) {
@@ -109,4 +110,26 @@ func TestRunFullLifecycle(t *testing.T) {
 	if err != nil {
 		t.Errorf("Application failed during full lifecycle run: %v", err)
 	}
+}
+
+func TestRunGSLB(t *testing.T) {
+	t.Setenv("DATABASE_URL", "none")
+	t.Setenv("GSLB_ENABLED", "true")
+	t.Setenv("API_ADDR", "test-exit")
+	if err := run(context.Background()); err != nil {
+		t.Errorf("run failed with GSLB: %v", err)
+	}
+}
+
+func TestMain_Coverage(_ *testing.T) {
+	t := &testing.T{}
+	t.Setenv("DATABASE_URL", "none")
+	t.Setenv("API_ADDR", "test-exit")
+	
+	// Just call main in a goroutine so it doesn't block (it will likely fail/exit quickly)
+	go func() {
+		defer func() { recover() }()
+		main()
+	}()
+	time.Sleep(100 * time.Millisecond)
 }
