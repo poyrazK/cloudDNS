@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
@@ -26,6 +27,15 @@ func TestGenerateKey(t *testing.T) {
 	mockRepo.AssertExpectations(t)
 }
 
+func TestGenerateKey_Error(t *testing.T) {
+	mockRepo := new(testutil.MockRepo)
+	mockRepo.On("CreateAPIKey", mock.Anything).Return(errors.New("db fail"))
+	err := generateKey(mockRepo, "t1", "admin", "k1", 1, ioDiscard)
+	if err == nil {
+		t.Error("expected error")
+	}
+}
+
 func TestListKeys(t *testing.T) {
 	mockRepo := new(testutil.MockRepo)
 	keys := []domain.APIKey{
@@ -46,6 +56,15 @@ func TestListKeys(t *testing.T) {
 	mockRepo.AssertExpectations(t)
 }
 
+func TestListKeys_Error(t *testing.T) {
+	mockRepo := new(testutil.MockRepo)
+	mockRepo.On("ListAPIKeys", "t1").Return([]domain.APIKey{}, errors.New("fail"))
+	err := listKeys(mockRepo, "t1", ioDiscard)
+	if err == nil {
+		t.Error("expected error")
+	}
+}
+
 func TestRevokeKey(t *testing.T) {
 	mockRepo := new(testutil.MockRepo)
 	mockRepo.On("DeleteAPIKey", "tenant1", "id1").Return(nil)
@@ -61,6 +80,15 @@ func TestRevokeKey(t *testing.T) {
 		t.Errorf("expected revocation message in output")
 	}
 	mockRepo.AssertExpectations(t)
+}
+
+func TestRevokeKey_Error(t *testing.T) {
+	mockRepo := new(testutil.MockRepo)
+	mockRepo.On("DeleteAPIKey", "t1", "id1").Return(errors.New("fail"))
+	err := revokeKey(mockRepo, "t1", "id1", ioDiscard)
+	if err == nil {
+		t.Error("expected error")
+	}
 }
 
 func TestRunCommand(t *testing.T) {
@@ -101,3 +129,14 @@ func TestRunCommand(t *testing.T) {
 		t.Errorf("Unexpected error for revoke: %v", err)
 	}
 }
+
+func TestMain_Coverage(t *testing.T) {
+	mockRepo := new(testutil.MockRepo)
+	out := &bytes.Buffer{}
+	
+	args := []string{"apikey", "list"}
+	mockRepo.On("ListAPIKeys", "default-tenant").Return([]domain.APIKey{}, nil).Once()
+	_ = run(args, out, mockRepo)
+}
+
+var ioDiscard = &bytes.Buffer{}
