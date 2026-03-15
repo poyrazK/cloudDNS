@@ -1006,6 +1006,7 @@ func TestHandleAXFR_NoSOA(t *testing.T) {
 }
 
 func TestServer_Run_NonBlockingOnTCPDoTFailure(t *testing.T) {
+	t.Setenv("DOH_PORT", "10443")
 	// Bind to a port first to force TCP error in Run
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
