@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
@@ -147,4 +148,26 @@ func TestMain_Coverage(t *testing.T) {
 	mockRepo.On("ListAPIKeys", "default-tenant").Return([]domain.APIKey{}, nil).Once()
 	_ = run(args, out, mockRepo)
 	mockRepo.AssertExpectations(t)
+}
+
+func TestRunCommand_ExtraErrors(t *testing.T) {
+	mockRepo := new(testutil.MockRepo)
+	
+	// 1. Create with invalid role
+	err := run([]string{"apikey", "create", "-role", "invalid"}, io.Discard, mockRepo)
+	if err == nil || !strings.Contains(err.Error(), "invalid role") {
+		t.Errorf("Expected invalid role error, got: %v", err)
+	}
+
+	// 2. Create with invalid days
+	err = run([]string{"apikey", "create", "-days", "0"}, io.Discard, mockRepo)
+	if err == nil || !strings.Contains(err.Error(), "invalid days") {
+		t.Errorf("Expected invalid days error, got: %v", err)
+	}
+
+	// 3. Revoke with missing ID
+	err = run([]string{"apikey", "revoke"}, io.Discard, mockRepo)
+	if err == nil || !strings.Contains(err.Error(), "ID is required") {
+		t.Errorf("Expected missing ID error, got: %v", err)
+	}
 }
