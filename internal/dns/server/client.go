@@ -19,7 +19,10 @@ func (s *Server) refreshZone(zone *domain.Zone) {
 		return
 	}
 
-	masterAddr := net.JoinHostPort(zone.MasterServer, "53")
+	masterAddr := zone.MasterServer
+	if !strings.Contains(masterAddr, ":") {
+		masterAddr = net.JoinHostPort(masterAddr, "53")
+	}
 	s.Logger.Info("initiating zone refresh", "zone", zone.Name, "master", masterAddr)
 
 	// 1. Query master for SOA
