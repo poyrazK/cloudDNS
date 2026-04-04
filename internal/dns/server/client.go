@@ -20,7 +20,8 @@ func (s *Server) refreshZone(zone *domain.Zone) {
 	}
 
 	masterAddr := zone.MasterServer
-	if !strings.Contains(masterAddr, ":") {
+	if _, _, err := net.SplitHostPort(masterAddr); err != nil {
+		// No port found (or malformed), default to 53
 		masterAddr = net.JoinHostPort(masterAddr, "53")
 	}
 	s.Logger.Info("initiating zone refresh", "zone", zone.Name, "master", masterAddr)
