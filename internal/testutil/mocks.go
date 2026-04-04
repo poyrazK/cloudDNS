@@ -10,6 +10,7 @@ type MockRoutingEngine struct {
 	Announced     bool
 	WithdrawCount int
 	FailAnnounce  bool
+	FailWithdraw  bool
 }
 
 func (m *MockRoutingEngine) Start(_ context.Context, _, _ uint32, _ string) error { return nil }
@@ -21,6 +22,9 @@ func (m *MockRoutingEngine) Announce(_ context.Context, _ string) error {
 	return nil
 }
 func (m *MockRoutingEngine) Withdraw(_ context.Context, _ string) error {
+	if m.FailWithdraw {
+		return errors.New("withdraw failed")
+	}
 	m.Announced = false
 	m.WithdrawCount++
 	return nil
