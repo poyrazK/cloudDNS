@@ -7,6 +7,21 @@ import (
 
 var (
 	// QueriesTotal tracks total DNS queries processed
+	QueriesTotal *prometheus.CounterVec
+	// QueryDuration tracks query processing time
+	QueryDuration *prometheus.HistogramVec
+	// CacheOperations tracks L1/L2 cache hits and misses
+	CacheOperations *prometheus.CounterVec
+	// ActiveWorkers tracks number of busy UDP workers
+	ActiveWorkers prometheus.Gauge
+	// DBConnectionsActive tracks open database connections
+	DBConnectionsActive prometheus.Gauge
+	// BGPAnnounced indicates if the node is currently announcing routes via BGP
+	BGPAnnounced prometheus.Gauge
+)
+
+func init() {
+	// QueriesTotal tracks total DNS queries processed
 	QueriesTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "clouddns_queries_total",
 		Help: "Total number of DNS queries processed",
@@ -42,4 +57,4 @@ var (
 		Name: "clouddns_bgp_announced",
 		Help: "Binary indicator of BGP announcement status (1 = announcing, 0 = withdrawn)",
 	})
-)
+}
