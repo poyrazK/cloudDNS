@@ -2,6 +2,7 @@ package packet
 
 import (
 	"testing"
+	"github.com/poyrazK/cloudDNS/internal/core/domain"
 )
 
 func TestDNSQuestion_ReadWrite_Comprehensive(t *testing.T) {
@@ -87,5 +88,41 @@ func TestDNSRecord_AddEDE_Comprehensive(t *testing.T) {
 	r.AddEDE(EdeSignatureExpired, "expired")
 	if len(r.Options) != 1 || r.Options[0].Code != 15 {
 		t.Errorf("AddEDE failed")
+	}
+}
+
+func TestQueryType_String_Comprehensive(t *testing.T) {
+	tests := []struct {
+		typ QueryType
+		want string
+	}{
+		{A, "A"}, {NS, "NS"}, {CNAME, "CNAME"}, {SOA, "SOA"},
+		{MX, "MX"}, {TXT, "TXT"}, {AAAA, "AAAA"}, {SRV, "SRV"},
+		{DS, "DS"}, {RRSIG, "RRSIG"}, {NSEC, "NSEC"}, {DNSKEY, "DNSKEY"},
+		{NSEC3, "NSEC3"}, {NSEC3PARAM, "NSEC3PARAM"}, {AXFR, "AXFR"},
+		{IXFR, "IXFR"}, {ANY, "ANY"}, {OPT, "OPT"}, {TSIG, "TSIG"},
+		{PTR, "PTR"}, {CAA, "CAA"}, {QueryType(65535), "TYPE65535"},
+	}
+	for _, tt := range tests {
+		if got := tt.typ.String(); got != tt.want {
+			t.Errorf("QueryType(%d).String() = %q, want %q", tt.typ, got, tt.want)
+		}
+	}
+}
+
+func TestRecordTypeToQueryType_Comprehensive(t *testing.T) {
+	tests := []struct {
+		typ domain.RecordType
+		want QueryType
+	}{
+		{domain.TypeA, A}, {domain.TypeNS, NS}, {domain.TypeCNAME, CNAME},
+		{domain.TypeSOA, SOA}, {domain.TypeMX, MX}, {domain.TypeTXT, TXT},
+		{domain.TypeAAAA, AAAA}, {domain.TypePTR, PTR}, {domain.TypeSRV, SRV},
+		{domain.TypeCAA, CAA}, {domain.RecordType("UNKNOWN"), UNKNOWN},
+	}
+	for _, tt := range tests {
+		if got := RecordTypeToQueryType(tt.typ); got != tt.want {
+			t.Errorf("RecordTypeToQueryType(%q) = %v, want %v", tt.typ, got, tt.want)
+		}
 	}
 }

@@ -105,7 +105,10 @@ func TestSignRRSet_Simple(t *testing.T) {
 	rrset := []DNSRecord{
 		{Name: "test.com.", Type: A, IP: []byte{1, 2, 3, 4}, TTL: 300, Class: 1},
 	}
-	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("ecdsa.GenerateKey failed: %v", err)
+	}
 	
 	sig, err := SignRRSet(rrset, priv, "test.com.", 1234, 1600000000, 1700000000)
 	if err != nil {
