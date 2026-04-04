@@ -1017,15 +1017,24 @@ func TestServer_Run_NonBlockingOnTCPDoTFailure(t *testing.T) {
 
 	srv := NewServer(addr, nil, nil)
 	// Intentional minimal TLS config to exercise DoT path in tests only
-	srv.TLSConfig = &tls.Config{} 
+	srv.TLSConfig = &tls.Config{}
 
 	// Context that expires quickly
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
 	// Should not block indefinitely even if listeners fail to bind (e.g. port already in use)
-	err = srv.Run(ctx)
-	if err != nil {
-		t.Logf("Run returned: %v", err)
+	errChan := make(chan error, 1)
+	go func() {
+		errChan <- srv.Run(ctx)
+	}()
+
+	select {
+	case err := <-errChan:
+		if err != nil {
+			t.Logf("Run returned expected error: %v", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("srv.Run blocked for too long")
 	}
 }

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -82,5 +83,12 @@ func TestCacheInvalidate(t *testing.T) {
 	_, found := cache.Get("key1")
 	if found {
 		t.Error("key should be invalidated")
+	}
+}
+
+func TestCachePing(t *testing.T) {
+	cache := NewDNSCache()
+	if err := cache.Ping(context.Background()); err != nil {
+		t.Errorf("Ping failed: %v", err)
 	}
 }
