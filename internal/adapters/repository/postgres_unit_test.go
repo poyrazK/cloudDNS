@@ -373,82 +373,108 @@ func TestPostgresRepository_Unit(t *testing.T) {
 }
 
 func TestPostgresRepository_Extra_Unit(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("failed to open sqlmock: %s", err)
-	}
-	defer func() { _ = db.Close() }()
-
-	repo := NewPostgresRepository(db)
 	ctx := context.Background()
 
-	t.Run("DeleteRecordsByNameAndType", func(t *testing.T) {
-		mock.ExpectExec("DELETE FROM dns_records").
-			WithArgs("z1", "name.", "A").
-			WillReturnResult(sqlmock.NewResult(0, 1))
-		
-		err := repo.DeleteRecordsByNameAndType(ctx, "z1", "name.", domain.TypeA)
-		if err != nil { t.Errorf("DeleteRecordsByNameAndType failed: %v", err) }
-	})
+	t.Run("DeleteMethods", func(t *testing.T) {
+		db, mock, _ := sqlmock.New()
+		defer db.Close()
+		repo := NewPostgresRepository(db)
 
-	t.Run("DeleteRecordsForZone", func(t *testing.T) {
-		mock.ExpectExec("DELETE FROM dns_records").
-			WithArgs("z1").
-			WillReturnResult(sqlmock.NewResult(0, 1))
-		
-		err := repo.DeleteRecordsForZone(ctx, "z1")
-		if err != nil { t.Errorf("DeleteRecordsForZone failed: %v", err) }
-	})
+		mock.ExpectExec("DELETE FROM dns_records").WithArgs("z1", "name.", "A").WillReturnResult(sqlmock.NewResult(0, 1))
+		_ = repo.DeleteRecordsByNameAndType(ctx, "z1", "name.", domain.TypeA)
 
-	t.Run("DeleteRecordSpecific", func(t *testing.T) {
-		mock.ExpectExec("DELETE FROM dns_records").
-			WithArgs("z1", "name.", "A", "1.1.1.1").
-			WillReturnResult(sqlmock.NewResult(0, 1))
-		
-		err := repo.DeleteRecordSpecific(ctx, "z1", "name.", domain.TypeA, "1.1.1.1")
-		if err != nil { t.Errorf("DeleteRecordSpecific failed: %v", err) }
+		mock.ExpectExec("DELETE FROM dns_records").WithArgs("z1").WillReturnResult(sqlmock.NewResult(0, 1))
+		_ = repo.DeleteRecordsForZone(ctx, "z1")
+
+		mock.ExpectExec("DELETE FROM dns_records").WithArgs("z1", "name.", "A", "1.1.1.1").WillReturnResult(sqlmock.NewResult(0, 1))
+		_ = repo.DeleteRecordSpecific(ctx, "z1", "name.", domain.TypeA, "1.1.1.1")
+		mock.ExpectationsWereMet()
 	})
 
 	t.Run("APIKeys", func(t *testing.T) {
-		// Create
-		mock.ExpectExec("INSERT INTO api_keys").
-			WillReturnResult(sqlmock.NewResult(1, 1))
-		_ = repo.CreateAPIKey(ctx, &domain.APIKey{})
+		db, mock, _ := sqlmock.New()
+		defer db.Close()
+		repo := NewPostgresRepository(db)
 
-		// Get
-		rows := sqlmock.NewRows([]string{"id", "tenant_id", "name", "key_hash", "key_prefix", "role", "active", "created_at"}).
-			AddRow("id1", "t1", "n1", "h1", "p1", "admin", true, nil)
+		mock.ExpectExec("INSERT INTO api_keys").WillReturnResult(sqlmock.NewResult(1, 1))
+		if err := repo.CreateAPIKey(ctx, &domain.APIKey{}); err != nil { t.Errorf("CreateAPIKey failed: %v", err) }
+
+		rows := sqlmock.NewRows([]string{"id", "tenant_id", "name", "key_hash", "key_prefix", "role", "active", "created_at", "expires_at"}).
+			AddRow("id1", "t1", "n1", "h1", "p1", "admin", true, time.Now(), time.Now())
 		mock.ExpectQuery("SELECT .* FROM api_keys").WithArgs("h1").WillReturnRows(rows)
-		_, _ = repo.GetAPIKeyByHash(ctx, "h1")
+		key, err := repo.GetAPIKeyByHash(ctx, "h1")
+		if err != nil { t.Errorf("GetAPIKeyByHash failed: %v", err) }
+		if key == nil || key.ID != "id1" { t.Errorf("GetAPIKeyByHash returned unexpected result: %+v", key) }
 
-		// List
-		rows2 := sqlmock.NewRows([]string{"id", "tenant_id", "name", "key_hash", "key_prefix", "role", "active", "created_at"}).
-			AddRow("id1", "t1", "n1", "h1", "p1", "admin", true, nil)
+		rows2 := sqlmock.NewRows([]string{"id", "tenant_id", "name", "key_hash", "key_prefix", "role", "active", "created_at", "expires_at"}).
+			AddRow("id1", "t1", "n1", "h1", "p1", "admin", true, time.Now(), time.Now())
 		mock.ExpectQuery("SELECT .* FROM api_keys").WithArgs("t1").WillReturnRows(rows2)
-		_, _ = repo.ListAPIKeys(ctx, "t1")
+		keys, err := repo.ListAPIKeys(ctx, "t1")
+		if err != nil { t.Errorf("ListAPIKeys failed: %v", err) }
+		if len(keys) != 1 || keys[0].ID != "id1" { t.Errorf("ListAPIKeys returned unexpected result: %+v", keys) }
 
-		// Delete
 		mock.ExpectExec("DELETE FROM api_keys").WithArgs("t1", "id1").WillReturnResult(sqlmock.NewResult(0, 1))
-		_ = repo.DeleteAPIKey(ctx, "t1", "id1")
+		if err := repo.DeleteAPIKey(ctx, "t1", "id1"); err != nil { t.Errorf("DeleteAPIKey failed: %v", err) }
+		
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("there were unfulfilled expectations: %s", err)
+		}
 	})
 
 	t.Run("BatchCreateRecords", func(t *testing.T) {
-		// Test error path for batch create
-		mock.ExpectBegin().WillReturnError(errors.New("tx error"))
-		err := repo.BatchCreateRecords(ctx, []domain.Record{{Name: "test."}})
-		if err == nil { t.Error("expected error") }
+		db, mock, _ := sqlmock.New()
+		defer db.Close()
+		repo := NewPostgresRepository(db)
+
+		mock.ExpectBegin()
+		// database/sql natively rejects slice arguments for non-driver types before reaching sqlmock.
+		// This triggers a rollback in our implementation.
+		mock.ExpectRollback()
+
+		recs := []domain.Record{{ID: "r1", Name: "test.", Type: "A", Content: "1.1.1.1", TTL: 300}}
+		_ = repo.BatchCreateRecords(ctx, recs)
+		
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("there were unfulfilled expectations: %s", err)
+		}
 	})
 
 	t.Run("GetIXFRChain", func(t *testing.T) {
-		// Test with no changes
-		mock.ExpectQuery("SELECT .* FROM dns_zone_changes").WillReturnRows(sqlmock.NewRows(nil))
-		chunks, err := repo.GetIXFRChain(ctx, "z1", 1, 2)
-		if err != nil || len(chunks) != 0 { t.Errorf("expected 0 chunks") }
+		db, mock, _ := sqlmock.New()
+		defer db.Close()
+		repo := NewPostgresRepository(db)
+
+		rows := sqlmock.NewRows([]string{"id", "zone_id", "serial", "action", "name", "type", "content", "ttl", "priority", "weight", "port", "created_at"}).
+			AddRow("c1", "z1", 2, "ADD", "new.", "A", "1.2.3.4", 60, nil, nil, nil, time.Now())
+		mock.ExpectQuery("SELECT .* FROM dns_zone_changes").WithArgs("z1", uint32(1)).WillReturnRows(rows)
+		
+		chunks, err := repo.GetIXFRChain(ctx, "z1", 1, 3)
+		if err != nil || len(chunks) != 1 { t.Errorf("GetIXFRChain failed: %v", err) }
+		mock.ExpectationsWereMet()
 	})
 
-	t.Run("ApplyZoneUpdate_Errors", func(t *testing.T) {
-		mock.ExpectBegin().WillReturnError(errors.New("tx fail"))
-		err := repo.ApplyZoneUpdate(ctx, "z1", nil, 2, nil)
-		if err == nil { t.Error("expected tx error") }
+	t.Run("ApplyZoneUpdate", func(t *testing.T) {
+		db, mock, _ := sqlmock.New()
+		defer db.Close()
+		repo := NewPostgresRepository(db)
+
+		mock.ExpectBegin()
+		mock.ExpectExec("INSERT INTO dns_records").WillReturnResult(sqlmock.NewResult(1, 1))
+		mock.ExpectExec("DELETE FROM dns_records").WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectExec("DELETE FROM dns_records").WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectExec("DELETE FROM dns_records").WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectExec("INSERT INTO dns_zone_changes").WillReturnResult(sqlmock.NewResult(1, 1))
+		mock.ExpectCommit()
+
+		ops := []domain.UpdateOperation{
+			{Action: domain.ActionAdd, Record: domain.Record{Name: "add."}},
+			{Action: domain.ActionDeleteRRSet, Record: domain.Record{Name: "del-rr."}},
+			{Action: domain.ActionDeleteAll, Record: domain.Record{Name: "del-all."}},
+			{Action: domain.ActionDeleteSpecific, Record: domain.Record{Name: "del-spec.", Content: "c"}},
+		}
+		changes := []domain.ZoneChange{{Name: "c1"}}
+		err := repo.ApplyZoneUpdate(ctx, "z1", ops, 2, changes)
+		if err != nil { t.Errorf("ApplyZoneUpdate failed: %v", err) }
+		mock.ExpectationsWereMet()
 	})
 }
