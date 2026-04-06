@@ -72,3 +72,55 @@ func TestRunImport_Success(t *testing.T) {
 	}
 	mRepo.AssertExpectations(t)
 }
+
+func TestRunImport_GetZoneError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(". 3600 IN SOA ns. ns. 1 2 3 4 5"))
+	}))
+	defer ts.Close()
+
+	mRepo := new(testutil.MockRepo)
+	mRepo.On("GetZone", ".").Return((*domain.Zone)(nil), errors.New("db error"))
+
+	err := RunImport(context.Background(), mRepo, ts.URL)
+	if err == nil {
+		t.Error("Expected error from GetZone failure")
+	}
+}
+
+func TestRunImport_BatchCreateError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(". 3600 IN SOA ns. ns. 1 2 3 4 5\n. 3600 IN A 1.2.3.4"))
+	}))
+	defer ts.Close()
+
+	mRepo := new(testutil.MockRepo)
+	existingZone := &domain.Zone{ID: "z1", Name: "."}
+	mRepo.On("GetZone", ".").Return(existingZone, nil)
+	mRepo.On("BatchCreateRecords", mock.AnythingOfType("[]domain.Record")).Return(errors.New("batch error"))
+
+	err := RunImport(context.Background(), mRepo, ts.URL)
+	if err == nil {
+		t.Error("Expected error from BatchCreateRecords failure")
+	}
+}
+
+func TestRunImport_CreateZoneSuccess(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(". 3600 IN SOA ns. ns. 1 2 3 4 5"))
+	}))
+	defer ts.Close()
+
+	mRepo := new(testutil.MockRepo)
+	mRepo.On("GetZone", ".").Return((*domain.Zone)(nil), nil)
+	mRepo.On("CreateZone", mock.AnythingOfType("*domain.Zone")).Return(nil)
+	mRepo.On("BatchCreateRecords", mock.AnythingOfType("[]domain.Record")).Return(nil)
+
+	err := RunImport(context.Background(), mRepo, ts.URL)
+	if err != nil {
+		t.Errorf("Expected success, got error: %v", err)
+	}
+}

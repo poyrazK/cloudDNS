@@ -79,3 +79,18 @@ func TestMain_Coverage(t *testing.T) {
 	// Call Run instead of main to avoid os.Exit
 	_ = Run([]string{"iana-bench", "-n", "1", "-c", "1"})
 }
+
+func TestRun_ConfigErrors(t *testing.T) {
+	t.Run("InvalidFlags", func(t *testing.T) {
+		if err := Run([]string{"iana-bench", "-invalid-flag"}); err == nil {
+			t.Error("Expected error for invalid flag")
+		}
+	})
+
+	t.Run("InvalidDB", func(t *testing.T) {
+		t.Setenv("DATABASE_URL", "invalid-url")
+		if err := Run([]string{"iana-bench"}); err == nil {
+			t.Error("Expected error for invalid database URL")
+		}
+	})
+}

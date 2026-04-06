@@ -43,6 +43,7 @@ func TestListKeys(t *testing.T) {
 	mockRepo := new(testutil.MockRepo)
 	keys := []domain.APIKey{
 		{ID: "id1", Name: "name1", Role: domain.RoleAdmin, KeyPrefix: "p1", Active: true},
+		{ID: "id2", Name: "name2", Role: domain.RoleReader, KeyPrefix: "p2", Active: false},
 	}
 	mockRepo.On("ListAPIKeys", "tenant1").Return(keys, nil)
 
@@ -53,8 +54,8 @@ func TestListKeys(t *testing.T) {
 		t.Fatalf("listKeys failed: %v", err)
 	}
 
-	if !bytes.Contains(out.Bytes(), []byte("id1")) {
-		t.Errorf("expected key ID in output")
+	if !bytes.Contains(out.Bytes(), []byte("id1")) || !bytes.Contains(out.Bytes(), []byte("revoked")) {
+		t.Errorf("expected key ID and revoked status in output")
 	}
 	mockRepo.AssertExpectations(t)
 }
@@ -169,5 +170,22 @@ func TestRunCommand_ExtraErrors(t *testing.T) {
 	err = run([]string{"apikey", "revoke"}, io.Discard, mockRepo)
 	if err == nil || !strings.Contains(err.Error(), "ID is required") {
 		t.Errorf("Expected missing ID error, got: %v", err)
+	}
+}
+
+func TestGenerateKey_RoleWriter(t *testing.T) {
+	mockRepo := new(testutil.MockRepo)
+	mockRepo.On("CreateAPIKey", mock.AnythingOfType("*domain.APIKey")).Return(nil)
+
+	err := run([]string{"apikey", "create", "-role", "writer"}, io.Discard, mockRepo)
+	if err != nil {
+		t.Errorf("Expected nil error for writer role, got: %v", err)
+	}
+}
+
+func TestRevokeKey_InternalEmptyID(t *testing.T) {
+	err := revokeKey(nil, "t1", "", io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "ID is required") {
+		t.Errorf("Expected ID is required error, got: %v", err)
 	}
 }
