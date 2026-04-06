@@ -122,6 +122,10 @@ func TestSeedDatabase(t *testing.T) {
 	if err != nil {
 		t.Errorf("seedDatabase failed: %v", err)
 	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet sqlmock expectations: %v", err)
+	}
 }
 
 func TestRunRealisticWorker_ConnError(_ *testing.T) {

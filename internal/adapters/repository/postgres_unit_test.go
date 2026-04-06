@@ -388,7 +388,10 @@ func TestPostgresRepository_Extra_Unit(t *testing.T) {
 
 		mock.ExpectExec("DELETE FROM dns_records").WithArgs("z1", "name.", "A", "1.1.1.1").WillReturnResult(sqlmock.NewResult(0, 1))
 		_ = repo.DeleteRecordSpecific(ctx, "z1", "name.", domain.TypeA, "1.1.1.1")
-		mock.ExpectationsWereMet()
+		
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("there were unfulfilled expectations: %s", err)
+		}
 	})
 
 	t.Run("APIKeys", func(t *testing.T) {
@@ -450,7 +453,10 @@ func TestPostgresRepository_Extra_Unit(t *testing.T) {
 		
 		chunks, err := repo.GetIXFRChain(ctx, "z1", 1, 3)
 		if err != nil || len(chunks) != 1 { t.Errorf("GetIXFRChain failed: %v", err) }
-		mock.ExpectationsWereMet()
+		
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("there were unfulfilled expectations: %s", err)
+		}
 	})
 
 	t.Run("ApplyZoneUpdate", func(t *testing.T) {
@@ -475,6 +481,9 @@ func TestPostgresRepository_Extra_Unit(t *testing.T) {
 		changes := []domain.ZoneChange{{Name: "c1"}}
 		err := repo.ApplyZoneUpdate(ctx, "z1", ops, 2, changes)
 		if err != nil { t.Errorf("ApplyZoneUpdate failed: %v", err) }
-		mock.ExpectationsWereMet()
+		
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("there were unfulfilled expectations: %s", err)
+		}
 	})
 }
