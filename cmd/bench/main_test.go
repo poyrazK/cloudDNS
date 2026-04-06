@@ -199,3 +199,38 @@ func TestRunScaleTest_Direct(t *testing.T) {
 	defer func() { _ = recover() }()
 	runScaleTest(1, 1)
 }
+
+func TestRun_Comprehensive(t *testing.T) {
+	// Test the dispatcher with various modes
+	
+	// 1. Benchmark mode (default)
+	t.Run("BenchmarkMode", func(t *testing.T) {
+		// Mock server for the benchmark to talk to
+		addr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:0")
+		conn, _ := net.ListenUDP("udp", addr)
+		defer conn.Close()
+		serverAddr := conn.LocalAddr().String()
+
+		args := []string{"-server", serverAddr, "-queries", "1", "-workers", "1"}
+		if err := Run(args); err != nil {
+			t.Errorf("Run (benchmark) failed: %v", err)
+		}
+	})
+
+	// 2. Help/Invalid flag
+	t.Run("InvalidFlag", func(t *testing.T) {
+		args := []string{"bench", "-invalid-flag"}
+		if err := Run(args); err == nil {
+			t.Error("Expected error for invalid flag")
+		}
+	})
+
+	// 3. Seed mode (short circuit)
+	t.Run("SeedMode", func(t *testing.T) {
+		t.Setenv("DATABASE_URL", "none")
+		args := []string{"-mode", "seed", "-records", "1"}
+		if err := Run(args); err != nil {
+			t.Errorf("Run (seed) failed: %v", err)
+		}
+	})
+}

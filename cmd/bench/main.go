@@ -48,14 +48,24 @@ type Result struct {
 var tlds = []string{"com", "net", "org", "io", "dev", "ai", "cloud", "gov", "edu", "tr", "com.tr", "me", "info"}
 
 func main() {
-	mode := flag.String("mode", "bench", "Mode: bench, scale-test, or seed")
-	target := flag.String("server", "127.0.0.1:10053", "DNS server to test")
-	concurrency := flag.Int("c", 10, "Number of concurrent workers")
-	count := flag.Int("n", 1000, "Total number of queries to send")
-	rangeLimit := flag.Int("range", 10000000, "Number of records in the database (default 10M)")
-	zipfS := flag.Float64("zipf-s", 1.1, "Zipf distribution constant (s > 1). Higher means more 'Hot' domains.")
-	zipfV := flag.Float64("zipf-v", 100, "Zipf distribution constant (v >= 1).")
-	flag.Parse()
+	if err := Run(os.Args); err != nil {
+		fmt.Printf("benchmark failed: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func Run(args []string) error {
+	fs := flag.NewFlagSet("bench", flag.ContinueOnError)
+	mode := fs.String("mode", "bench", "Mode: bench, scale-test, or seed")
+	target := fs.String("server", "127.0.0.1:10053", "DNS server to test")
+	concurrency := fs.Int("c", 10, "Number of concurrent workers")
+	count := fs.Int("n", 1000, "Total number of queries to send")
+	rangeLimit := fs.Int("range", 10000000, "Number of records in the database (default 10M)")
+	zipfS := fs.Float64("zipf-s", 1.1, "Zipf distribution constant (s > 1). Higher means more 'Hot' domains.")
+	zipfV := fs.Float64("zipf-v", 100, "Zipf distribution constant (v >= 1).")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
 
 	switch *mode {
 	case "seed":
@@ -65,6 +75,7 @@ func main() {
 	default:
 		runBenchmark(*target, *count, *concurrency, uint64(*rangeLimit), *zipfS, *zipfV) // #nosec G115
 	}
+	return nil
 }
 
 func runBenchmark(target string, count int, concurrency int, rangeLimit uint64, s float64, v float64) {
