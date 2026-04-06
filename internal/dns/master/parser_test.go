@@ -226,3 +226,27 @@ func TestMasterParser_LargeRecord(t *testing.T) {
 		t.Errorf("Large record parsing failed")
 	}
 }
+
+func TestCompareNamesCanonically(t *testing.T) {
+	tests := []struct {
+		a, b string
+		want int
+	}{
+		{"example.com.", "example.com.", 0},
+		{"a.example.com.", "b.example.com.", -1},
+		{"b.example.com.", "a.example.com.", 1},
+		{"example.com.", "a.example.com.", -1},
+		{"a.example.com.", "example.com.", 1},
+		{"", "", 0},
+		{"", "test.", -1},
+		{"test.", "", 1},
+		{"a.b.c.", "z.b.c.", -1},
+		{"z.b.c.", "a.b.c.", 1},
+	}
+
+	for _, tt := range tests {
+		if got := CompareNamesCanonically(tt.a, tt.b); got != tt.want {
+			t.Errorf("CompareNamesCanonically(%q, %q) = %d, want %d", tt.a, tt.b, got, tt.want)
+		}
+	}
+}
