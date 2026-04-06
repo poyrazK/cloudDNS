@@ -100,7 +100,11 @@ func run(ctx context.Context) error {
 
 		// Periodic DB metrics update
 		go func() {
-			ticker := time.NewTicker(15 * time.Second)
+			interval := 15 * time.Second
+			if os.Getenv("TEST_MODE") == "true" {
+				interval = 10 * time.Millisecond
+			}
+			ticker := time.NewTicker(interval)
 			defer ticker.Stop()
 			for {
 				select {
