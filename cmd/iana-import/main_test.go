@@ -50,6 +50,7 @@ func TestRunImport_EmptyDB(t *testing.T) {
 	if err == nil {
 		t.Error("Expected error from CreateZone failure")
 	}
+	mRepo.AssertExpectations(t)
 }
 
 func TestRunImport_Success(t *testing.T) {
@@ -87,6 +88,7 @@ func TestRunImport_GetZoneError(t *testing.T) {
 	if err == nil {
 		t.Error("Expected error from GetZone failure")
 	}
+	mRepo.AssertExpectations(t)
 }
 
 func TestRunImport_BatchCreateError(t *testing.T) {
@@ -105,6 +107,7 @@ func TestRunImport_BatchCreateError(t *testing.T) {
 	if err == nil {
 		t.Error("Expected error from BatchCreateRecords failure")
 	}
+	mRepo.AssertExpectations(t)
 }
 
 func TestRunImport_CreateZoneSuccess(t *testing.T) {
@@ -123,4 +126,5 @@ func TestRunImport_CreateZoneSuccess(t *testing.T) {
 	if err != nil {
 		t.Errorf("Expected success, got error: %v", err)
 	}
+	mRepo.AssertExpectations(t)
 }
