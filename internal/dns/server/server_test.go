@@ -840,9 +840,11 @@ func TestServer_Run_ContextCancel(t *testing.T) {
 
 type errorPacketConn struct {
 	net.PacketConn
+	WriteAttempts int
 }
 
 func (e *errorPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
+	e.WriteAttempts++
 	return 0, errors.New("write error")
 }
 func (e *errorPacketConn) Close() error { return nil }
@@ -856,14 +858,22 @@ func TestHandleUDPConnection_Error(t *testing.T) {
 	pc := &errorPacketConn{}
 	addr := &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}
 	
+	// 1. Invalid payload - should not even attempt WriteTo
 	srv.handleUDPConnection(pc, addr, []byte("invalid"))
+	if pc.WriteAttempts > 0 {
+		t.Errorf("Expected 0 WriteAttempts for invalid payload, got %d", pc.WriteAttempts)
+	}
 	
+	// 2. Valid query - should attempt WriteTo (and fail)
 	q := packet.NewDNSPacket()
 	q.Questions = append(q.Questions, packet.DNSQuestion{Name: "test.com.", QType: packet.A})
 	buf := packet.NewBytePacketBuffer()
 	_ = q.Write(buf)
 	
 	srv.handleUDPConnection(pc, addr, buf.Buf[:buf.Position()])
+	if pc.WriteAttempts == 0 {
+		t.Error("Expected at least 1 WriteAttempt for valid query payload")
+	}
 }
 
 type mockResponseWriter struct {
