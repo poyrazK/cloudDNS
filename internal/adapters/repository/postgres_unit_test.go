@@ -370,6 +370,10 @@ func TestPostgresRepository_Unit(t *testing.T) {
 			t.Errorf("Expected Begin error in CreateZoneWithRecords")
 		}
 	})
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("there were unfulfilled expectations: %s", err)
+	}
 }
 
 func TestPostgresRepository_Extra_Unit(t *testing.T) {
