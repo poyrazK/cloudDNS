@@ -34,6 +34,9 @@ func main() {
 }
 
 func run(ctx context.Context) error {
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	// 1. Initialize Structured Logging
 	logLevel := slog.LevelInfo
 	if lvl := os.Getenv("LOG_LEVEL"); lvl != "" {
@@ -108,7 +111,7 @@ func run(ctx context.Context) error {
 			defer ticker.Stop()
 			for {
 				select {
-				case <-ctx.Done():
+				case <-runCtx.Done():
 					return
 				case <-ticker.C:
 					stats := db.Stats()
