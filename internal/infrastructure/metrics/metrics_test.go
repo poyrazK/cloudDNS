@@ -5,23 +5,23 @@ import (
 )
 
 func TestMetricsDeclarations(t *testing.T) {
-	// Simply touch the variables to ensure they are initialized and counted in coverage
-	if QueriesTotal == nil {
-		t.Error("QueriesTotal is nil")
+	tests := []struct {
+		name   string
+		metric interface{}
+	}{
+		{"QueriesTotal", QueriesTotal},
+		{"QueryDuration", QueryDuration},
+		{"CacheOperations", CacheOperations},
+		{"ActiveWorkers", ActiveWorkers},
+		{"DBConnectionsActive", DBConnectionsActive},
+		{"BGPAnnounced", BGPAnnounced},
 	}
-	if QueryDuration == nil {
-		t.Error("QueryDuration is nil")
-	}
-	if CacheOperations == nil {
-		t.Error("CacheOperations is nil")
-	}
-	if ActiveWorkers == nil {
-		t.Error("ActiveWorkers is nil")
-	}
-	if DBConnectionsActive == nil {
-		t.Error("DBConnectionsActive is nil")
-	}
-	if BGPAnnounced == nil {
-		t.Error("BGPAnnounced is nil")
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.metric == nil {
+				t.Errorf("%s is nil", tt.name)
+			}
+		})
 	}
 }
