@@ -213,4 +213,9 @@ func TestAnycastManager_StartWithdrawError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Trigger shutdown immediately
 	mgr.Start(ctx)
+
+	// Verify that withdraw was attempted despite FailWithdraw being true
+	if routing.WithdrawAttempts == 0 {
+		t.Errorf("Expected withdraw attempt during shutdown")
+	}
 }
