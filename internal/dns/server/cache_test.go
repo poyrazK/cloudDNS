@@ -1,6 +1,8 @@
 package server
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -82,5 +84,23 @@ func TestCacheInvalidate(t *testing.T) {
 	_, found := cache.Get("key1")
 	if found {
 		t.Error("key should be invalidated")
+	}
+}
+
+func TestCachePing(t *testing.T) {
+	cache := NewDNSCache()
+	
+	// 1. Success case
+	if err := cache.Ping(context.Background()); err != nil {
+		t.Errorf("Ping failed: %v", err)
+	}
+
+	// 2. Canceled context case
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := cache.Ping(ctx); err == nil {
+		t.Error("Expected error for canceled context, got nil")
+	} else if !errors.Is(err, context.Canceled) {
+		t.Errorf("Expected context.Canceled, got: %v", err)
 	}
 }

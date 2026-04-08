@@ -88,8 +88,10 @@ func (c *DNSCache) Invalidate(key string) {
 	delete(shard.items, key)
 }
 
-// Flush removes all items from all shards in the cache.
-func (c *DNSCache) Ping(_ context.Context) error { return nil }
+// Ping verifies the cache is responsive by checking the context.
+func (c *DNSCache) Ping(ctx context.Context) error {
+	return ctx.Err()
+}
 
 func (c *DNSCache) Flush() {
 	for i := 0; i < shardCount; i++ {

@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"errors"
 	"net"
 	"net/http"
@@ -825,6 +826,64 @@ func TestServer_RunError(t *testing.T) {
 	}
 }
 
+func TestServer_Run_ContextCancel(t *testing.T) {
+	srv := NewServer("127.0.0.1:0", nil, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	errChan := make(chan error, 1)
+	go func() {
+		errChan <- srv.Run(ctx)
+	}()
+
+	select {
+	case err := <-errChan:
+		if err != nil {
+			t.Errorf("Expected nil error from Run on cancel, got %v", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("srv.Run blocked for too long after context cancellation")
+	}
+}
+
+type errorPacketConn struct {
+	net.PacketConn
+	WriteAttempts int
+}
+
+func (e *errorPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
+	e.WriteAttempts++
+	return 0, errors.New("write error")
+}
+func (e *errorPacketConn) Close() error { return nil }
+
+func TestHandleUDPConnection_Error(t *testing.T) {
+	repo := &mockServerRepo{}
+	srv := NewServer("127.0.0.1:0", repo, nil)
+	
+	// This test ensures that handleUDPConnection does not panic when encountering 
+	// malformed data or write errors.
+	pc := &errorPacketConn{}
+	addr := &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}
+	
+	// 1. Invalid payload - should not even attempt WriteTo
+	srv.handleUDPConnection(pc, addr, []byte("invalid"))
+	if pc.WriteAttempts > 0 {
+		t.Errorf("Expected 0 WriteAttempts for invalid payload, got %d", pc.WriteAttempts)
+	}
+	
+	// 2. Valid query - should attempt WriteTo (and fail)
+	q := packet.NewDNSPacket()
+	q.Questions = append(q.Questions, packet.DNSQuestion{Name: "test.com.", QType: packet.A})
+	buf := packet.NewBytePacketBuffer()
+	_ = q.Write(buf)
+	
+	srv.handleUDPConnection(pc, addr, buf.Buf[:buf.Position()])
+	if pc.WriteAttempts == 0 {
+		t.Error("Expected at least 1 WriteAttempt for valid query payload")
+	}
+}
+
 type mockResponseWriter struct {
 	http.ResponseWriter
 	code   int
@@ -936,4 +995,66 @@ func TestHandleUpdate_IncrementSerialError(t *testing.T) {
 		}
 		return nil
 	})
+}
+
+func TestHandleAXFR_NoSOA(t *testing.T) {
+	repo := &mockServerRepo{
+		zones: []domain.Zone{{ID: "z1", Name: "nosoa.test."}},
+		// No records
+	}
+	srv := NewServer(":0", repo, nil)
+
+	req := packet.NewDNSPacket()
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "nosoa.test.", QType: packet.AXFR})
+
+	conn := &mockTCPConn{}
+	srv.handleAXFR(conn, req)
+
+	if len(conn.captured) != 1 {
+		t.Fatalf("Expected 1 error packet, got %d", len(conn.captured))
+	}
+	
+	res := packet.NewDNSPacket()
+	pb := packet.NewBytePacketBuffer()
+	pb.Load(conn.captured[0])
+	_ = res.FromBuffer(pb)
+	if res.Header.ResCode != packet.RcodeServFail {
+		t.Errorf("Expected SERVFAIL (2), got %d", res.Header.ResCode)
+	}
+}
+
+func TestServer_Run_NonBlockingOnTCPDoTFailure(t *testing.T) {
+	t.Setenv("DOH_PORT", "10443")
+	// Bind to a port first to force TCP error in Run
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	addr := l.Addr().String()
+
+	srv := NewServer(addr, nil, nil)
+	// Intentional minimal TLS config to exercise DoT path in tests only
+	srv.TLSConfig = &tls.Config{
+		MinVersion: tls.VersionTLS12,
+	}
+
+	// Context that expires quickly
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	// Should not block indefinitely even if listeners fail to bind (e.g. port already in use)
+	errChan := make(chan error, 1)
+	go func() {
+		errChan <- srv.Run(ctx)
+	}()
+
+	select {
+	case err := <-errChan:
+		if err != nil {
+			t.Logf("Run returned expected error: %v", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("srv.Run blocked for too long")
+	}
 }

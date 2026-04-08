@@ -2,9 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"net"
-	"os"
 	"testing"
 	"time"
 
@@ -123,6 +123,10 @@ func TestSeedDatabase(t *testing.T) {
 	if err != nil {
 		t.Errorf("seedDatabase failed: %v", err)
 	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet sqlmock expectations: %v", err)
+	}
 }
 
 func TestRunRealisticWorker_ConnError(_ *testing.T) {
@@ -131,15 +135,24 @@ func TestRunRealisticWorker_ConnError(_ *testing.T) {
 	runRealisticWorker("127.0.0.1:1", 1, 0, 100, 1.1, 100, stats)
 }
 
-func TestRunSeed_InvalidDB(_ *testing.T) {
+func TestRunSeed_InvalidDB(t *testing.T) {
 	// Should not panic, just print error
 	runSeed(10) 
 }
 
+func TestRunSeed_Errors(t *testing.T) {
+	t.Run("ConnectionError", func(t *testing.T) {
+		t.Setenv("DATABASE_URL", "invalid-url")
+		// Should print error and return
+		runSeed(1)
+	})
+}
+
 func TestMain_Bench(_ *testing.T) {
 	// Reset flags for testing
-	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
-	os.Args = []string{"cmd", "-n", "1", "-c", "1"}
+	oldCommandLine := flag.CommandLine
+	defer func() { flag.CommandLine = oldCommandLine }()
+	flag.CommandLine = flag.NewFlagSet("bench", flag.ExitOnError)
 	
 	// Start a mock UDP server to avoid hang
 	addr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:10053")
@@ -153,33 +166,130 @@ func TestMain_Bench(_ *testing.T) {
 		}()
 	}
 
-	main()
+	// We call run instead of main to avoid os.Exit
+	runBenchmark("127.0.0.1:10053", 1, 1, 1, 1.1, 1)
 }
 
 func TestMain_ScaleMode(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping scale test in short mode")
+		t.Skip("skipping heavy scale test in short mode")
 	}
-	// We can't easily run full scale test without docker, but we can trigger the flag path
-	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
-	os.Args = []string{"cmd", "-mode", "scale-test", "-n", "1", "-c", "1"}
-	
-	// This will likely fail quickly if docker is missing, but it hits the dispatch logic
-	defer func() {
-		if r := recover(); r != nil {
-			// Expected failure in test environment
-			_ = r 
-		}
-	}()
-	// Note: main calls runScaleTest which eventually calls testcontainers.
-	// Since we want coverage, we just need to hit the branch.
-	main()
 }
 
 func TestMain_SeedMode(t *testing.T) {
-	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
-	os.Args = []string{"cmd", "-mode", "seed", "-range", "1"}
+	if testing.Short() {
+		t.Skip("skipping heavy seed test in short mode")
+	}
+}
+
+func TestRunAndCaptureScale_Parsing(t *testing.T) {
+	// Deterministic parser test
+	sampleOutput := "Throughput:       500.00 queries/sec\nP50 (Median):     1.2ms\nP99:              5.5ms\nReliability:      100.00%"
 	
+	tp := extractRegex(sampleOutput, `Throughput:\s+([0-9.]+)`)
+	if tp != "500.00" {
+		t.Errorf("Expected 500.00, got %s", tp)
+	}
+	
+	p50 := extractRegex(sampleOutput, `P50 \(Median\):\s+([0-9a-z.]+)`)
+	if p50 != "1.2ms" {
+		t.Errorf("Expected 1.2ms, got %s", p50)
+	}
+}
+
+func TestRunSeed_Direct(t *testing.T) {
+	t.Setenv("DATABASE_URL", "invalid")
+	runSeed(1)
+}
+
+func TestRunScaleTest_Direct(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping heavy scale test in short mode")
+	}
+	// Just hit the entry point
 	defer func() { _ = recover() }()
-	main()
+	runScaleTest(1, 1)
+}
+
+func TestRunScaleTest_Errors(t *testing.T) {
+	// These tests use environment variables to trigger early returns in runScaleTest
+	
+	t.Run("InvalidDB", func(t *testing.T) {
+		t.Setenv("DATABASE_URL", "invalid-url")
+		// Should print error and return
+		runScaleTest(1, 1)
+	})
+}
+
+func TestRun_Comprehensive(t *testing.T) {
+	// Test the dispatcher with various modes
+	
+	// 1. Benchmark mode (default)
+	t.Run("BenchmarkMode", func(t *testing.T) {
+		// Mock server for the benchmark to talk to
+		addr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:0")
+		conn, _ := net.ListenUDP("udp", addr)
+		defer conn.Close()
+		serverAddr := conn.LocalAddr().String()
+
+		args := []string{"bench", "-server", serverAddr, "-n", "1", "-c", "1"}
+		if err := Run(args); err != nil {
+			t.Errorf("Run (benchmark) failed: %v", err)
+		}
+	})
+
+	// 2. Help/Invalid flag
+	t.Run("InvalidFlag", func(t *testing.T) {
+		args := []string{"bench", "-invalid-flag"}
+		if err := Run(args); err == nil {
+			t.Error("Expected error for invalid flag")
+		}
+	})
+
+	// 3. Seed mode (short circuit)
+	t.Run("SeedMode", func(t *testing.T) {
+		t.Setenv("DATABASE_URL", "none")
+		args := []string{"bench", "-mode", "seed", "-range", "1"}
+		if err := Run(args); err != nil {
+			t.Errorf("Run (seed) failed: %v", err)
+		}
+	})
+
+	// 4. Scale test mode (short circuit)
+	t.Run("ScaleTestMode", func(t *testing.T) {
+		t.Setenv("DATABASE_URL", "none")
+		args := []string{"bench", "-mode", "scale-test", "-n", "1"}
+		if err := Run(args); err != nil {
+			t.Errorf("Run (scale-test) failed: %v", err)
+		}
+	})
+}
+
+func TestSeedDatabase_Errors(t *testing.T) {
+	t.Run("ZoneInsertError", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		if err != nil { t.Fatalf("failed to open sqlmock: %s", err) }
+		defer db.Close()
+
+		mock.ExpectExec("INSERT INTO dns_zones").WillReturnError(errors.New("insert fail"))
+		err = seedDatabase(context.Background(), db, 1)
+		if err == nil { t.Error("expected error") }
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("unmet expectations: %v", err)
+		}
+	})
+
+	t.Run("RecordInsertError", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		if err != nil { t.Fatalf("failed to open sqlmock: %s", err) }
+		defer db.Close()
+
+		mock.ExpectExec("INSERT INTO dns_zones").WillReturnResult(sqlmock.NewResult(1, 1))
+		mock.ExpectExec("INSERT INTO dns_records").WillReturnError(errors.New("insert fail"))
+		err = seedDatabase(context.Background(), db, 1)
+		if err == nil { t.Error("expected error") }
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("unmet expectations: %v", err)
+		}
+	})
 }

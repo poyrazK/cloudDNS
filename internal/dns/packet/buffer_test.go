@@ -92,3 +92,39 @@ func TestBuffer_ReadErrors(t *testing.T) {
 		t.Errorf("ReadRange out of bounds should fail")
 	}
 }
+
+func TestWriteNameUncompressed(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	name := "www.test.com."
+	err := buf.WriteNameUncompressed(name)
+	if err != nil {
+		t.Fatalf("WriteNameUncompressed failed: %v", err)
+	}
+
+	if err := buf.Seek(0); err != nil {
+		t.Fatalf("Seek failed: %v", err)
+	}
+	got, err := buf.ReadName()
+	if err != nil {
+		t.Fatalf("ReadName failed: %v", err)
+	}
+	if got != name {
+		t.Errorf("Expected %s, got %s", name, got)
+	}
+
+	// Test too long label
+	buf.Reset()
+	longLabel := "thislabeliswaytoolongandexceedsthemaximumlengthofsixtythreecharacters"
+	err = buf.WriteNameUncompressed(longLabel + ".com.")
+	if err == nil {
+		t.Errorf("Expected error for too long label")
+	}
+}
+
+func TestSeekError(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	err := buf.Seek(MaxPacketSize + 1)
+	if err == nil {
+		t.Errorf("Expected error seeking past MaxPacketSize")
+	}
+}

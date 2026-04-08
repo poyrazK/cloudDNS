@@ -194,4 +194,28 @@ func TestAnycastManager_CoverageBoost(t *testing.T) {
 	if !mgr2.isAnnounced.Load() {
 		t.Errorf("Empty health map should be considered healthy")
 	}
+
+	// 4. Withdraw error path
+	routing.FailWithdraw = true
+	mgr.isAnnounced.Store(true)
+	mgr.withdraw(ctx)
+	if !mgr.isAnnounced.Load() {
+		t.Errorf("Should remain announced if withdrawal fails")
+	}
+}
+
+func TestAnycastManager_StartWithdrawError(t *testing.T) {
+	dnsSvc := &mockAnycastDNSService{healthy: true}
+	routing := &testutil.MockRoutingEngine{FailWithdraw: true}
+	vipMgr := &testutil.MockVIPManager{}
+	mgr := NewAnycastManager(dnsSvc, routing, vipMgr, "1.1.1.1", "lo", nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Trigger shutdown immediately
+	mgr.Start(ctx)
+
+	// Verify that withdraw was attempted despite FailWithdraw being true
+	if routing.WithdrawAttempts == 0 {
+		t.Errorf("Expected withdraw attempt during shutdown")
+	}
 }

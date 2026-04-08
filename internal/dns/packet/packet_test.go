@@ -1118,3 +1118,27 @@ func TestSRVRecordSerialization(t *testing.T) {
 		t.Errorf("SRV mismatch: %+v", parsed)
 	}
 }
+
+func TestDNSRecord_GetSetOption(t *testing.T) {
+	r := &DNSRecord{Type: OPT}
+	
+	// 1. Set new option
+	r.SetOption(EdnsOptionNSID, []byte("node-1"))
+	val, ok := r.GetOption(EdnsOptionNSID)
+	if !ok || string(val) != "node-1" {
+		t.Errorf("SetOption/GetOption failed for new option")
+	}
+	
+	// 2. Update existing option
+	r.SetOption(EdnsOptionNSID, []byte("node-2"))
+	val, ok = r.GetOption(EdnsOptionNSID)
+	if !ok || string(val) != "node-2" {
+		t.Errorf("SetOption failed to update existing option")
+	}
+	
+	// 3. Get non-existent option
+	_, ok = r.GetOption(EdnsOptionCookie)
+	if ok {
+		t.Errorf("GetOption returned true for non-existent option")
+	}
+}

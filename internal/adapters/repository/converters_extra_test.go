@@ -110,3 +110,54 @@ func TestDNSSECConverters_Errors(t *testing.T) {
 		t.Errorf("Expected error for non-numeric fields in DNSKEY")
 	}
 }
+
+func TestConvertPacketRecordToDomain_Unsupported(t *testing.T) {
+	pRec := packet.DNSRecord{
+		Name: "test.",
+		Type: 999, // Unsupported
+	}
+	_, err := ConvertPacketRecordToDomain(pRec, "z1")
+	if err == nil {
+		t.Error("Expected error for unsupported type")
+	}
+}
+
+func TestConvertDomainToPacketRecord_Unsupported(t *testing.T) {
+	dRec := domain.Record{
+		Name:    "test.",
+		Type:    "INVALID",
+		Content: "data",
+	}
+	_, err := ConvertDomainToPacketRecord(dRec)
+	if err == nil {
+		t.Error("Expected error for invalid record type")
+	}
+}
+
+func TestConvertDomainToPacketRecord_A_EdgeCase(t *testing.T) {
+	// Should now return an error for non-parseable IPs
+	dRec := domain.Record{
+		Name:    "test.",
+		Type:    domain.TypeA,
+		Content: "not-an-ip",
+	}
+	_, err := ConvertDomainToPacketRecord(dRec)
+	if err == nil {
+		t.Error("Expected error for invalid IP content, got nil")
+	}
+}
+
+func TestConvertDomainToPacketRecord_CAA(t *testing.T) {
+	dRec := domain.Record{
+		Name:    "example.com.",
+		Type:    domain.TypeCAA,
+		Content: "0 issue \"letsencrypt.org\"",
+	}
+	pRec, err := ConvertDomainToPacketRecord(dRec)
+	if err != nil {
+		t.Fatalf("CAA conversion failed: %v", err)
+	}
+	if pRec.CAAFlag != 0 || pRec.CAATag != "issue" || pRec.CAAValue != "letsencrypt.org" {
+		t.Errorf("CAA result mismatch: %+v", pRec)
+	}
+}

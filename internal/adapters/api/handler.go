@@ -191,18 +191,9 @@ func (h *APIHandler) CreateRecord(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if record.Type == domain.TypeSRV {
-		if err := domain.ValidateSRVFields(record.Priority, record.Weight, record.Port, record.Content); err != nil {
-			http.Error(w, "Invalid SRV record: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-	}
-
-	if record.Type == domain.TypeCAA {
-		if err := domain.ValidateCAAContent(record.Content); err != nil {
-			http.Error(w, "Invalid CAA record: "+err.Error(), http.StatusBadRequest)
-			return
-		}
+	if err := domain.ValidateRecord(&record); err != nil {
+		http.Error(w, "Invalid record: "+err.Error(), http.StatusBadRequest)
+		return
 	}
 
 	record.ZoneID = zoneID

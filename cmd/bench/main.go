@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -21,8 +22,6 @@ import (
 
 	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/poyrazK/cloudDNS/internal/adapters/repository"
 	"github.com/poyrazK/cloudDNS/internal/dns/packet"
@@ -48,14 +47,32 @@ type Result struct {
 var tlds = []string{"com", "net", "org", "io", "dev", "ai", "cloud", "gov", "edu", "tr", "com.tr", "me", "info"}
 
 func main() {
-	mode := flag.String("mode", "bench", "Mode: bench, scale-test, or seed")
-	target := flag.String("server", "127.0.0.1:10053", "DNS server to test")
-	concurrency := flag.Int("c", 10, "Number of concurrent workers")
-	count := flag.Int("n", 1000, "Total number of queries to send")
-	rangeLimit := flag.Int("range", 10000000, "Number of records in the database (default 10M)")
-	zipfS := flag.Float64("zipf-s", 1.1, "Zipf distribution constant (s > 1). Higher means more 'Hot' domains.")
-	zipfV := flag.Float64("zipf-v", 100, "Zipf distribution constant (v >= 1).")
-	flag.Parse()
+	if err := Run(os.Args); err != nil {
+		fmt.Printf("benchmark failed: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func Run(args []string) error {
+	fs := flag.NewFlagSet("bench", flag.ContinueOnError)
+	mode := fs.String("mode", "bench", "Mode: bench, scale-test, or seed")
+	target := fs.String("server", "127.0.0.1:10053", "DNS server to test")
+	concurrency := fs.Int("c", 10, "Number of concurrent workers")
+	count := fs.Int("n", 1000, "Total number of queries to send")
+	rangeLimit := fs.Int("range", 10000000, "Number of records in the database (default 10M)")
+	zipfS := fs.Float64("zipf-s", 1.1, "Zipf distribution constant (s > 1). Higher means more 'Hot' domains.")
+	zipfV := fs.Float64("zipf-v", 100, "Zipf distribution constant (v >= 1).")
+	
+	var parseArgs []string
+	if len(args) > 1 {
+		parseArgs = args[1:]
+	} else {
+		parseArgs = []string{}
+	}
+	
+	if err := fs.Parse(parseArgs); err != nil {
+		return err
+	}
 
 	switch *mode {
 	case "seed":
@@ -65,6 +82,7 @@ func main() {
 	default:
 		runBenchmark(*target, *count, *concurrency, uint64(*rangeLimit), *zipfS, *zipfV) // #nosec G115
 	}
+	return nil
 }
 
 func runBenchmark(target string, count int, concurrency int, rangeLimit uint64, s float64, v float64) {
@@ -215,7 +233,9 @@ func seedDatabase(ctx context.Context, db *sql.DB, total int) error {
 	
 	fmt.Println("Preparing record environment...")
 	
-	_, _ = db.ExecContext(ctx, "INSERT INTO dns_zones (id, tenant_id, name) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING", zoneID, "bench", "root")
+	if _, err := db.ExecContext(ctx, "INSERT INTO dns_zones (id, tenant_id, name) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING", zoneID, "bench", "root"); err != nil {
+		return fmt.Errorf("failed to ensure root zone: %w", err)
+	}
 
 	batchSize := 5000 
 	fmt.Printf("Seeding %d Realistic Records...\n", total)
@@ -252,43 +272,41 @@ func seedDatabase(ctx context.Context, db *sql.DB, total int) error {
 func runScaleTest(count int, concurrency int) {
 	ctx := context.Background()
 
-	// 1. Infrastructure
-	fmt.Println("Starting Internet-Scale Infrastructure...")
-	pgContainer, _ := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: testcontainers.ContainerRequest{
-			Image: "postgres:16-alpine", ExposedPorts: []string{"5432/tcp"},
-			Env: map[string]string{"POSTGRES_PASSWORD": "password", "POSTGRES_DB": "clouddns"},
-			WaitingFor: wait.ForListeningPort("5432/tcp"),
-		},
-		Started: true,
-	})
-	_ = pgContainer.Terminate(ctx)
+	// Use external dependencies instead of starting containers
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		dbURL = "postgres://postgres:password@localhost:5432/clouddns?sslmode=disable"
+	}
+	redisURL := os.Getenv("REDIS_URL")
+	if redisURL == "" {
+		redisURL = "localhost:6379"
+	}
 
-	redisContainer, _ := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: testcontainers.ContainerRequest{
-			Image: "redis:7-alpine", ExposedPorts: []string{"6379/tcp"},
-			WaitingFor: wait.ForListeningPort("6379/tcp"),
-		},
-		Started: true,
-	})
-	_ = redisContainer.Terminate(ctx)
-
-	pgHost, _ := pgContainer.Host(ctx)
-	pgPort, _ := pgContainer.MappedPort(ctx, "5432")
-	redisHost, _ := redisContainer.Host(ctx)
-	redisPort, _ := redisContainer.MappedPort(ctx, "6379")
+	fmt.Printf("Starting Scale Test (using %s and %s)...\n", dbURL, redisURL)
 
 	// 2. Heavy Seeding
-	db, _ := sql.Open("pgx", fmt.Sprintf("postgres://postgres:password@%s:%s/clouddns?sslmode=disable", pgHost, pgPort.Port()))
-	schema, err := os.ReadFile("internal/adapters/repository/schema.sql")
-	if err != nil {
-		fmt.Printf("Failed to read schema file: %v\n", err)
+	db, errDB := sql.Open("pgx", dbURL)
+	if errDB != nil {
+		fmt.Printf("Failed to connect to database: %v\n", errDB)
 		return
 	}
-	_, _ = db.ExecContext(ctx, string(schema))
+	defer func() { _ = db.Close() }()
+
+	schema, errRead := os.ReadFile("internal/adapters/repository/schema.sql")
+	if errRead != nil {
+		fmt.Printf("Failed to read schema file: %v\n", errRead)
+		return
+	}
+	if _, errSchema := db.ExecContext(ctx, string(schema)); errSchema != nil {
+		fmt.Printf("Failed to load schema: %v\n", errSchema)
+		return
+	}
 
 	zoneID := uuid.New()
-	_, _ = db.ExecContext(ctx, "INSERT INTO dns_zones (id, tenant_id, name) VALUES ($1, $2, $3)", zoneID, "bench", "root")
+	if _, errZone := db.ExecContext(ctx, "INSERT INTO dns_zones (id, tenant_id, name) VALUES ($1, $2, $3)", zoneID, "bench", "root"); errZone != nil {
+		fmt.Printf("Failed to create root zone: %v\n", errZone)
+		return
+	}
 	
 	totalRecords := 1000000
 	batchSize := 10000
@@ -297,14 +315,19 @@ func runScaleTest(count int, concurrency int) {
 		args := []interface{}{}
 		for j := 0; j < batchSize; j++ {
 			idx := i + j
+			if idx >= totalRecords { break }
 			name := fmt.Sprintf("host-%d.%s", idx, tlds[idx%len(tlds)])
 			off := len(args)
 			vals = append(vals, fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d)", off+1, off+2, off+3, off+4, off+5, off+6))
 			args = append(args, uuid.New(), zoneID, name, "A", "1.2.3.4", 3600)
 		}
+		if len(vals) == 0 { break }
 		// #nosec G201
 		query := fmt.Sprintf("INSERT INTO dns_records (id, zone_id, name, type, content, ttl) VALUES %s", strings.Join(vals, ","))
-		_, _ = db.ExecContext(ctx, query, args...)
+		if _, errExec := db.ExecContext(ctx, query, args...); errExec != nil {
+			fmt.Printf("Batch insertion failed at record %d: %v\n", i, errExec)
+			return
+		}
 	}
 
 	// 3. Server
@@ -312,12 +335,14 @@ func runScaleTest(count int, concurrency int) {
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	repo := repository.NewPostgresRepository(db)
 	srv := server.NewServer(addr, repo, logger)
-	srv.Redis = server.NewRedisCache(fmt.Sprintf("%s:%s", redisHost, redisPort.Port()), "", 0)
+	srv.Redis = server.NewRedisCache(redisURL, "", 0)
 	
 	srvCtx, cancelSrv := context.WithCancel(ctx)
 	defer cancelSrv()
 	go func() {
-		_ = srv.Run(srvCtx)
+		if err := srv.Run(srvCtx); err != nil && !errors.Is(err, context.Canceled) {
+			logger.Error("server failed during scale test", "error", err)
+		}
 	}()
 
 	time.Sleep(1 * time.Second)

@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"net"
 	"regexp"
 	"strconv"
 	"strings"
@@ -37,6 +38,56 @@ func ValidateZoneName(name string) error {
 			return fmt.Errorf("label '%s' contains invalid characters or format", label)
 		}
 	}
+	return nil
+}
+
+// ValidateRecord performs general validation for a DNS record.
+func ValidateRecord(r *Record) error {
+	if r.Name == "" {
+		return fmt.Errorf("record name cannot be empty")
+	}
+	if !strings.HasSuffix(r.Name, ".") {
+		return fmt.Errorf("record name must be a FQDN (end with a dot)")
+	}
+	if r.Content == "" {
+		return fmt.Errorf("record content cannot be empty")
+	}
+
+	switch r.Type {
+	case TypeA:
+		parsed := net.ParseIP(r.Content)
+		if parsed == nil || parsed.To4() == nil {
+			return fmt.Errorf("invalid IPv4 address: %s", r.Content)
+		}
+	case TypeAAAA:
+		parsed := net.ParseIP(r.Content)
+		if parsed == nil || parsed.To16() == nil || parsed.To4() != nil {
+			return fmt.Errorf("invalid IPv6 address: %s", r.Content)
+		}
+	case TypeCNAME, TypeNS, TypePTR:
+		if !strings.HasSuffix(r.Content, ".") {
+			return fmt.Errorf("%s target must be a FQDN (end with a dot)", r.Type)
+		}
+	case TypeSRV:
+		return ValidateSRVFields(r.Priority, r.Weight, r.Port, r.Content)
+	case TypeCAA:
+		return ValidateCAAContent(r.Content)
+	case TypeMX:
+		if r.Priority == nil {
+			return fmt.Errorf("MX record requires a priority field")
+		}
+		if *r.Priority < 0 || *r.Priority > 65535 {
+			return fmt.Errorf("invalid MX priority: %d (must be 0-65535)", *r.Priority)
+		}
+		if !strings.HasSuffix(r.Content, ".") {
+			return fmt.Errorf("MX target must be a FQDN (end with a dot)")
+		}
+	case TypeTXT, TypeSOA:
+		return nil
+	default:
+		return fmt.Errorf("unsupported record type: %s", r.Type)
+	}
+
 	return nil
 }
 

@@ -894,9 +894,15 @@ func ConvertDomainToPacketRecord(rec domain.Record) (packet.DNSRecord, error) {
 	case domain.TypeA:
 		pRec.Type = packet.A
 		pRec.IP = net.ParseIP(rec.Content)
+		if pRec.IP == nil {
+			return pRec, fmt.Errorf("invalid IPv4 address: %s", rec.Content)
+		}
 	case domain.TypeAAAA:
 		pRec.Type = packet.AAAA
 		pRec.IP = net.ParseIP(rec.Content)
+		if pRec.IP == nil {
+			return pRec, fmt.Errorf("invalid IPv6 address: %s", rec.Content)
+		}
 	case domain.TypeCNAME:
 		pRec.Type = packet.CNAME
 		pRec.Host = rec.Content

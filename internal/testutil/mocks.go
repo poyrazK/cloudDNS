@@ -7,13 +7,17 @@ import (
 
 // MockRoutingEngine implements ports.RoutingEngine for testing.
 type MockRoutingEngine struct {
-	Announced     bool
-	WithdrawCount int
-	FailAnnounce  bool
+	Announced        bool
+	WithdrawCount    int
+	AnnounceAttempts int
+	WithdrawAttempts int
+	FailAnnounce     bool
+	FailWithdraw     bool
 }
 
 func (m *MockRoutingEngine) Start(_ context.Context, _, _ uint32, _ string) error { return nil }
 func (m *MockRoutingEngine) Announce(_ context.Context, _ string) error {
+	m.AnnounceAttempts++
 	if m.FailAnnounce {
 		return errors.New("announce failed")
 	}
@@ -21,6 +25,10 @@ func (m *MockRoutingEngine) Announce(_ context.Context, _ string) error {
 	return nil
 }
 func (m *MockRoutingEngine) Withdraw(_ context.Context, _ string) error {
+	m.WithdrawAttempts++
+	if m.FailWithdraw {
+		return errors.New("withdraw failed")
+	}
 	m.Announced = false
 	m.WithdrawCount++
 	return nil

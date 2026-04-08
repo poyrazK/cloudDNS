@@ -87,3 +87,26 @@ func TestSystemVIPAdapter_OSLogic(t *testing.T) {
 		}
 	}
 }
+
+func TestRealExecutor_Run(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping TestRealExecutor_Run on Windows: uses Unix-only commands")
+	}
+	executor := &realExecutor{}
+	ctx := context.Background()
+	
+	// Test successful command
+	out, err := executor.Run(ctx, "echo", "hello")
+	if err != nil {
+		t.Errorf("Run failed: %v", err)
+	}
+	if string(out) != "hello\n" {
+		t.Errorf("expected hello, got %q", string(out))
+	}
+	
+	// Test error command
+	_, err = executor.Run(ctx, "false")
+	if err == nil {
+		t.Error("expected error for false command")
+	}
+}
