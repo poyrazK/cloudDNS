@@ -38,6 +38,10 @@ func Run(args []string) error {
 		dbURL = "postgres://postgres:postgres@localhost:5432/clouddns?sslmode=disable"
 	}
 
+	if dbURL == "none" {
+		return nil
+	}
+
 	db, err := sql.Open("pgx", dbURL)
 	if err != nil {
 		return fmt.Errorf("failed to connect to database: %w", err)

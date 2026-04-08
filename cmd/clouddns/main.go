@@ -127,7 +127,7 @@ func run(ctx context.Context) error {
 	if redisURL != "" {
 		redisCache = server.NewRedisCache(redisURL, "", 0)
 		// Verify connectivity
-		pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		pingCtx, cancel := context.WithTimeout(runCtx, 2*time.Second)
 		if err := redisCache.Ping(pingCtx); err != nil {
 			cancel()
 			return fmt.Errorf("failed to connect to redis at %s: %w", redisURL, err)
@@ -171,11 +171,11 @@ func run(ctx context.Context) error {
 
 		errChan := make(chan error, 1)
 		go func() {
-			if err := routingAdapter.Start(ctx, localASN, peerASN, peerIP); err != nil {
+			if err := routingAdapter.Start(runCtx, localASN, peerASN, peerIP); err != nil {
 				errChan <- fmt.Errorf("failed to start BGP speaker: %w", err)
 				return
 			}
-			anycastMgr.Start(ctx)
+			anycastMgr.Start(runCtx)
 		}()
 
 		// Provide a short grace period to immediately catch bind/startup errors
@@ -196,7 +196,7 @@ func run(ctx context.Context) error {
 	dnsServer.Redis = redisCache
 
 	go func() {
-		if err := dnsServer.Run(ctx); err != nil {
+		if err := dnsServer.Run(runCtx); err != nil {
 			logger.Error("DNS server failed", "error", err)
 		}
 	}()
@@ -218,7 +218,7 @@ func run(ctx context.Context) error {
 	// 5. Start Health Monitor (Smart Engine)
 	if repo != nil {
 		healthMonitor := services.NewHealthMonitor(repo, logger)
-		go healthMonitor.Start(ctx, 30*time.Second)
+		go healthMonitor.Start(runCtx, 30*time.Second)
 	}
 
 	logger.Info("cloudDNS services starting",
@@ -257,7 +257,7 @@ func run(ctx context.Context) error {
 	select {
 	case err := <-apiErrChan:
 		return err
-	case <-ctx.Done():
+	case <-runCtx.Done():
 		logger.Info("shutting down services...")
 	}
 

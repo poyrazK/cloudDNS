@@ -232,7 +232,7 @@ func TestRun_Comprehensive(t *testing.T) {
 		defer conn.Close()
 		serverAddr := conn.LocalAddr().String()
 
-		args := []string{"-server", serverAddr, "-queries", "1", "-workers", "1"}
+		args := []string{"bench", "-server", serverAddr, "-n", "1", "-c", "1"}
 		if err := Run(args); err != nil {
 			t.Errorf("Run (benchmark) failed: %v", err)
 		}
@@ -249,7 +249,7 @@ func TestRun_Comprehensive(t *testing.T) {
 	// 3. Seed mode (short circuit)
 	t.Run("SeedMode", func(t *testing.T) {
 		t.Setenv("DATABASE_URL", "none")
-		args := []string{"-mode", "seed", "-records", "1"}
+		args := []string{"bench", "-mode", "seed", "-range", "1"}
 		if err := Run(args); err != nil {
 			t.Errorf("Run (seed) failed: %v", err)
 		}
@@ -258,7 +258,7 @@ func TestRun_Comprehensive(t *testing.T) {
 	// 4. Scale test mode (short circuit)
 	t.Run("ScaleTestMode", func(t *testing.T) {
 		t.Setenv("DATABASE_URL", "none")
-		args := []string{"-mode", "scale-test", "-n", "1"}
+		args := []string{"bench", "-mode", "scale-test", "-n", "1"}
 		if err := Run(args); err != nil {
 			t.Errorf("Run (scale-test) failed: %v", err)
 		}
@@ -266,20 +266,30 @@ func TestRun_Comprehensive(t *testing.T) {
 }
 
 func TestSeedDatabase_Errors(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil { t.Fatalf("failed to open sqlmock: %s", err) }
-	defer func() { _ = db.Close() }()
-
 	t.Run("ZoneInsertError", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		if err != nil { t.Fatalf("failed to open sqlmock: %s", err) }
+		defer db.Close()
+
 		mock.ExpectExec("INSERT INTO dns_zones").WillReturnError(errors.New("insert fail"))
-		err := seedDatabase(context.Background(), db, 1)
+		err = seedDatabase(context.Background(), db, 1)
 		if err == nil { t.Error("expected error") }
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("unmet expectations: %v", err)
+		}
 	})
 
 	t.Run("RecordInsertError", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		if err != nil { t.Fatalf("failed to open sqlmock: %s", err) }
+		defer db.Close()
+
 		mock.ExpectExec("INSERT INTO dns_zones").WillReturnResult(sqlmock.NewResult(1, 1))
 		mock.ExpectExec("INSERT INTO dns_records").WillReturnError(errors.New("insert fail"))
-		err := seedDatabase(context.Background(), db, 1)
+		err = seedDatabase(context.Background(), db, 1)
 		if err == nil { t.Error("expected error") }
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("unmet expectations: %v", err)
+		}
 	})
 }

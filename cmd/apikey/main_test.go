@@ -147,7 +147,9 @@ func TestMain_Coverage(t *testing.T) {
 	// This dummy test just ensures we consider the entry point logic.
 	args := []string{"apikey", "list"}
 	mockRepo.On("ListAPIKeys", "default-tenant").Return([]domain.APIKey{}, nil).Once()
-	_ = run(args, out, mockRepo)
+	if err := run(args, out, mockRepo); err != nil {
+		t.Errorf("run failed: %v", err)
+	}
 	mockRepo.AssertExpectations(t)
 }
 
@@ -181,6 +183,7 @@ func TestGenerateKey_RoleWriter(t *testing.T) {
 	if err != nil {
 		t.Errorf("Expected nil error for writer role, got: %v", err)
 	}
+	mockRepo.AssertExpectations(t)
 }
 
 func TestRevokeKey_InternalEmptyID(t *testing.T) {

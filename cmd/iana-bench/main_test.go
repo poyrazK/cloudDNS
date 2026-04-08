@@ -9,12 +9,13 @@ import (
 )
 
 func TestRunBench_Errors(t *testing.T) {
-	db, mock, _ := sqlmock.New()
+	db, mock, err := sqlmock.New()
+	if err != nil { t.Fatalf("sqlmock.New failed: %v", err) }
 	defer func() { _ = db.Close() }()
 
 	// 1. Fetch names error
 	mock.ExpectQuery("SELECT .* FROM dns_records").WillReturnError(sqlmock.ErrCancelled)
-	err := RunBench(db, "127.0.0.1:10053", 10, 1)
+	err = RunBench(db, "127.0.0.1:10053", 10, 1)
 	if err == nil {
 		t.Error("Expected error when fetch names fails")
 	}
@@ -32,7 +33,8 @@ func TestRunBench_Errors(t *testing.T) {
 }
 
 func TestRunBench_Success(t *testing.T) {
-	db, mock, _ := sqlmock.New()
+	db, mock, err := sqlmock.New()
+	if err != nil { t.Fatalf("sqlmock.New failed: %v", err) }
 	defer func() { _ = db.Close() }()
 
 	rows := sqlmock.NewRows([]string{"name"}).
@@ -41,8 +43,10 @@ func TestRunBench_Success(t *testing.T) {
 	mock.ExpectQuery("SELECT .* FROM dns_records").WillReturnRows(rows)
 
 	// Start mock UDP server
-	addr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:0")
-	conn, _ := net.ListenUDP("udp", addr)
+	addr, err := net.ResolveUDPAddr("udp", "127.0.0.1:0")
+	if err != nil { t.Fatalf("net.ResolveUDPAddr failed: %v", err) }
+	conn, err := net.ListenUDP("udp", addr)
+	if err != nil { t.Fatalf("net.ListenUDP failed: %v", err) }
 	defer conn.Close()
 	
 	go func() {
@@ -65,7 +69,7 @@ func TestRunBench_Success(t *testing.T) {
 		}
 	}()
 
-	err := RunBench(db, conn.LocalAddr().String(), 5, 2)
+	err = RunBench(db, conn.LocalAddr().String(), 5, 2)
 	if err != nil {
 		t.Errorf("RunBench failed: %v", err)
 	}
@@ -76,8 +80,11 @@ func TestRunBench_Success(t *testing.T) {
 }
 
 func TestMain_Coverage(t *testing.T) {
+	t.Setenv("DATABASE_URL", "none")
 	// Call Run instead of main to avoid os.Exit
-	_ = Run([]string{"iana-bench", "-n", "1", "-c", "1"})
+	if err := Run([]string{"iana-bench", "-n", "1", "-c", "1"}); err != nil {
+		t.Errorf("Run failed: %v", err)
+	}
 }
 
 func TestRun_ConfigErrors(t *testing.T) {

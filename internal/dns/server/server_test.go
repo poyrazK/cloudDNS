@@ -831,10 +831,18 @@ func TestServer_Run_ContextCancel(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	// Run should block on context then return nil
-	err := srv.Run(ctx)
-	if err != nil {
-		t.Errorf("Expected nil error from Run on cancel, got %v", err)
+	errChan := make(chan error, 1)
+	go func() {
+		errChan <- srv.Run(ctx)
+	}()
+
+	select {
+	case err := <-errChan:
+		if err != nil {
+			t.Errorf("Expected nil error from Run on cancel, got %v", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("srv.Run blocked for too long after context cancellation")
 	}
 }
 
@@ -1027,7 +1035,9 @@ func TestServer_Run_NonBlockingOnTCPDoTFailure(t *testing.T) {
 
 	srv := NewServer(addr, nil, nil)
 	// Intentional minimal TLS config to exercise DoT path in tests only
-	srv.TLSConfig = &tls.Config{}
+	srv.TLSConfig = &tls.Config{
+		MinVersion: tls.VersionTLS12,
+	}
 
 	// Context that expires quickly
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)

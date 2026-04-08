@@ -26,7 +26,7 @@ func main() {
 	}
 }
 
-func Run(args []string) error {
+func Run(_args []string) error {
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		dbURL = "postgres://postgres:postgres@localhost:5432/clouddns?sslmode=disable"
@@ -41,6 +41,10 @@ func Run(args []string) error {
 			log.Printf("failed to close database: %v", errClose)
 		}
 	}()
+
+	if errPing := db.Ping(); errPing != nil {
+		return fmt.Errorf("failed to validate database connection: %w", errPing)
+	}
 
 	repo := repository.NewPostgresRepository(db)
 	return RunImport(context.Background(), repo, rootZoneURL)

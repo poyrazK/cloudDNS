@@ -123,7 +123,9 @@ func TestRunGSLB(t *testing.T) {
 func TestMain_Coverage(t *testing.T) {
 	t.Setenv("DATABASE_URL", "none")
 	t.Setenv("API_ADDR", "test-exit")
-	_ = run(context.Background())
+	if err := run(context.Background()); err != nil {
+		t.Errorf("run failed: %v", err)
+	}
 }
 
 func TestRun_ConfigPaths(t *testing.T) {
@@ -208,7 +210,9 @@ func TestRun_ConfigPaths(t *testing.T) {
 		t.Setenv("DATABASE_URL", "none")
 		
 		err := run(context.Background())
-		if err != nil {
+		if err == nil {
+			t.Error("Expected error for BGP startup failure, got nil")
+		} else {
 			t.Logf("Got expected BGP startup failure: %v", err)
 		}
 	})
