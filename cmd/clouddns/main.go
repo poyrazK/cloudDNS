@@ -77,6 +77,14 @@ func run(ctx context.Context) error {
 		dbURL = "postgres://postgres:postgres@localhost:5432/clouddns?sslmode=disable"
 	}
 
+	// Allow overriding host for Cloud SQL Proxy sidecar
+	if hostOverride := os.Getenv("DATABASE_HOST"); hostOverride != "" && dbURL != "" && dbURL != "none" {
+		if u, err := url.Parse(dbURL); err == nil {
+			u.Host = hostOverride
+			dbURL = u.String()
+		}
+	}
+
 	if dbURL != "none" {
 		parsedURL, err := url.Parse(dbURL)
 		if err == nil {

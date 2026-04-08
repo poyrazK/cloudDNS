@@ -201,6 +201,15 @@ func TestRun_ConfigPaths(t *testing.T) {
 		_ = run(context.Background())
 	})
 
+	t.Run("DatabaseHostOverride", func(t *testing.T) {
+		t.Setenv("DATABASE_URL", "postgres://user:pass@remote:5432/db")
+		t.Setenv("DATABASE_HOST", "127.0.0.1")
+		t.Setenv("API_ADDR", "test-exit")
+		if err := run(context.Background()); err != nil {
+			t.Errorf("run failed with host override: %v", err)
+		}
+	})
+
 	t.Run("BGPStartupFailure", func(t *testing.T) {
 		t.Setenv("ANYCAST_ENABLED", "true")
 		t.Setenv("ANYCAST_VIP", "1.1.1.1")

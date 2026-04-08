@@ -50,6 +50,8 @@ spec:
             secretKeyRef:
               name: clouddns-secrets
               key: database-url
+        - name: DATABASE_HOST
+          value: "127.0.0.1"
         - name: REDIS_URL
           valueFrom:
             configMapKeyRef:
@@ -73,7 +75,7 @@ spec:
           initialDelaySeconds: 30
           failureThreshold: 60
           periodSeconds: 10
-          timeoutSeconds: 10
+          timeoutSeconds: 30
         livenessProbe:
           httpGet:
             path: /health
@@ -81,7 +83,7 @@ spec:
             scheme: HTTP
           initialDelaySeconds: 10
           periodSeconds: 30
-          timeoutSeconds: 5
+          timeoutSeconds: 15
         readinessProbe:
           httpGet:
             path: /health
@@ -89,8 +91,25 @@ spec:
             scheme: HTTP
           initialDelaySeconds: 5
           periodSeconds: 15
-          timeoutSeconds: 5
-        resources: {}
+          timeoutSeconds: 15
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
+      - name: cloud-sql-proxy
+        image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.14.2
+        args:
+          - "--port=5432"
+          - "thecloud-clouddns:europe-west3:clouddns-db"
+        securityContext:
+          runAsNonRoot: true
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
 ---
 # DNS over UDP (port 53) — needs a separate LB service for GKE
 apiVersion: v1
