@@ -94,7 +94,7 @@ spec:
           timeoutSeconds: 15
         resources:
           requests:
-            cpu: "10m"
+            cpu: "1m"
             memory: "64Mi"
           limits:
             cpu: "500m"
@@ -109,7 +109,7 @@ spec:
         resources:
           requests:
             memory: "32Mi"
-            cpu: "10m"
+            cpu: "1m"
 ---
 # DNS over UDP (port 53) — needs a separate LB service for GKE
 apiVersion: v1
@@ -140,7 +140,7 @@ spec:
   - name: dns-tcp
     port: 53
     targetPort: 1053
-    protocol: TCP
+    protocol: UDP
   - name: api
     port: 8080
     targetPort: 8080
