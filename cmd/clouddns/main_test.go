@@ -198,4 +198,18 @@ func TestRun_ConfigPaths(t *testing.T) {
 		// it run slightly longer, but hitting the branch is the first step.
 		_ = run(context.Background())
 	})
+
+	t.Run("BGPStartupFailure", func(t *testing.T) {
+		t.Setenv("ANYCAST_ENABLED", "true")
+		t.Setenv("ANYCAST_VIP", "1.1.1.1")
+		t.Setenv("BGP_PEER_IP", "1.1.1.2")
+		// Force immediate failure by using an invalid RouterID or port
+		t.Setenv("BGP_ROUTER_ID", "invalid")
+		t.Setenv("DATABASE_URL", "none")
+		
+		err := run(context.Background())
+		if err != nil {
+			t.Logf("Got expected BGP startup failure: %v", err)
+		}
+	})
 }

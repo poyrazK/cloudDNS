@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"net"
 	"testing"
@@ -134,9 +135,17 @@ func TestRunRealisticWorker_ConnError(_ *testing.T) {
 	runRealisticWorker("127.0.0.1:1", 1, 0, 100, 1.1, 100, stats)
 }
 
-func TestRunSeed_InvalidDB(_ *testing.T) {
+func TestRunSeed_InvalidDB(t *testing.T) {
 	// Should not panic, just print error
 	runSeed(10) 
+}
+
+func TestRunSeed_Errors(t *testing.T) {
+	t.Run("ConnectionError", func(t *testing.T) {
+		t.Setenv("DATABASE_URL", "invalid-url")
+		// Should print error and return
+		runSeed(1)
+	})
 }
 
 func TestMain_Bench(_ *testing.T) {
@@ -165,8 +174,6 @@ func TestMain_ScaleMode(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping heavy scale test in short mode")
 	}
-	// Note: main calls runScaleTest which eventually calls testcontainers.
-	// We just need to hit the branch if we were running full tests.
 }
 
 func TestMain_SeedMode(t *testing.T) {
@@ -204,6 +211,16 @@ func TestRunScaleTest_Direct(t *testing.T) {
 	runScaleTest(1, 1)
 }
 
+func TestRunScaleTest_Errors(t *testing.T) {
+	// These tests use environment variables to trigger early returns in runScaleTest
+	
+	t.Run("InvalidDB", func(t *testing.T) {
+		t.Setenv("DATABASE_URL", "invalid-url")
+		// Should print error and return
+		runScaleTest(1, 1)
+	})
+}
+
 func TestRun_Comprehensive(t *testing.T) {
 	// Test the dispatcher with various modes
 	
@@ -236,5 +253,33 @@ func TestRun_Comprehensive(t *testing.T) {
 		if err := Run(args); err != nil {
 			t.Errorf("Run (seed) failed: %v", err)
 		}
+	})
+
+	// 4. Scale test mode (short circuit)
+	t.Run("ScaleTestMode", func(t *testing.T) {
+		t.Setenv("DATABASE_URL", "none")
+		args := []string{"-mode", "scale-test", "-n", "1"}
+		if err := Run(args); err != nil {
+			t.Errorf("Run (scale-test) failed: %v", err)
+		}
+	})
+}
+
+func TestSeedDatabase_Errors(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil { t.Fatalf("failed to open sqlmock: %s", err) }
+	defer func() { _ = db.Close() }()
+
+	t.Run("ZoneInsertError", func(t *testing.T) {
+		mock.ExpectExec("INSERT INTO dns_zones").WillReturnError(errors.New("insert fail"))
+		err := seedDatabase(context.Background(), db, 1)
+		if err == nil { t.Error("expected error") }
+	})
+
+	t.Run("RecordInsertError", func(t *testing.T) {
+		mock.ExpectExec("INSERT INTO dns_zones").WillReturnResult(sqlmock.NewResult(1, 1))
+		mock.ExpectExec("INSERT INTO dns_records").WillReturnError(errors.New("insert fail"))
+		err := seedDatabase(context.Background(), db, 1)
+		if err == nil { t.Error("expected error") }
 	})
 }
