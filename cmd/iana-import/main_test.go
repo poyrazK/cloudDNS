@@ -128,3 +128,11 @@ func TestRunImport_CreateZoneSuccess(t *testing.T) {
 	}
 	mRepo.AssertExpectations(t)
 }
+
+func TestRun_ConfigError(t *testing.T) {
+	// 1. Invalid DB URL
+	t.Setenv("DATABASE_URL", "invalid-url")
+	if err := Run(nil); err == nil {
+		t.Error("Expected error for invalid DB URL")
+	}
+}

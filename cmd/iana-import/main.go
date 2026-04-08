@@ -21,6 +21,12 @@ import (
 const rootZoneURL = "https://www.internic.net/domain/root.zone"
 
 func main() {
+	if err := Run(os.Args); err != nil {
+		log.Fatalf("iana-import failed: %v", err)
+	}
+}
+
+func Run(args []string) error {
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		dbURL = "postgres://postgres:postgres@localhost:5432/clouddns?sslmode=disable"
@@ -28,7 +34,7 @@ func main() {
 
 	db, err := sql.Open("pgx", dbURL)
 	if err != nil {
-		log.Fatalf("failed to connect to database: %v", err)
+		return fmt.Errorf("failed to connect to database: %w", err)
 	}
 	defer func() {
 		if errClose := db.Close(); errClose != nil {
@@ -37,9 +43,7 @@ func main() {
 	}()
 
 	repo := repository.NewPostgresRepository(db)
-	if err := RunImport(context.Background(), repo, rootZoneURL); err != nil {
-		log.Fatalf("import failed: %v", err)
-	}
+	return RunImport(context.Background(), repo, rootZoneURL)
 }
 
 func RunImport(ctx context.Context, repo ports.DNSRepository, url string) error {

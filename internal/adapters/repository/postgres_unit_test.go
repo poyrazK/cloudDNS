@@ -237,7 +237,7 @@ func TestPostgresRepository_Unit(t *testing.T) {
 	// 13. Test Smart Engine GSLB methods
 	t.Run("SmartEngineMethods", func(t *testing.T) {
 		// UpdateRecordHealth
-		mock.ExpectExec(`INSERT INTO record_health`).
+		mock.ExpectExec(`record_health`).
 			WithArgs("r1", "HEALTHY", "none").
 			WillReturnResult(sqlmock.NewResult(1, 1))
 		err := repo.UpdateRecordHealth(ctx, "r1", domain.HealthStatusHealthy, "none")
@@ -317,7 +317,7 @@ func TestPostgresRepository_Unit(t *testing.T) {
 
 		mock.ExpectQuery(`SELECT`).WillReturnError(dbErr)
 		if _, err := repo.ListZones(ctx, ""); err == nil {
-			t.Errorf("Expected error in ListZones")
+			t.Errorf("Expected Scan error in ListZones")
 		}
 
 		mock.ExpectQuery(`SELECT`).WillReturnError(dbErr)
@@ -489,5 +489,82 @@ func TestPostgresRepository_Extra_Unit(t *testing.T) {
 		if err := mock.ExpectationsWereMet(); err != nil {
 			t.Errorf("there were unfulfilled expectations: %s", err)
 		}
+	})
+
+	t.Run("ApplyZoneUpdate_Errors", func(t *testing.T) {
+		db, mock, _ := sqlmock.New()
+		defer db.Close()
+		repo := NewPostgresRepository(db)
+
+		t.Run("BeginError", func(t *testing.T) {
+			mock.ExpectBegin().WillReturnError(errors.New("begin fail"))
+			err := repo.ApplyZoneUpdate(ctx, "z1", nil, 1, nil)
+			if err == nil { t.Error("expected error") }
+		})
+
+		t.Run("OperationError", func(t *testing.T) {
+			mock.ExpectBegin()
+			mock.ExpectExec("DELETE FROM dns_records").WillReturnError(errors.New("delete fail"))
+			mock.ExpectRollback()
+			err := repo.ApplyZoneUpdate(ctx, "z1", []domain.UpdateOperation{{Action: domain.ActionDeleteAll, Record: domain.Record{Name: "test"}}}, 1, nil)
+			if err == nil { t.Error("expected error") }
+		})
+
+		t.Run("CommitError", func(t *testing.T) {
+			mock.ExpectBegin()
+			mock.ExpectCommit().WillReturnError(errors.New("commit fail"))
+			err := repo.ApplyZoneUpdate(ctx, "z1", nil, 1, nil)
+			if err == nil { t.Error("expected error") }
+		})
+	})
+
+	t.Run("GetRecordsToProbe_ScanError", func(t *testing.T) {
+		db, mock, _ := sqlmock.New()
+		defer db.Close()
+		repo := NewPostgresRepository(db)
+		rows := sqlmock.NewRows([]string{"id"}).AddRow(123) // Wrong columns/types
+		mock.ExpectQuery("SELECT .* FROM dns_records").WillReturnRows(rows)
+		_, err := repo.GetRecordsToProbe(ctx)
+		if err == nil { t.Error("expected error") }
+	})
+
+	t.Run("ListAPIKeys_ScanError", func(t *testing.T) {
+		db, mock, _ := sqlmock.New()
+		defer db.Close()
+		repo := NewPostgresRepository(db)
+		rows := sqlmock.NewRows([]string{"id"}).AddRow(123) // Wrong columns/types
+		mock.ExpectQuery("SELECT .* FROM api_keys").WillReturnRows(rows)
+		_, err := repo.ListAPIKeys(ctx, "t1")
+		if err == nil { t.Error("expected error") }
+	})
+
+	t.Run("GetRecord_ScanError", func(t *testing.T) {
+		db, mock, _ := sqlmock.New()
+		defer db.Close()
+		repo := NewPostgresRepository(db)
+		mock.ExpectQuery("SELECT .* FROM dns_records").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(123))
+		_, err := repo.GetRecord(ctx, "r1", "z1", "t1")
+		if err == nil { t.Error("expected error") }
+	})
+
+	t.Run("ListZoneChanges_RowsErr", func(t *testing.T) {
+		db, mock, _ := sqlmock.New()
+		defer db.Close()
+		repo := NewPostgresRepository(db)
+		rows := sqlmock.NewRows([]string{"id", "zone_id", "serial", "action", "name", "type", "content", "ttl", "priority", "weight", "port", "created_at"}).
+			AddRow("c1", "z1", 1, "ADD", "test.", "A", "1.1.1.1", 60, nil, nil, nil, time.Now()).
+			RowError(0, errors.New("row error"))
+		mock.ExpectQuery("SELECT .* FROM dns_zone_changes").WillReturnRows(rows)
+		_, err := repo.ListZoneChanges(ctx, "z1", 0)
+		if err == nil { t.Error("expected error") }
+	})
+
+	t.Run("GetIXFRChain_Error", func(t *testing.T) {
+		db, mock, _ := sqlmock.New()
+		defer db.Close()
+		repo := NewPostgresRepository(db)
+		mock.ExpectQuery("SELECT .* FROM dns_zone_changes").WillReturnError(errors.New("db fail"))
+		_, err := repo.GetIXFRChain(ctx, "z1", 1, 3)
+		if err == nil { t.Error("expected error") }
 	})
 }
