@@ -94,8 +94,8 @@ spec:
           timeoutSeconds: 15
         resources:
           requests:
-            cpu: "100m"
-            memory: "128Mi"
+            cpu: "10m"
+            memory: "64Mi"
           limits:
             cpu: "500m"
             memory: "256Mi"
@@ -108,8 +108,8 @@ spec:
           runAsNonRoot: true
         resources:
           requests:
-            memory: "64Mi"
-            cpu: "50m"
+            memory: "32Mi"
+            cpu: "10m"
 ---
 # DNS over UDP (port 53) — needs a separate LB service for GKE
 apiVersion: v1
