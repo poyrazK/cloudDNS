@@ -78,7 +78,13 @@ jobs:
             kubectl describe nodes
             kubectl get pods -l app=clouddns
             kubectl describe pods -l app=clouddns
-            kubectl logs -l app=clouddns --tail=100
+            
+            echo "--- App Container Logs ---"
+            kubectl logs -l app=clouddns -c clouddns --tail=100
+            
+            echo "--- Proxy Container Logs ---"
+            kubectl logs -l app=clouddns -c cloud-sql-proxy --tail=100
+            
             exit 1
           fi
 
