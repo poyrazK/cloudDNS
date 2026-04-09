@@ -81,6 +81,10 @@ func run(ctx context.Context) error {
 	if hostOverride := os.Getenv("DATABASE_HOST"); hostOverride != "" && dbURL != "" && dbURL != "none" {
 		if u, err := url.Parse(dbURL); err == nil {
 			u.Host = hostOverride
+			// Force sslmode=disable for local proxy connections to avoid TLS handshake issues
+			q := u.Query()
+			q.Set("sslmode", "disable")
+			u.RawQuery = q.Encode()
 			dbURL = u.String()
 		}
 	}
