@@ -17,6 +17,7 @@ spec:
       labels:
         app: clouddns
     spec:
+      serviceAccountName: clouddns
       automountServiceAccountToken: true
       securityContext:
         runAsNonRoot: true
