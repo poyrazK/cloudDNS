@@ -293,3 +293,16 @@ func TestSeedDatabase_Errors(t *testing.T) {
 		}
 	})
 }
+
+func TestRunSeed_ConnectionError(t *testing.T) {
+	// Force a connection error in runSeed by using a bad DSN
+	t.Setenv("DATABASE_URL", "host=/invalid/path/socket")
+	runSeed(1)
+}
+
+func TestRunScaleTest_MoreErrors(t *testing.T) {
+	t.Run("BadDSN", func(t *testing.T) {
+		t.Setenv("DATABASE_URL", "host=/invalid/path/socket")
+		runScaleTest(1, 1)
+	})
+}

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"testing"
+	"time"
 )
 
 func TestGetEnvUint32(t *testing.T) {
@@ -26,8 +27,9 @@ func TestRunConfigErrors(t *testing.T) {
 	ctx := context.Background()
 	// Test DBURL="none" exit
 	t.Setenv("DATABASE_URL", "none")
+	t.Setenv("API_ADDR", "test-exit")
 	if err := run(ctx); err != nil {
-		t.Errorf("Expected nil for DBURL=none, got %v", err)
+		t.Errorf("Expected nil for DBURL=none with test-exit, got %v", err)
 	}
 
 	// Test test-exit
@@ -64,7 +66,9 @@ func TestRunAnycastCompleteConfig(t *testing.T) {
 }
 
 func TestRunRedisConnectionFailure(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	
 	t.Setenv("DATABASE_URL", "none")
 	t.Setenv("REDIS_URL", "invalid.local:6379")
 
@@ -173,7 +177,7 @@ func TestRun_ConfigPaths(t *testing.T) {
 
 	t.Run("DefaultAddresses", func(t *testing.T) {
 		t.Setenv("DATABASE_URL", "none")
-		t.Setenv("API_ADDR", "")
+		t.Setenv("API_ADDR", "test-exit")
 		t.Setenv("DNS_ADDR", "")
 		// Should set defaults and exit early due to test-exit branch condition (dbURL == "none")
 		if err := run(context.Background()); err != nil {
@@ -188,6 +192,7 @@ func TestRun_ConfigPaths(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // Cancel immediately
 		t.Setenv("DATABASE_URL", "none")
+		t.Setenv("API_ADDR", "test-exit")
 		_ = run(ctx)
 	})
 
@@ -210,6 +215,15 @@ func TestRun_ConfigPaths(t *testing.T) {
 		}
 	})
 
+	t.Run("DatabaseDSNOverride", func(t *testing.T) {
+		t.Setenv("DATABASE_URL", "user=foo password=bar host=remote port=5432 dbname=db sslmode=require")
+		t.Setenv("DATABASE_HOST", "127.0.0.1")
+		t.Setenv("API_ADDR", "test-exit")
+		if err := run(context.Background()); err != nil {
+			t.Errorf("run failed with DSN host override: %v", err)
+		}
+	})
+
 	t.Run("BGPStartupFailure", func(t *testing.T) {
 		t.Setenv("ANYCAST_ENABLED", "true")
 		t.Setenv("ANYCAST_VIP", "1.1.1.1")
@@ -217,12 +231,27 @@ func TestRun_ConfigPaths(t *testing.T) {
 		// Force immediate failure by using an invalid RouterID or port
 		t.Setenv("BGP_ROUTER_ID", "invalid")
 		t.Setenv("DATABASE_URL", "none")
+		t.Setenv("API_ADDR", "test-exit")
 		
 		err := run(context.Background())
 		if err == nil {
 			t.Error("Expected error for BGP startup failure, got nil")
 		} else {
 			t.Logf("Got expected BGP startup failure: %v", err)
+		}
+	})
+
+	t.Run("APIBindFailure", func(t *testing.T) {
+		t.Setenv("DATABASE_URL", "none")
+		// Port 1 usually requires root, should fail to bind
+		t.Setenv("API_ADDR", "127.0.0.1:1")
+		
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		
+		err := run(ctx)
+		if err == nil {
+			t.Error("Expected error for API bind failure on port 1")
 		}
 	})
 }

@@ -100,4 +100,12 @@ func TestRun_ConfigErrors(t *testing.T) {
 			t.Error("Expected error for invalid database URL")
 		}
 	})
+
+	t.Run("BadDSN", func(t *testing.T) {
+		// pgx specifically fails early on some DSN formats
+		t.Setenv("DATABASE_URL", "host=/invalid/path/socket")
+		if err := Run([]string{"iana-bench"}); err == nil {
+			t.Error("Expected error for bad DSN")
+		}
+	})
 }

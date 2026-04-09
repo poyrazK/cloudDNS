@@ -1,0 +1,430 @@
+
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<title>clouddns: Go Coverage Report</title>
+		<style>
+			body {
+				background: black;
+				color: rgb(80, 80, 80);
+			}
+			body, pre, #legend span {
+				font-family: Menlo, monospace;
+				font-weight: bold;
+			}
+			#topbar {
+				background: black;
+				position: fixed;
+				top: 0; left: 0; right: 0;
+				height: 42px;
+				border-bottom: 1px solid rgb(80, 80, 80);
+			}
+			#content {
+				margin-top: 50px;
+			}
+			#nav, #legend {
+				float: left;
+				margin-left: 10px;
+			}
+			#legend {
+				margin-top: 12px;
+			}
+			#nav {
+				margin-top: 10px;
+			}
+			#legend span {
+				margin: 0 5px;
+			}
+			.cov0 { color: rgb(192, 0, 0) }
+.cov1 { color: rgb(128, 128, 128) }
+.cov2 { color: rgb(116, 140, 131) }
+.cov3 { color: rgb(104, 152, 134) }
+.cov4 { color: rgb(92, 164, 137) }
+.cov5 { color: rgb(80, 176, 140) }
+.cov6 { color: rgb(68, 188, 143) }
+.cov7 { color: rgb(56, 200, 146) }
+.cov8 { color: rgb(44, 212, 149) }
+.cov9 { color: rgb(32, 224, 152) }
+.cov10 { color: rgb(20, 236, 155) }
+
+		</style>
+	</head>
+	<body>
+		<div id="topbar">
+			<div id="nav">
+				<select id="files">
+				
+				<option value="file0">github.com/poyrazK/cloudDNS/cmd/clouddns/main.go (66.7%)</option>
+				
+				</select>
+			</div>
+			<div id="legend">
+				<span>not tracked</span>
+			
+				<span class="cov0">not covered</span>
+				<span class="cov8">covered</span>
+			
+			</div>
+		</div>
+		<div id="content">
+		
+		<pre class="file" id="file0" style="display: none">package main
+
+import (
+        "context"
+        "database/sql"
+        "fmt"
+        "log/slog"
+        "net/http"
+        "net/url"
+        "os"
+        "os/signal"
+        "strconv"
+        "strings"
+        "syscall"
+        "time"
+
+        _ "github.com/jackc/pgx/v5/stdlib"
+        "github.com/poyrazK/cloudDNS/internal/adapters/api"
+        "github.com/poyrazK/cloudDNS/internal/adapters/repository"
+        "github.com/poyrazK/cloudDNS/internal/adapters/routing"
+        "github.com/poyrazK/cloudDNS/internal/core/ports"
+        "github.com/poyrazK/cloudDNS/internal/core/services"
+        "github.com/poyrazK/cloudDNS/internal/dns/server"
+        "github.com/poyrazK/cloudDNS/internal/infrastructure/metrics"
+)
+
+func main() <span class="cov0" title="0">{
+        ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+        defer stop()
+
+        if err := run(ctx); err != nil </span><span class="cov0" title="0">{
+                slog.Error("application failed", "error", err)
+                os.Exit(1)
+        }</span>
+}
+
+func run(ctx context.Context) error <span class="cov8" title="1">{
+        runCtx, cancel := context.WithCancel(ctx)
+        defer cancel()
+
+        // 1. Initialize Structured Logging
+        logLevel := slog.LevelInfo
+        if lvl := os.Getenv("LOG_LEVEL"); lvl != "" </span><span class="cov8" title="1">{
+                if err := logLevel.UnmarshalText([]byte(lvl)); err != nil </span><span class="cov8" title="1">{
+                        fmt.Fprintf(os.Stderr, "invalid LOG_LEVEL %q, defaulting to INFO\n", lvl)
+                }</span>
+        }
+
+        <span class="cov8" title="1">opts := &amp;slog.HandlerOptions{
+                Level: logLevel,
+        }
+
+        var handler slog.Handler
+        if os.Getenv("LOG_FORMAT") == "text" </span><span class="cov8" title="1">{
+                handler = slog.NewTextHandler(os.Stdout, opts)
+        }</span> else<span class="cov8" title="1"> {
+                handler = slog.NewJSONHandler(os.Stdout, opts)
+        }</span>
+
+        <span class="cov8" title="1">logger := slog.New(handler)
+
+        // Add NodeID to all logs
+        nodeID := os.Getenv("NODE_ID")
+        if nodeID == "" </span><span class="cov8" title="1">{
+                h, _ := os.Hostname()
+                if h != "" </span><span class="cov8" title="1">{
+                        nodeID = h
+                }</span> else<span class="cov0" title="0"> {
+                        nodeID = "unknown-node"
+                }</span>
+        }
+        <span class="cov8" title="1">logger = logger.With("node_id", nodeID)
+
+        slog.SetDefault(logger)
+
+        dbURL := os.Getenv("DATABASE_URL")
+        if dbURL == "" </span><span class="cov0" title="0">{
+                dbURL = "postgres://postgres:postgres@localhost:5432/clouddns?sslmode=disable"
+        }</span>
+
+        // Allow overriding host for Cloud SQL Proxy sidecar
+        <span class="cov8" title="1">if hostOverride := os.Getenv("DATABASE_HOST"); hostOverride != "" &amp;&amp; dbURL != "" &amp;&amp; dbURL != "none" </span><span class="cov8" title="1">{
+                if u, err := url.Parse(dbURL); err == nil </span><span class="cov8" title="1">{
+                        u.Host = hostOverride
+                        // Force sslmode=disable for local proxy connections to avoid TLS handshake issues.
+                        // Cloud SQL Proxy listening on 127.0.0.1 expects plain TCP from the application.
+                        q := u.Query()
+                        q.Set("sslmode", "disable")
+                        u.RawQuery = q.Encode()
+                        dbURL = u.String()
+                }</span> else<span class="cov0" title="0"> if strings.Contains(dbURL, "=") </span><span class="cov0" title="0">{
+                        // Handle DSN format (e.g., "user=... password=...")
+                        dbURL = strings.ReplaceAll(dbURL, "sslmode=verify-full", "sslmode=disable")
+                        dbURL = strings.ReplaceAll(dbURL, "sslmode=require", "sslmode=disable")
+                        dbURL = strings.ReplaceAll(dbURL, "sslmode=prefer", "sslmode=disable")
+                        if !strings.Contains(dbURL, "sslmode=") </span><span class="cov0" title="0">{
+                                dbURL += " sslmode=disable"
+                        }</span>
+                        // Host override in DSN
+                        <span class="cov0" title="0">if strings.Contains(dbURL, "host=") </span><span class="cov0" title="0">{
+                                // Very basic regex-like replacement for host
+                                parts := strings.Split(dbURL, " ")
+                                for i, p := range parts </span><span class="cov0" title="0">{
+                                        if strings.HasPrefix(p, "host=") </span><span class="cov0" title="0">{
+                                                parts[i] = "host=" + hostOverride
+                                        }</span>
+                                }
+                                <span class="cov0" title="0">dbURL = strings.Join(parts, " ")</span>
+                        } else<span class="cov0" title="0"> {
+                                dbURL += " host=" + hostOverride
+                        }</span>
+                }
+        }
+
+        <span class="cov8" title="1">if dbURL != "none" </span><span class="cov8" title="1">{
+                parsedURL, err := url.Parse(dbURL)
+                if err == nil </span><span class="cov8" title="1">{
+                        redactedURL := fmt.Sprintf("%s://%s@%s%s", parsedURL.Scheme, "***", parsedURL.Host, parsedURL.Path)
+                        logger.Info("database configuration", "url", redactedURL, "sslmode", parsedURL.Query().Get("sslmode"))
+                }</span> else<span class="cov0" title="0"> {
+                        logger.Info("database configuration (DSN format)", "sslmode", "check-dsn-string")
+                }</span>
+        }
+
+        <span class="cov8" title="1">var db *sql.DB
+        var repo ports.DNSRepository
+        if dbURL != "none" </span><span class="cov8" title="1">{
+                var err error
+                db, err = sql.Open("pgx", dbURL)
+                if err != nil </span><span class="cov0" title="0">{
+                        return err
+                }</span>
+                // Sane pool settings for Cloud SQL f1-micro (limited RAM and ~25 connections max)
+                <span class="cov8" title="1">db.SetMaxOpenConns(20)
+                db.SetMaxIdleConns(10)
+                db.SetConnMaxLifetime(5 * time.Minute)
+
+                defer func() </span><span class="cov8" title="1">{ _ = db.Close() }</span>()
+                <span class="cov8" title="1">repo = repository.NewPostgresRepository(db)
+
+                // Periodic DB metrics update
+                go func() </span><span class="cov8" title="1">{
+                        interval := 15 * time.Second
+                        if os.Getenv("TEST_MODE") == "true" </span><span class="cov8" title="1">{
+                                interval = 10 * time.Millisecond
+                        }</span>
+                        <span class="cov8" title="1">ticker := time.NewTicker(interval)
+                        defer ticker.Stop()
+                        for </span><span class="cov8" title="1">{
+                                select </span>{
+                                case &lt;-runCtx.Done():<span class="cov8" title="1">
+                                        return</span>
+                                case &lt;-ticker.C:<span class="cov0" title="0">
+                                        stats := db.Stats()
+                                        metrics.DBConnectionsActive.Set(float64(stats.InUse))</span>
+                                }
+                        }
+                }()
+        }
+
+        <span class="cov8" title="1">var cacheInvalidator ports.CacheInvalidator
+        redisURL := os.Getenv("REDIS_URL")
+        var redisCache *server.RedisCache
+        if redisURL != "" </span><span class="cov8" title="1">{
+                redisCache = server.NewRedisCache(redisURL, "", 0)
+                // Verify connectivity
+                pingCtx, cancel := context.WithTimeout(runCtx, 2*time.Second)
+                if err := redisCache.Ping(pingCtx); err != nil </span><span class="cov8" title="1">{
+                        cancel()
+                        return fmt.Errorf("failed to connect to redis at %s: %w", redisURL, err)
+                }</span>
+                <span class="cov0" title="0">cancel()
+                cacheInvalidator = redisCache
+                logger.Info("connected to redis cache", "url", redisURL)</span>
+        }
+
+        <span class="cov8" title="1">dnsSvc := services.NewDNSService(repo, cacheInvalidator)
+
+        var routingAdapter *routing.GoBGPAdapter
+        var anycastMgr *services.AnycastManager
+
+        // 2. Initialize Anycast BGP (Phase 3)
+        if os.Getenv("ANYCAST_ENABLED") == "true" </span><span class="cov8" title="1">{
+                vip := os.Getenv("ANYCAST_VIP")
+                peerIP := os.Getenv("BGP_PEER_IP")
+
+                if vip == "" || peerIP == "" </span><span class="cov8" title="1">{
+                        return fmt.Errorf("ANYCAST_VIP and BGP_PEER_IP must be set when ANYCAST_ENABLED=true")
+                }</span>
+
+                <span class="cov8" title="1">routingAdapter = routing.NewGoBGPAdapter(logger)
+                vipAdapter := routing.NewSystemVIPAdapter(logger)
+
+                iface := os.Getenv("ANYCAST_INTERFACE")
+                if iface == "" </span><span class="cov8" title="1">{
+                        iface = "lo"
+                }</span>
+
+                <span class="cov8" title="1">localASN := getEnvUint32("ANYCAST_LOCAL_ASN", 65001)
+                peerASN := getEnvUint32("BGP_PEER_ASN", 65000)
+
+                // Configure RouterID and NextHop if provided
+                routerID := os.Getenv("BGP_ROUTER_ID")
+                nextHop := os.Getenv("BGP_NEXT_HOP")
+                routingAdapter.SetConfig(routerID, 179, nextHop)
+
+                anycastMgr = services.NewAnycastManager(dnsSvc, routingAdapter, vipAdapter, vip, iface, logger)
+
+                errChan := make(chan error, 1)
+                go func() </span><span class="cov8" title="1">{
+                        if err := routingAdapter.Start(runCtx, localASN, peerASN, peerIP); err != nil </span><span class="cov8" title="1">{
+                                errChan &lt;- fmt.Errorf("failed to start BGP speaker: %w", err)
+                                return
+                        }</span>
+                        <span class="cov8" title="1">anycastMgr.Start(runCtx)</span>
+                }()
+
+                // Provide a short grace period to immediately catch bind/startup errors
+                <span class="cov8" title="1">select </span>{
+                case err := &lt;-errChan:<span class="cov8" title="1">
+                        return err</span>
+                case &lt;-time.After(500 * time.Millisecond):<span class="cov8" title="1"></span>
+                        // Started successfully
+                }
+        }
+
+        // 3. Start DNS Server
+        <span class="cov8" title="1">dnsAddr := os.Getenv("DNS_ADDR")
+        if dnsAddr == "" </span><span class="cov8" title="1">{
+                dnsAddr = "127.0.0.1:10053"
+        }</span>
+        <span class="cov8" title="1">dnsServer := server.NewServer(dnsAddr, repo, logger)
+        dnsServer.Redis = redisCache
+
+        go func() </span><span class="cov8" title="1">{
+                if err := dnsServer.Run(runCtx); err != nil </span><span class="cov0" title="0">{
+                        logger.Error("DNS server failed", "error", err)
+                }</span>
+        }()
+
+        // 4. Start Management API
+        <span class="cov8" title="1">apiAddr := os.Getenv("API_ADDR")
+        if apiAddr == "" </span><span class="cov8" title="1">{
+                apiAddr = ":8080"
+        }</span>
+        <span class="cov8" title="1">apiHandler := api.NewAPIHandler(dnsSvc, repo)
+        mux := http.NewServeMux()
+        apiHandler.RegisterRoutes(mux)
+
+        // For testing the full initialization path
+        if apiAddr == "test-exit" || dbURL == "none" </span><span class="cov8" title="1">{
+                return nil
+        }</span>
+
+        // 5. Start Health Monitor (Smart Engine)
+        <span class="cov0" title="0">if repo != nil </span><span class="cov0" title="0">{
+                healthMonitor := services.NewHealthMonitor(repo, logger)
+                go healthMonitor.Start(runCtx, 30*time.Second)
+        }</span>
+
+        <span class="cov0" title="0">logger.Info("cloudDNS services starting",
+                "dns_addr", dnsAddr,
+                "api_addr", apiAddr,
+        )
+
+        s := &amp;http.Server{
+                Addr:              apiAddr,
+                Handler:           mux,
+                ReadHeaderTimeout: 5 * time.Second,
+                ReadTimeout:       10 * time.Second,
+                WriteTimeout:      10 * time.Second,
+                IdleTimeout:       120 * time.Second,
+        }
+
+        certFile := os.Getenv("API_TLS_CERT")
+        keyFile := os.Getenv("API_TLS_KEY")
+
+        apiErrChan := make(chan error, 1)
+        go func() </span><span class="cov0" title="0">{
+                var err error
+                if certFile != "" &amp;&amp; keyFile != "" </span><span class="cov0" title="0">{
+                        logger.Info("starting API server with TLS", "cert", certFile, "key", keyFile)
+                        err = s.ListenAndServeTLS(certFile, keyFile)
+                }</span> else<span class="cov0" title="0"> {
+                        logger.Info("starting API server without TLS")
+                        err = s.ListenAndServe()
+                }</span>
+                <span class="cov0" title="0">if err != nil &amp;&amp; err != http.ErrServerClosed </span><span class="cov0" title="0">{
+                        apiErrChan &lt;- fmt.Errorf("API server failed: %w", err)
+                }</span>
+        }()
+
+        // Wait for termination signal or API server error
+        <span class="cov0" title="0">select </span>{
+        case err := &lt;-apiErrChan:<span class="cov0" title="0">
+                return err</span>
+        case &lt;-runCtx.Done():<span class="cov0" title="0">
+                logger.Info("shutting down services...")</span>
+        }
+
+        <span class="cov0" title="0">shutdownCtx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond) // Fast timeout for tests
+        defer cancel()
+
+        if err := s.Shutdown(shutdownCtx); err != nil </span><span class="cov0" title="0">{
+                logger.Error("API server shutdown failed", "error", err)
+        }</span>
+
+        <span class="cov0" title="0">if routingAdapter != nil </span><span class="cov0" title="0">{
+                if err := routingAdapter.Stop(); err != nil </span><span class="cov0" title="0">{
+                        logger.Error("BGP speaker stop failed", "error", err)
+                }</span>
+        }
+
+        <span class="cov0" title="0">return nil</span>
+}
+
+func getEnvUint32(key string, def uint32) uint32 <span class="cov8" title="1">{
+        val := os.Getenv(key)
+        if val == "" </span><span class="cov8" title="1">{
+                return def
+        }</span>
+        <span class="cov8" title="1">u, err := strconv.ParseUint(val, 10, 32)
+        if err != nil </span><span class="cov8" title="1">{
+                return def
+        }</span>
+        <span class="cov8" title="1">return uint32(u)</span>
+}
+</pre>
+		
+		</div>
+	</body>
+	<script>
+	(function() {
+		var files = document.getElementById('files');
+		var visible;
+		files.addEventListener('change', onChange, false);
+		function select(part) {
+			if (visible)
+				visible.style.display = 'none';
+			visible = document.getElementById(part);
+			if (!visible)
+				return;
+			files.value = part;
+			visible.style.display = 'block';
+			location.hash = part;
+		}
+		function onChange() {
+			select(files.value);
+			window.scrollTo(0, 0);
+		}
+		if (location.hash != "") {
+			select(location.hash.substr(1));
+		}
+		if (!visible) {
+			select("file0");
+		}
+	})();
+	</script>
+</html>

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -81,11 +82,33 @@ func run(ctx context.Context) error {
 	if hostOverride := os.Getenv("DATABASE_HOST"); hostOverride != "" && dbURL != "" && dbURL != "none" {
 		if u, err := url.Parse(dbURL); err == nil {
 			u.Host = hostOverride
-			// Force sslmode=disable for local proxy connections to avoid TLS handshake issues
+			// Force sslmode=disable for local proxy connections to avoid TLS handshake issues.
+			// Cloud SQL Proxy listening on 127.0.0.1 expects plain TCP from the application.
 			q := u.Query()
 			q.Set("sslmode", "disable")
 			u.RawQuery = q.Encode()
 			dbURL = u.String()
+		} else if strings.Contains(dbURL, "=") {
+			// Handle DSN format (e.g., "user=... password=...")
+			dbURL = strings.ReplaceAll(dbURL, "sslmode=verify-full", "sslmode=disable")
+			dbURL = strings.ReplaceAll(dbURL, "sslmode=require", "sslmode=disable")
+			dbURL = strings.ReplaceAll(dbURL, "sslmode=prefer", "sslmode=disable")
+			if !strings.Contains(dbURL, "sslmode=") {
+				dbURL += " sslmode=disable"
+			}
+			// Host override in DSN
+			if strings.Contains(dbURL, "host=") {
+				// Very basic regex-like replacement for host
+				parts := strings.Split(dbURL, " ")
+				for i, p := range parts {
+					if strings.HasPrefix(p, "host=") {
+						parts[i] = "host=" + hostOverride
+					}
+				}
+				dbURL = strings.Join(parts, " ")
+			} else {
+				dbURL += " host=" + hostOverride
+			}
 		}
 	}
 
@@ -93,7 +116,9 @@ func run(ctx context.Context) error {
 		parsedURL, err := url.Parse(dbURL)
 		if err == nil {
 			redactedURL := fmt.Sprintf("%s://%s@%s%s", parsedURL.Scheme, "***", parsedURL.Host, parsedURL.Path)
-			logger.Info("database configuration", "url", redactedURL)
+			logger.Info("database configuration", "url", redactedURL, "sslmode", parsedURL.Query().Get("sslmode"))
+		} else {
+			logger.Info("database configuration (DSN format)", "sslmode", "check-dsn-string")
 		}
 	}
 
@@ -223,7 +248,7 @@ func run(ctx context.Context) error {
 	apiHandler.RegisterRoutes(mux)
 
 	// For testing the full initialization path
-	if apiAddr == "test-exit" || dbURL == "none" {
+	if apiAddr == "test-exit" {
 		return nil
 	}
 
