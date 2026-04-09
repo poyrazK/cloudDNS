@@ -87,13 +87,7 @@ spec:
           initialDelaySeconds: 5
           periodSeconds: 15
           timeoutSeconds: 15
-        resources:
-          requests:
-            cpu: "1m"
-            memory: "64Mi"
-          limits:
-            cpu: "500m"
-            memory: "256Mi"
+        resources: {}
       - name: cloud-sql-proxy
         image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.14.2
         args:
@@ -101,10 +95,7 @@ spec:
           - "thecloud-clouddns:europe-west3:clouddns-db"
         securityContext:
           runAsNonRoot: true
-        resources:
-          requests:
-            cpu: "1m"
-            memory: "32Mi"
+        resources: {}
 ---
 # DNS over UDP (port 53) — needs a separate LB service for GKE
 apiVersion: v1
