@@ -17,7 +17,7 @@ spec:
       labels:
         app: clouddns
     spec:
-      automountServiceAccountToken: false
+      automountServiceAccountToken: true
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -52,6 +52,11 @@ spec:
               key: database-url
         - name: DATABASE_HOST
           value: "127.0.0.1"
+        - name: REDIS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: clouddns-config
+              key: redis-url
         - name: DNS_ADDR
           value: ":1053"
         - name: API_ADDR
