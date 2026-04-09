@@ -52,11 +52,6 @@ spec:
               key: database-url
         - name: DATABASE_HOST
           value: "127.0.0.1"
-        - name: REDIS_URL
-          valueFrom:
-            configMapKeyRef:
-              name: clouddns-config
-              key: redis-url
         - name: DNS_ADDR
           value: ":1053"
         - name: API_ADDR
@@ -73,7 +68,7 @@ spec:
             port: 8080
             scheme: HTTP
           initialDelaySeconds: 30
-          failureThreshold: 60
+          failureThreshold: 120
           periodSeconds: 10
           timeoutSeconds: 30
         livenessProbe:
