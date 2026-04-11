@@ -16,6 +16,7 @@ jobs:
   deploy:
     name: Build & Deploy
     needs: ci
+    if: vars.DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
     env:
       REGION: europe-west3
@@ -91,6 +92,7 @@ jobs:
   smoke-test:
     name: Verify Deployment
     needs: deploy
+    if: vars.DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
     env:
       CLUSTER: clouddns-cluster
