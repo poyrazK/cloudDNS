@@ -306,3 +306,149 @@ func TestRunScaleTest_MoreErrors(t *testing.T) {
 		runScaleTest(1, 1)
 	})
 }
+
+// TestRunRealisticWorker_WriteError tests write error path
+func TestRunRealisticWorker_WriteError(t *testing.T) {
+	addr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:0")
+	conn, _ := net.ListenUDP("udp", addr)
+	conn.Close() // Close before worker uses it
+
+	stats := &Stats{
+		Latencies: make(chan time.Duration, 10),
+	}
+	runRealisticWorker(conn.LocalAddr().String(), 1, 0, 100, 1.1, 100, stats)
+}
+
+// TestRunRealisticWorker_ReadError tests read timeout error path
+func TestRunRealisticWorker_ReadError(t *testing.T) {
+	addr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:0")
+	conn, _ := net.ListenUDP("udp", addr)
+	defer conn.Close()
+
+	serverAddr := conn.LocalAddr().String()
+
+	// Goroutine that accepts but never responds
+	go func() {
+		buf := make([]byte, 512)
+		conn.ReadFromUDP(buf)
+	}()
+
+	stats := &Stats{
+		Latencies: make(chan time.Duration, 10),
+	}
+	// With very short timeout, read should error
+	runRealisticWorker(serverAddr, 1, 0, 100, 1.1, 1, stats)
+	// Expect errors to be incremented
+}
+
+// TestRunRealisticWorker_SuccessfulQuery tests a successful query path
+func TestRunRealisticWorker_SuccessfulQuery(t *testing.T) {
+	addr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:0")
+	conn, _ := net.ListenUDP("udp", addr)
+	defer conn.Close()
+
+	serverAddr := conn.LocalAddr().String()
+
+	// Goroutine that responds
+	go func() {
+		buf := make([]byte, 512)
+		for {
+			n, remote, err := conn.ReadFromUDP(buf)
+			if err != nil {
+				return
+			}
+
+			req := packet.NewDNSPacket()
+			pb := packet.NewBytePacketBuffer()
+			pb.Load(buf[:n])
+			_ = req.FromBuffer(pb)
+
+			resp := packet.NewDNSPacket()
+			resp.Header.ID = req.Header.ID
+			resp.Header.Response = true
+			resBuf := packet.NewBytePacketBuffer()
+			_ = resp.Write(resBuf)
+			_, _ = conn.WriteToUDP(resBuf.Buf[:resBuf.Position()], remote)
+		}
+	}()
+
+	stats := &Stats{
+		Latencies: make(chan time.Duration, 10),
+	}
+	runRealisticWorker(serverAddr, 3, 0, 100, 1.1, 100, stats)
+
+	if stats.TotalQueries != 3 {
+		t.Errorf("Expected 3 queries, got %d", stats.TotalQueries)
+	}
+}
+
+// TestSeedDatabase_SmallTotal tests when total < batchSize (5000)
+func TestSeedDatabase_SmallTotal(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to open sqlmock: %s", err)
+	}
+	defer db.Close()
+
+	mock.ExpectExec("INSERT INTO dns_zones").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("INSERT INTO dns_records").WillReturnResult(sqlmock.NewResult(1, 1))
+
+	err = seedDatabase(context.Background(), db, 100) // Less than batchSize (5000)
+	if err != nil {
+		t.Errorf("seedDatabase failed: %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet sqlmock expectations: %v", err)
+	}
+}
+
+// TestSeedDatabase_EmptyEarlyReturn tests when total=0
+func TestSeedDatabase_ZeroTotal(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to open sqlmock: %s", err)
+	}
+	defer db.Close()
+
+	mock.ExpectExec("INSERT INTO dns_zones").WillReturnResult(sqlmock.NewResult(1, 1))
+	// No INSERT INTO dns_records expected when total=0
+
+	err = seedDatabase(context.Background(), db, 0)
+	if err != nil {
+		t.Errorf("seedDatabase failed: %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet sqlmock expectations: %v", err)
+	}
+}
+
+// TestRunSeed_DBOpenFailure tests db.Open failure path
+func TestRunSeed_DBOpenFailure(t *testing.T) {
+	t.Setenv("DATABASE_URL", "invalid-dsn")
+	// Should print "failed to connect" and return
+	runSeed(1)
+}
+
+// TestRunSeed_ZoneExistsError tests ON CONFLICT DO NOTHING
+func TestSeedDatabase_ZoneConflict(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to open sqlmock: %s", err)
+	}
+	defer db.Close()
+
+	// Zone insert with conflict - ON CONFLICT DO NOTHING should not error
+	mock.ExpectExec("INSERT INTO dns_zones").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("INSERT INTO dns_records").WillReturnResult(sqlmock.NewResult(1, 1))
+
+	err = seedDatabase(context.Background(), db, 1)
+	if err != nil {
+		t.Errorf("seedDatabase failed: %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet sqlmock expectations: %v", err)
+	}
+}
