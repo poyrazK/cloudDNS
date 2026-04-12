@@ -330,7 +330,7 @@ func TestRunRealisticWorker_ReadError(t *testing.T) {
 	// Goroutine that accepts but never responds
 	go func() {
 		buf := make([]byte, 512)
-		conn.ReadFromUDP(buf)
+		_, _, _ = conn.ReadFromUDP(buf)
 	}()
 
 	stats := &Stats{
