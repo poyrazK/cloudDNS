@@ -477,8 +477,7 @@ func TestRunAndCaptureScale_Mock(t *testing.T) {
 }
 
 type mockCommand struct {
-	stdout *bytes.Buffer
-	out    *bytes.Buffer
+	out *bytes.Buffer
 }
 
 func (m *mockCommand) SetStdout(buf *bytes.Buffer) {
