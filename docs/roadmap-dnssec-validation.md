@@ -21,7 +21,7 @@ Implement full DNSSEC validation MVP across small, reviewable PRs.
 **Contents**:
 - `VerifyRRSet(rrset []DNSRecord, rrsig DNSRecord, dnskey DNSRecord, now uint32) (bool, error)` - ECDSA P-256 signature verification
 - `VerifyDNSKEYMatchesDS(dnskey DNSRecord, ds DNSRecord) (bool, error)` - DNSKEY matches DS record
-- `VerifyDNSKEYSelfSignature(dnskey DNSRecord) (bool, error)` - DNSKEY self-signature validation
+- `ValidateDNSKEYFormat(dnskey DNSRecord) (bool, error)` - DNSKEY format validation
 - `FindMatchingDNSKEY(rrsig DNSRecord, dnskeys []DNSRecord) *DNSRecord` - locate correct DNSKEY for RRSIG
 - `extractECDSAPublicKey(dnskey DNSRecord) (*ecdsa.PublicKey, error)` - extract ECDSA key from DNSKEY
 - `writeCanonicalRData(r *DNSRecord, buf *BytePacketBuffer) error` - canonical RDATA serialization
@@ -147,7 +147,7 @@ Implement full DNSSEC validation MVP across small, reviewable PRs.
 
 ## PR Order & Dependencies
 
-```
+```text
 PR1 (dnssec-verify-packet)
     ↓
 PR2 (dnssec-validator-service)

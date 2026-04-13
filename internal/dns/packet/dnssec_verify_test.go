@@ -127,11 +127,12 @@ func TestVerifyRRSet_RoundTrip(t *testing.T) {
 
 	// Extract public key properly from the DNSKEY we created
 	pubBytes := encodeECDSAPublicKey(&pubKey)
+	t.Logf("EncPubKey len: %d", len(pubBytes))
 	t.Logf("EncPubKey: %x", pubBytes)
 
-	// Try with x/y from the encoded key
-	x2 := new(big.Int).SetBytes(pubBytes[1:33])
-	y2 := new(big.Int).SetBytes(pubBytes[33:65])
+	// Try with x/y from the encoded key (64-byte X||Y format)
+	x2 := new(big.Int).SetBytes(pubBytes[0:32])
+	y2 := new(big.Int).SetBytes(pubBytes[32:64])
 	t.Logf("X2: %x", x2.Bytes())
 	t.Logf("Y2: %x", y2.Bytes())
 
@@ -398,8 +399,8 @@ func TestVerifyDNSKEYMatchesDS_Invalid(t *testing.T) {
 	}
 }
 
-// TestVerifyDNSKEYSelfSignature_Valid tests self-signature verification.
-func TestVerifyDNSKEYSelfSignature_Valid(t *testing.T) {
+// TestValidateDNSKEYFormat_Valid tests self-signature verification.
+func TestValidateDNSKEYFormat_Valid(t *testing.T) {
 	privKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	pubKey := privKey.PublicKey
 
@@ -412,23 +413,23 @@ func TestVerifyDNSKEYSelfSignature_Valid(t *testing.T) {
 		PublicKey: encodeECDSAPublicKey(&pubKey),
 	}
 
-	valid, err := VerifyDNSKEYSelfSignature(dnskey)
+	valid, err := ValidateDNSKEYFormat(dnskey)
 	if err != nil {
-		t.Fatalf("VerifyDNSKEYSelfSignature failed: %v", err)
+		t.Fatalf("ValidateDNSKEYFormat failed: %v", err)
 	}
 	if !valid {
 		t.Error("Expected valid self-signature check")
 	}
 }
 
-// TestVerifyDNSKEYSelfSignature_WrongType tests self-signature with wrong record type.
-func TestVerifyDNSKEYSelfSignature_WrongType(t *testing.T) {
+// TestValidateDNSKEYFormat_WrongType tests self-signature with wrong record type.
+func TestValidateDNSKEYFormat_WrongType(t *testing.T) {
 	record := DNSRecord{
 		Name: "example.com.",
 		Type: A,
 	}
 
-	_, err := VerifyDNSKEYSelfSignature(record)
+	_, err := ValidateDNSKEYFormat(record)
 	if err != ErrInvalidDNSKEY {
 		t.Errorf("Expected ErrInvalidDNSKEY, got %v", err)
 	}
@@ -943,8 +944,8 @@ func TestVerifyDNSKEYMatchesDS_KeyTagMismatch(t *testing.T) {
 	}
 }
 
-// TestVerifyDNSKEYSelfSignature_NoPublicKey tests with missing public key.
-func TestVerifyDNSKEYSelfSignature_NoPublicKey(t *testing.T) {
+// TestValidateDNSKEYFormat_NoPublicKey tests with missing public key.
+func TestValidateDNSKEYFormat_NoPublicKey(t *testing.T) {
 	dnskey := DNSRecord{
 		Name:      "example.com.",
 		Type:      DNSKEY,
@@ -954,14 +955,14 @@ func TestVerifyDNSKEYSelfSignature_NoPublicKey(t *testing.T) {
 		PublicKey: []byte{0x01, 0x02}, // Too short
 	}
 
-	_, err := VerifyDNSKEYSelfSignature(dnskey)
+	_, err := ValidateDNSKEYFormat(dnskey)
 	if err != ErrNoPublicKey {
 		t.Errorf("Expected ErrNoPublicKey, got %v", err)
 	}
 }
 
-// TestVerifyDNSKEYSelfSignature_UnsupportedAlgorithm tests with invalid key format.
-func TestVerifyDNSKEYSelfSignature_UnsupportedAlgorithm(t *testing.T) {
+// TestValidateDNSKEYFormat_UnsupportedAlgorithm tests with invalid key format.
+func TestValidateDNSKEYFormat_UnsupportedAlgorithm(t *testing.T) {
 	dnskey := DNSRecord{
 		Name:      "example.com.",
 		Type:      DNSKEY,
@@ -971,7 +972,7 @@ func TestVerifyDNSKEYSelfSignature_UnsupportedAlgorithm(t *testing.T) {
 		PublicKey: make([]byte, 65), // Valid length but wrong format
 	}
 
-	_, err := VerifyDNSKEYSelfSignature(dnskey)
+	_, err := ValidateDNSKEYFormat(dnskey)
 	if err != ErrUnsupportedAlgorithm {
 		t.Errorf("Expected ErrUnsupportedAlgorithm, got %v", err)
 	}
@@ -1107,15 +1108,14 @@ func TestWriteCanonicalRData_MX_BufferFull(t *testing.T) {
 }
 
 // encodeECDSAPublicKey encodes an ECDSA public key into DNSKEY format.
+// RFC 6605 specifies ECDSA P-256 (Algorithm 13) uses X||Y format (64 bytes).
 func encodeECDSAPublicKey(pub *ecdsa.PublicKey) []byte {
-	// Uncompressed point format: 0x04 || X || Y
-	result := make([]byte, 65)
-	result[0] = 0x04
-	// Use fixed-size 32-byte big-endian encoding
+	// X || Y format per RFC 6605 (64 bytes total)
+	result := make([]byte, 64)
 	xBytes := pub.X.FillBytes(make([]byte, 32))
 	yBytes := pub.Y.FillBytes(make([]byte, 32))
-	copy(result[1:33], xBytes)
-	copy(result[33:65], yBytes)
+	copy(result[0:32], xBytes)
+	copy(result[32:64], yBytes)
 	return result
 }
 

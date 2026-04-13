@@ -233,8 +233,36 @@ func VerifyRRSet(rrset []DNSRecord, rrsig DNSRecord, dnskey DNSRecord, now uint3
 		return false, err
 	}
 
-	// 7. Reconstruct canonical wire format of RRSet
+	// 7. Reconstruct canonical wire format of RRSIG/RRset per RFC 4034 Section 8.1
 	buf := NewBytePacketBuffer()
+
+	// Prepend RRSIG RDATA fields (excluding Signature)
+	if err := buf.Writeu16(rrsig.TypeCovered); err != nil {
+		return false, err
+	}
+	if err := buf.Write(rrsig.Algorithm); err != nil {
+		return false, err
+	}
+	if err := buf.Write(rrsig.Labels); err != nil {
+		return false, err
+	}
+	if err := buf.Writeu32(rrsig.OrigTTL); err != nil {
+		return false, err
+	}
+	if err := buf.Writeu32(rrsig.Expiration); err != nil {
+		return false, err
+	}
+	if err := buf.Writeu32(rrsig.Inception); err != nil {
+		return false, err
+	}
+	if err := buf.Writeu16(rrsig.KeyTag); err != nil {
+		return false, err
+	}
+	if err := buf.WriteName(strings.ToLower(rrsig.SignerName)); err != nil {
+		return false, err
+	}
+
+	// Write canonical RRset per RFC 4034: owner|type|class|Original TTL|RDLENGTH|RDATA
 	for _, r := range rrset {
 		// Write owner name in canonical form
 		if err := buf.WriteName(strings.ToLower(r.Name)); err != nil {
@@ -243,10 +271,10 @@ func VerifyRRSet(rrset []DNSRecord, rrsig DNSRecord, dnskey DNSRecord, now uint3
 		if err := buf.Writeu16(uint16(r.Type)); err != nil {
 			return false, err
 		}
-		if err := buf.Writeu16(1); err != nil { // Class IN (RDATA class, per RFC 4034)
+		if err := buf.Writeu16(1); err != nil { // Class IN
 			return false, err
 		}
-		if err := buf.Writeu32(r.TTL); err != nil {
+		if err := buf.Writeu32(rrsig.OrigTTL); err != nil {
 			return false, err
 		}
 		// Write RDATA in canonical form
@@ -274,19 +302,26 @@ func VerifyRRSet(rrset []DNSRecord, rrsig DNSRecord, dnskey DNSRecord, now uint3
 }
 
 // extractECDSAPublicKey extracts an ECDSA P-256 public key from a DNSKEY record.
+// It supports both RFC 6605 format (64-byte X||Y for Algorithm 13) and
+// SEC1 uncompressed format (65-byte 0x04||X||Y).
 func extractECDSAPublicKey(dnskey DNSRecord) (*ecdsa.PublicKey, error) {
-	if len(dnskey.PublicKey) < 65 {
-		return nil, ErrNoPublicKey
-	}
+	var x, y *big.Int
 
-	// ECDSA P-256 public key is an uncompressed curve point:
-	// 0x04 || X (32 bytes) || Y (32 bytes)
-	if dnskey.PublicKey[0] != 0x04 {
+	switch {
+	case dnskey.Algorithm == 13 && len(dnskey.PublicKey) == 64:
+		// RFC 6605: ECDSAP256SHA256 uses X||Y format (64 bytes)
+		x = new(big.Int).SetBytes(dnskey.PublicKey[0:32])
+		y = new(big.Int).SetBytes(dnskey.PublicKey[32:64])
+	case len(dnskey.PublicKey) >= 65 && dnskey.PublicKey[0] == 0x04:
+		// SEC1 uncompressed format: 0x04 || X (32 bytes) || Y (32 bytes)
+		x = new(big.Int).SetBytes(dnskey.PublicKey[1:33])
+		y = new(big.Int).SetBytes(dnskey.PublicKey[33:65])
+	default:
+		if len(dnskey.PublicKey) < 64 {
+			return nil, ErrNoPublicKey
+		}
 		return nil, ErrUnsupportedAlgorithm
 	}
-
-	x := new(big.Int).SetBytes(dnskey.PublicKey[1:33])
-	y := new(big.Int).SetBytes(dnskey.PublicKey[33:65])
 
 	return &ecdsa.PublicKey{
 		Curve: elliptic.P256(),
@@ -409,6 +444,11 @@ func VerifyDNSKEYMatchesDS(dnskey DNSRecord, ds DNSRecord) (bool, error) {
 		return false, ErrKeyTagMismatch
 	}
 
+	// Compare algorithms (prevents tampered DS from passing)
+	if computedDS.Algorithm != ds.Algorithm {
+		return false, ErrAlgorithmMismatch
+	}
+
 	// Compare digests
 	if string(computedDS.Digest) != string(ds.Digest) {
 		return false, errors.New("dnssec: DS digest mismatch")
@@ -417,10 +457,11 @@ func VerifyDNSKEYMatchesDS(dnskey DNSRecord, ds DNSRecord) (bool, error) {
 	return true, nil
 }
 
-// VerifyDNSKEYSelfSignature verifies that a DNSKEY can self-validate.
-// This is a basic check that the key tag is correctly computed.
-// Full self-signature verification requires an RRSIG over the DNSKEY RRset.
-func VerifyDNSKEYSelfSignature(dnskey DNSRecord) (bool, error) {
+// ValidateDNSKEYFormat verifies that a DNSKEY has valid structure.
+// It checks the key tag is non-zero and the public key is parseable.
+// Note: This does NOT perform cryptographic self-signature verification.
+// For full self-signature validation, use VerifyRRSet with the DNSKEY RRset and its RRSIG.
+func ValidateDNSKEYFormat(dnskey DNSRecord) (bool, error) {
 	if dnskey.Type != DNSKEY {
 		return false, ErrInvalidDNSKEY
 	}

@@ -124,6 +124,34 @@ func SignRRSet(records []DNSRecord, privKey *ecdsa.PrivateKey, signerName string
 	}
 
 	buf := NewBytePacketBuffer()
+
+	// Prepend RRSIG RDATA fields (excluding Signature) per RFC 4034 Section 8.1
+	if err := buf.Writeu16(sig.TypeCovered); err != nil {
+		return DNSRecord{}, err
+	}
+	if err := buf.Write(sig.Algorithm); err != nil {
+		return DNSRecord{}, err
+	}
+	if err := buf.Write(sig.Labels); err != nil {
+		return DNSRecord{}, err
+	}
+	if err := buf.Writeu32(sig.OrigTTL); err != nil {
+		return DNSRecord{}, err
+	}
+	if err := buf.Writeu32(sig.Expiration); err != nil {
+		return DNSRecord{}, err
+	}
+	if err := buf.Writeu32(sig.Inception); err != nil {
+		return DNSRecord{}, err
+	}
+	if err := buf.Writeu16(sig.KeyTag); err != nil {
+		return DNSRecord{}, err
+	}
+	if err := buf.WriteName(strings.ToLower(sig.SignerName)); err != nil {
+		return DNSRecord{}, err
+	}
+
+	// Write canonical RRset per RFC 4034: owner|type|class|Original TTL|RDLENGTH|RDATA
 	for _, r := range records {
 		if err := buf.WriteName(strings.ToLower(r.Name)); err != nil {
 			return DNSRecord{}, err
@@ -131,10 +159,10 @@ func SignRRSet(records []DNSRecord, privKey *ecdsa.PrivateKey, signerName string
 		if err := buf.Writeu16(uint16(r.Type)); err != nil {
 			return DNSRecord{}, err
 		}
-		if err := buf.Writeu16(uint16(1)); err != nil {
+		if err := buf.Writeu16(1); err != nil {
 			return DNSRecord{}, err
 		} // Class IN
-		if err := buf.Writeu32(r.TTL); err != nil {
+		if err := buf.Writeu32(sig.OrigTTL); err != nil {
 			return DNSRecord{}, err
 		}
 		// Write RDATA in canonical form
@@ -171,21 +199,16 @@ func countLabels(name string) int {
 }
 
 // writeSignCanonicalRData writes the RDATA portion of a record in canonical form for signing.
-// This is a copy of writeCanonicalRData from dnssec_verify.go but without the switch on type
-// since SignRRSet only signs A records here (based on existing usage).
+// Handles all record types per RFC 4034 canonical wire format.
 func writeSignCanonicalRData(r *DNSRecord, buf *BytePacketBuffer) error {
 	switch r.Type {
 	case A:
-		// A record needs IP; if missing, fall through to data fallback
-		if len(r.IP) == 0 {
+		ip4 := r.IP.To4()
+		if ip4 == nil {
 			break
 		}
 		if err := buf.Writeu16(4); err != nil {
 			return err
-		}
-		ip4 := r.IP.To4()
-		if ip4 == nil {
-			break
 		}
 		for _, b := range ip4 {
 			if err := buf.Write(b); err != nil {
@@ -193,14 +216,89 @@ func writeSignCanonicalRData(r *DNSRecord, buf *BytePacketBuffer) error {
 			}
 		}
 		return nil
-	default:
-		// Fallback: write raw data if available
-		if len(r.Data) > 0 {
-			for _, b := range r.Data {
-				if err := buf.Write(b); err != nil {
-					return err
-				}
+	case AAAA:
+		if err := buf.Writeu16(16); err != nil {
+			return err
+		}
+		return writeBytes(buf, r.IP.To16())
+	case CNAME, NS, PTR:
+		return buf.WriteName(strings.ToLower(r.Host))
+	case MX:
+		if err := buf.Writeu16(r.Priority); err != nil {
+			return err
+		}
+		return buf.WriteName(strings.ToLower(r.Host))
+	case TXT:
+		for _, chunk := range stringsToChunks(r.Txt) {
+			if err := buf.Write(byte(len(chunk))); err != nil {
+				return err
 			}
+			if err := writeBytes(buf, []byte(chunk)); err != nil {
+				return err
+			}
+		}
+		return nil
+	case SOA:
+		if err := buf.WriteName(strings.ToLower(r.MName)); err != nil {
+			return err
+		}
+		if err := buf.WriteName(strings.ToLower(r.RName)); err != nil {
+			return err
+		}
+		if err := buf.Writeu32(r.Serial); err != nil {
+			return err
+		}
+		if err := buf.Writeu32(r.Refresh); err != nil {
+			return err
+		}
+		if err := buf.Writeu32(r.Retry); err != nil {
+			return err
+		}
+		if err := buf.Writeu32(r.Expire); err != nil {
+			return err
+		}
+		return buf.Writeu32(r.Minimum)
+	case SRV:
+		if err := buf.Writeu16(r.Priority); err != nil {
+			return err
+		}
+		if err := buf.Writeu16(r.Weight); err != nil {
+			return err
+		}
+		if err := buf.Writeu16(r.Port); err != nil {
+			return err
+		}
+		return buf.WriteName(strings.ToLower(r.Host))
+	case DNSKEY:
+		if err := buf.Writeu16(r.Flags); err != nil {
+			return err
+		}
+		if err := buf.Write(3); err != nil {
+			return err
+		}
+		if err := buf.Write(r.Algorithm); err != nil {
+			return err
+		}
+		return writeBytes(buf, r.PublicKey)
+	case DS:
+		if err := buf.Writeu16(r.KeyTag); err != nil {
+			return err
+		}
+		if err := buf.Write(r.Algorithm); err != nil {
+			return err
+		}
+		if err := buf.Write(r.DigestType); err != nil {
+			return err
+		}
+		return writeBytes(buf, r.Digest)
+	case NSEC:
+		if err := buf.WriteName(strings.ToLower(r.NextName)); err != nil {
+			return err
+		}
+		return writeBytes(buf, r.TypeBitMap)
+	default:
+		if len(r.Data) > 0 {
+			return writeBytes(buf, r.Data)
 		}
 	}
 	return nil
