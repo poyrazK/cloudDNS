@@ -106,21 +106,23 @@ func SignRRSet(records []DNSRecord, privKey *ecdsa.PrivateKey, signerName string
 	}
 
 	buf := NewBytePacketBuffer()
-	if err := buf.Writeu16(sig.TypeCovered); err != nil { return DNSRecord{}, err }
-	if err := buf.Write(sig.Algorithm); err != nil { return DNSRecord{}, err }
-	if err := buf.Write(sig.Labels); err != nil { return DNSRecord{}, err }
-	if err := buf.Writeu32(sig.OrigTTL); err != nil { return DNSRecord{}, err }
-	if err := buf.Writeu32(sig.Expiration); err != nil { return DNSRecord{}, err }
-	if err := buf.Writeu32(sig.Inception); err != nil { return DNSRecord{}, err }
-	if err := buf.Writeu16(sig.KeyTag); err != nil { return DNSRecord{}, err }
-	if err := buf.WriteName(sig.SignerName); err != nil { return DNSRecord{}, err }
-
 	for _, r := range records {
-		if err := buf.WriteName(strings.ToLower(r.Name)); err != nil { return DNSRecord{}, err }
-		if err := buf.Writeu16(uint16(r.Type)); err != nil { return DNSRecord{}, err }
-		if err := buf.Writeu16(uint16(1)); err != nil { return DNSRecord{}, err } // Class IN
-		if err := buf.Writeu32(r.TTL); err != nil { return DNSRecord{}, err }
-		// Simplified: Real DNSSEC requires canonical RDATA serialization here
+		if err := buf.WriteName(strings.ToLower(r.Name)); err != nil {
+			return DNSRecord{}, err
+		}
+		if err := buf.Writeu16(uint16(r.Type)); err != nil {
+			return DNSRecord{}, err
+		}
+		if err := buf.Writeu16(uint16(1)); err != nil {
+			return DNSRecord{}, err
+		} // Class IN
+		if err := buf.Writeu32(r.TTL); err != nil {
+			return DNSRecord{}, err
+		}
+		// Write RDATA in canonical form
+		if err := writeSignCanonicalRData(&r, buf); err != nil {
+			return DNSRecord{}, err
+		}
 	}
 
 	hashed := crypto.SHA256.New()
@@ -132,12 +134,12 @@ func SignRRSet(records []DNSRecord, privKey *ecdsa.PrivateKey, signerName string
 		return DNSRecord{}, err
 	}
 
-	rBytes := rb.Bytes()
-	sBytes := sb.Bytes()
+	rBytes := rb.FillBytes(make([]byte, 32))
+	sBytes := sb.FillBytes(make([]byte, 32))
 	sigData := make([]byte, 64)
-	copy(sigData[32-len(rBytes):], rBytes)
-	copy(sigData[64-len(sBytes):], sBytes)
-	
+	copy(sigData[0:32], rBytes)
+	copy(sigData[32:64], sBytes)
+
 	sig.Signature = sigData
 	return sig, nil
 }
@@ -146,4 +148,40 @@ func countLabels(name string) int {
 	name = strings.TrimSuffix(name, ".")
 	if name == "" { return 0 }
 	return len(strings.Split(name, "."))
+}
+
+// writeSignCanonicalRData writes the RDATA portion of a record in canonical form for signing.
+// This is a copy of writeCanonicalRData from dnssec_verify.go but without the switch on type
+// since SignRRSet only signs A records here (based on existing usage).
+func writeSignCanonicalRData(r *DNSRecord, buf *BytePacketBuffer) error {
+	switch r.Type {
+	case A:
+		// A record needs IP; if missing, fall through to data fallback
+		if r.IP == nil || len(r.IP) == 0 {
+			break
+		}
+		if err := buf.Writeu16(4); err != nil {
+			return err
+		}
+		ip4 := r.IP.To4()
+		if ip4 == nil {
+			break
+		}
+		for _, b := range ip4 {
+			if err := buf.Write(b); err != nil {
+				return err
+			}
+		}
+		return nil
+	default:
+		// Fallback: write raw data if available
+		if len(r.Data) > 0 {
+			for _, b := range r.Data {
+				if err := buf.Write(b); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
 }
