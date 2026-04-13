@@ -605,6 +605,363 @@ func TestFindMatchingDNSKEY_NotFound(t *testing.T) {
 	}
 }
 
+// TestCanonicalWireMarshal_RRSIG tests canonical wire format for RRSIG.
+func TestCanonicalWireMarshal_RRSIG(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	record := DNSRecord{
+		Name:        "example.com.",
+		Type:        RRSIG,
+		Class:       1,
+		TTL:         300,
+		TypeCovered: uint16(A),
+		Algorithm:   13,
+		Labels:      2,
+		OrigTTL:     300,
+		Expiration:  1600000000,
+		Inception:   1599900000,
+		KeyTag:      12345,
+		SignerName:  "example.com.",
+		Signature:   make([]byte, 64),
+	}
+
+	err := CanonicalWireMarshal(&record, buf)
+	if err != nil {
+		t.Fatalf("CanonicalWireMarshal failed: %v", err)
+	}
+
+	data := buf.Buf[:buf.Position()]
+	if len(data) < 18 {
+		t.Error("Expected at least 18 bytes for RRSIG header")
+	}
+}
+
+// TestCanonicalWireMarshal_DS tests canonical wire format for DS.
+func TestCanonicalWireMarshal_DS(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	record := DNSRecord{
+		Name:       "example.com.",
+		Type:       DS,
+		Class:      1,
+		TTL:        300,
+		KeyTag:     12345,
+		Algorithm:  13,
+		DigestType:  2,
+		Digest:     []byte{0x01, 0x02, 0x03, 0x04},
+	}
+
+	err := CanonicalWireMarshal(&record, buf)
+	if err != nil {
+		t.Fatalf("CanonicalWireMarshal failed: %v", err)
+	}
+
+	data := buf.Buf[:buf.Position()]
+	if len(data) < 4 {
+		t.Error("Expected at least 4 bytes for DS header")
+	}
+}
+
+// TestCanonicalWireMarshal_SOA tests canonical wire format for SOA.
+func TestCanonicalWireMarshal_SOA(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	record := DNSRecord{
+		Name:    "example.com.",
+		Type:    SOA,
+		Class:   1,
+		TTL:     300,
+		MName:   "ns1.example.com.",
+		RName:   "admin.example.com.",
+		Serial:  2024010101,
+		Refresh: 3600,
+		Retry:   3600,
+		Expire:  3600,
+		Minimum: 300,
+	}
+
+	err := CanonicalWireMarshal(&record, buf)
+	if err != nil {
+		t.Fatalf("CanonicalWireMarshal failed: %v", err)
+	}
+}
+
+// TestCanonicalWireMarshal_SRV tests canonical wire format for SRV.
+func TestCanonicalWireMarshal_SRV(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	record := DNSRecord{
+		Name:     "_http._tcp.example.com.",
+		Type:     SRV,
+		Class:    1,
+		TTL:      300,
+		Priority: 10,
+		Weight:   20,
+		Port:     80,
+		Host:     "server.example.com.",
+	}
+
+	err := CanonicalWireMarshal(&record, buf)
+	if err != nil {
+		t.Fatalf("CanonicalWireMarshal failed: %v", err)
+	}
+
+	data := buf.Buf[:buf.Position()]
+	if len(data) < 7 {
+		t.Error("Expected at least 7 bytes for SRV header")
+	}
+}
+
+// TestCanonicalWireMarshal_NSEC tests canonical wire format for NSEC.
+func TestCanonicalWireMarshal_NSEC(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	record := DNSRecord{
+		Name:       "example.com.",
+		Type:       NSEC,
+		Class:      1,
+		TTL:        300,
+		NextName:   "example2.com.",
+		TypeBitMap:  []byte{0x00, 0x03, 0x00, 0x00, 0x01, 0x00, 0x00, 0x1c, 0x00, 0x00, 0x00, 0x05},
+	}
+
+	err := CanonicalWireMarshal(&record, buf)
+	if err != nil {
+		t.Fatalf("CanonicalWireMarshal failed: %v", err)
+	}
+}
+
+// TestCanonicalWireMarshal_Default tests canonical wire format for unknown types using raw Data.
+func TestCanonicalWireMarshal_Default(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	record := DNSRecord{
+		Name:  "example.com.",
+		Type:  UNKNOWN,
+		Class: 1,
+		TTL:   300,
+		Data:  []byte{0x01, 0x02, 0x03},
+	}
+
+	err := CanonicalWireMarshal(&record, buf)
+	if err != nil {
+		t.Fatalf("CanonicalWireMarshal failed: %v", err)
+	}
+}
+
+// TestWriteCanonicalRData_NS tests canonical RDATA for NS records.
+func TestWriteCanonicalRData_NS(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	record := DNSRecord{
+		Name:  "example.com.",
+		Type:  NS,
+		Host:  "ns1.example.com.",
+	}
+
+	err := writeCanonicalRData(&record, buf)
+	if err != nil {
+		t.Fatalf("writeCanonicalRData failed: %v", err)
+	}
+}
+
+// TestWriteCanonicalRData_PTR tests canonical RDATA for PTR records.
+func TestWriteCanonicalRData_PTR(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	record := DNSRecord{
+		Name:  "1.0.0.127.in-addr.arpa.",
+		Type:  PTR,
+		Host:  "localhost.",
+	}
+
+	err := writeCanonicalRData(&record, buf)
+	if err != nil {
+		t.Fatalf("writeCanonicalRData failed: %v", err)
+	}
+}
+
+// TestWriteCanonicalRData_MX tests canonical RDATA for MX records.
+func TestWriteCanonicalRData_MX(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	record := DNSRecord{
+		Name:     "example.com.",
+		Type:     MX,
+		Priority: 10,
+		Host:     "mail.example.com.",
+	}
+
+	err := writeCanonicalRData(&record, buf)
+	if err != nil {
+		t.Fatalf("writeCanonicalRData failed: %v", err)
+	}
+
+	data := buf.Buf[:buf.Position()]
+	if len(data) < 3 {
+		t.Error("Expected at least 3 bytes for MX RDATA")
+	}
+}
+
+// TestWriteCanonicalRData_SOA tests canonical RDATA for SOA records.
+func TestWriteCanonicalRData_SOA(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	record := DNSRecord{
+		Name:    "example.com.",
+		Type:    SOA,
+		MName:   "ns1.example.com.",
+		RName:   "admin.example.com.",
+		Serial:  2024010101,
+		Refresh: 3600,
+		Retry:   3600,
+		Expire:  3600,
+		Minimum: 300,
+	}
+
+	err := writeCanonicalRData(&record, buf)
+	if err != nil {
+		t.Fatalf("writeCanonicalRData failed: %v", err)
+	}
+}
+
+// TestWriteCanonicalRData_SRV tests canonical RDATA for SRV records.
+func TestWriteCanonicalRData_SRV(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	record := DNSRecord{
+		Name:     "_http._tcp.example.com.",
+		Type:     SRV,
+		Priority: 10,
+		Weight:   20,
+		Port:     8080,
+		Host:     "server.example.com.",
+	}
+
+	err := writeCanonicalRData(&record, buf)
+	if err != nil {
+		t.Fatalf("writeCanonicalRData failed: %v", err)
+	}
+
+	data := buf.Buf[:buf.Position()]
+	if len(data) < 7 {
+		t.Error("Expected at least 7 bytes for SRV RDATA")
+	}
+}
+
+// TestWriteCanonicalRData_DS tests canonical RDATA for DS records.
+func TestWriteCanonicalRData_DS(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	record := DNSRecord{
+		Name:       "example.com.",
+		Type:       DS,
+		KeyTag:     12345,
+		Algorithm:  13,
+		DigestType:  2,
+		Digest:     []byte{0x01, 0x02, 0x03, 0x04},
+	}
+
+	err := writeCanonicalRData(&record, buf)
+	if err != nil {
+		t.Fatalf("writeCanonicalRData failed: %v", err)
+	}
+
+	data := buf.Buf[:buf.Position()]
+	if len(data) < 4 {
+		t.Error("Expected at least 4 bytes for DS RDATA")
+	}
+}
+
+// TestWriteCanonicalRData_NSEC tests canonical RDATA for NSEC records.
+func TestWriteCanonicalRData_NSEC(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	record := DNSRecord{
+		Name:       "example.com.",
+		Type:       NSEC,
+		NextName:   "example2.com.",
+		TypeBitMap:  []byte{0x00, 0x03, 0x00, 0x00, 0x01, 0x00, 0x00, 0x1c},
+	}
+
+	err := writeCanonicalRData(&record, buf)
+	if err != nil {
+		t.Fatalf("writeCanonicalRData failed: %v", err)
+	}
+}
+
+// TestWriteCanonicalRData_Default tests canonical RDATA for unknown types.
+func TestWriteCanonicalRData_Default(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	record := DNSRecord{
+		Name:  "example.com.",
+		Type:  UNKNOWN,
+		Data:  []byte{0x01, 0x02, 0x03},
+	}
+
+	err := writeCanonicalRData(&record, buf)
+	if err != nil {
+		t.Fatalf("writeCanonicalRData failed: %v", err)
+	}
+}
+
+// TestVerifyDNSKEYMatchesDS_KeyTagMismatch tests when key tags don't match.
+func TestVerifyDNSKEYMatchesDS_KeyTagMismatch(t *testing.T) {
+	privKey1, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	pubKey1 := privKey1.PublicKey
+	privKey2, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	pubKey2 := privKey2.PublicKey
+
+	// Create two DNSKEYs with different key tags
+	dnskey1 := DNSRecord{
+		Name:      "example.com.",
+		Type:      DNSKEY,
+		Flags:     257,
+		Protocol:  3,
+		Algorithm: 13,
+		PublicKey: encodeECDSAPublicKey(&pubKey1),
+	}
+
+	dnskey2 := DNSRecord{
+		Name:      "example.com.",
+		Type:      DNSKEY,
+		Flags:     257,
+		Protocol:  3,
+		Algorithm: 13,
+		PublicKey: encodeECDSAPublicKey(&pubKey2),
+	}
+
+	// Compute DS from dnskey1
+	ds, _ := dnskey1.ComputeDS(2)
+
+	// Verify with dnskey2 (different key tag) should fail
+	_, err := VerifyDNSKEYMatchesDS(dnskey2, ds)
+	if err != ErrKeyTagMismatch {
+		t.Errorf("Expected ErrKeyTagMismatch, got %v", err)
+	}
+}
+
+// TestVerifyDNSKEYSelfSignature_NoPublicKey tests with missing public key.
+func TestVerifyDNSKEYSelfSignature_NoPublicKey(t *testing.T) {
+	dnskey := DNSRecord{
+		Name:      "example.com.",
+		Type:      DNSKEY,
+		Flags:     257,
+		Protocol:  3,
+		Algorithm: 13,
+		PublicKey: []byte{0x01, 0x02}, // Too short
+	}
+
+	_, err := VerifyDNSKEYSelfSignature(dnskey)
+	if err != ErrNoPublicKey {
+		t.Errorf("Expected ErrNoPublicKey, got %v", err)
+	}
+}
+
+// TestVerifyDNSKEYSelfSignature_UnsupportedAlgorithm tests with invalid key format.
+func TestVerifyDNSKEYSelfSignature_UnsupportedAlgorithm(t *testing.T) {
+	dnskey := DNSRecord{
+		Name:      "example.com.",
+		Type:      DNSKEY,
+		Flags:     257,
+		Protocol:  3,
+		Algorithm: 13,
+		PublicKey: make([]byte, 65), // Valid length but wrong format
+	}
+
+	_, err := VerifyDNSKEYSelfSignature(dnskey)
+	if err != ErrUnsupportedAlgorithm {
+		t.Errorf("Expected ErrUnsupportedAlgorithm, got %v", err)
+	}
+}
+
 // encodeECDSAPublicKey encodes an ECDSA public key into DNSKEY format.
 func encodeECDSAPublicKey(pub *ecdsa.PublicKey) []byte {
 	// Uncompressed point format: 0x04 || X || Y
