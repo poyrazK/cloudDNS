@@ -101,24 +101,24 @@ func TestVerifyRRSet_RoundTrip(t *testing.T) {
 	// Verify manually using crypto
 	buf := NewBytePacketBuffer()
 	for _, r := range rrset {
-		buf.WriteName(strings.ToLower(r.Name))
-		buf.Writeu16(uint16(r.Type))
-		buf.Writeu16(r.Class)
-		buf.Writeu32(r.TTL)
+		_ = buf.WriteName(strings.ToLower(r.Name))
+		_ = buf.Writeu16(uint16(r.Type))
+		_ = buf.Writeu16(r.Class)
+		_ = buf.Writeu32(r.TTL)
 		ip4 := r.IP.To4()
-		buf.Writeu16(4)
+		_ = buf.Writeu16(4)
 		for _, b := range ip4 {
-			buf.Write(b)
+			_ = buf.Write(b)
 		}
 	}
 
 	signBuf := NewBytePacketBuffer()
 	for _, r := range rrset {
-		signBuf.WriteName(strings.ToLower(r.Name))
-		signBuf.Writeu16(uint16(r.Type))
-		signBuf.Writeu16(uint16(1))
-		signBuf.Writeu32(r.TTL)
-		writeSignCanonicalRData(&r, signBuf)
+		_ = signBuf.WriteName(strings.ToLower(r.Name))
+		_ = signBuf.Writeu16(uint16(r.Type))
+		_ = signBuf.Writeu16(uint16(1))
+		_ = signBuf.Writeu32(r.TTL)
+		_ = writeSignCanonicalRData(&r, signBuf)
 	}
 
 	// Try manual verification with same hash
