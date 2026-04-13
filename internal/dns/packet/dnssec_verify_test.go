@@ -1159,3 +1159,140 @@ func TestWriteCanonicalRData_A_InvalidIP(t *testing.T) {
 		t.Errorf("Expected 'invalid IPv4 address' error, got %v", err)
 	}
 }
+
+// TestCanonicalWireMarshal_SOA_BufferFull tests SOA buffer-full error in CanonicalWireMarshal.
+func TestCanonicalWireMarshal_SOA_BufferFull(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	buf.Pos = MaxPacketSize - 1 // Only 1 byte left
+	record := DNSRecord{
+		Name:    "example.com.",
+		Type:    SOA,
+		MName:   "ns1.example.com.",
+		RName:   "admin.example.com.",
+		Serial:  2024010101,
+		Refresh: 3600,
+		Retry:   3600,
+		Expire:  3600,
+		Minimum: 300,
+	}
+
+	err := CanonicalWireMarshal(&record, buf)
+	if err == nil {
+		t.Error("Expected buffer-full error for SOA in CanonicalWireMarshal")
+	}
+}
+
+// TestCanonicalWireMarshal_SRV_BufferFull tests SRV buffer-full error in CanonicalWireMarshal.
+func TestCanonicalWireMarshal_SRV_BufferFull(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	buf.Pos = MaxPacketSize - 2 // Only 2 bytes left
+	record := DNSRecord{
+		Name:     "_http._tcp.example.com.",
+		Type:     SRV,
+		Priority: 10,
+		Weight:   20,
+		Port:     8080,
+		Host:     "server.example.com.",
+	}
+
+	err := CanonicalWireMarshal(&record, buf)
+	if err == nil {
+		t.Error("Expected buffer-full error for SRV in CanonicalWireMarshal")
+	}
+}
+
+// TestCanonicalWireMarshal_DNSKEY_BufferFull tests DNSKEY buffer-full error in CanonicalWireMarshal.
+func TestCanonicalWireMarshal_DNSKEY_BufferFull(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	buf.Pos = MaxPacketSize - 2 // Only 2 bytes left
+	record := DNSRecord{
+		Name:     "example.com.",
+		Type:     DNSKEY,
+		Flags:    256,
+		Protocol: 3,
+		Algorithm: 13,
+		PublicKey: []byte{0x04, 0x01, 0x02, 0x03},
+	}
+
+	err := CanonicalWireMarshal(&record, buf)
+	if err == nil {
+		t.Error("Expected buffer-full error for DNSKEY in CanonicalWireMarshal")
+	}
+}
+
+// TestCanonicalWireMarshal_DS_BufferFull tests DS buffer-full error in CanonicalWireMarshal.
+func TestCanonicalWireMarshal_DS_BufferFull(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	buf.Pos = MaxPacketSize - 2 // Only 2 bytes left
+	record := DNSRecord{
+		Name:       "example.com.",
+		Type:       DS,
+		KeyTag:     12345,
+		Algorithm:  13,
+		DigestType: 2,
+		Digest:     []byte{1, 2, 3, 4},
+	}
+
+	err := CanonicalWireMarshal(&record, buf)
+	if err == nil {
+		t.Error("Expected buffer-full error for DS in CanonicalWireMarshal")
+	}
+}
+
+// TestCanonicalWireMarshal_RRSIG_BufferFull tests RRSIG buffer-full error in CanonicalWireMarshal.
+func TestCanonicalWireMarshal_RRSIG_BufferFull(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	buf.Pos = MaxPacketSize - 2 // Only 2 bytes left
+	record := DNSRecord{
+		Name:        "example.com.",
+		Type:        RRSIG,
+		TypeCovered: 1,
+		Algorithm:   13,
+		Labels:      2,
+		OrigTTL:     300,
+		Expiration:   4102444800,
+		Inception:   1609459200,
+		KeyTag:      12345,
+		SignerName:  "example.com.",
+		Signature:   make([]byte, 64),
+	}
+
+	err := CanonicalWireMarshal(&record, buf)
+	if err == nil {
+		t.Error("Expected buffer-full error for RRSIG in CanonicalWireMarshal")
+	}
+}
+
+// TestCanonicalWireMarshal_NSEC_BufferFull tests NSEC buffer-full error in CanonicalWireMarshal.
+func TestCanonicalWireMarshal_NSEC_BufferFull(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	buf.Pos = MaxPacketSize - 3 // Only 3 bytes left
+	record := DNSRecord{
+		Name:       "example.com.",
+		Type:       NSEC,
+		NextName:   "example2.com.",
+		TypeBitMap: []byte{1, 2, 3},
+	}
+
+	err := CanonicalWireMarshal(&record, buf)
+	if err == nil {
+		t.Error("Expected buffer-full error for NSEC in CanonicalWireMarshal")
+	}
+}
+
+// TestCanonicalWireMarshal_MX_BufferFull tests MX buffer-full error in CanonicalWireMarshal.
+func TestCanonicalWireMarshal_MX_BufferFull(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	buf.Pos = MaxPacketSize - 2 // Only 2 bytes left
+	record := DNSRecord{
+		Name:     "example.com.",
+		Type:     MX,
+		Priority: 10,
+		Host:     "mail.example.com.",
+	}
+
+	err := CanonicalWireMarshal(&record, buf)
+	if err == nil {
+		t.Error("Expected buffer-full error for MX in CanonicalWireMarshal")
+	}
+}
