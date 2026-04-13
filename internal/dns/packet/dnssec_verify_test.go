@@ -758,6 +758,21 @@ func TestWriteCanonicalRData_NS(t *testing.T) {
 	}
 }
 
+// TestWriteCanonicalRData_CNAME tests canonical RDATA for CNAME records.
+func TestWriteCanonicalRData_CNAME(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	record := DNSRecord{
+		Name:  "www.example.com.",
+		Type:  CNAME,
+		Host:  "example.com.",
+	}
+
+	err := writeCanonicalRData(&record, buf)
+	if err != nil {
+		t.Fatalf("writeCanonicalRData failed: %v", err)
+	}
+}
+
 // TestWriteCanonicalRData_PTR tests canonical RDATA for PTR records.
 func TestWriteCanonicalRData_PTR(t *testing.T) {
 	buf := NewBytePacketBuffer()
@@ -983,4 +998,35 @@ func containsLowercase(s string) bool {
 		}
 	}
 	return false
+}
+
+// TestWriteBytes_Error tests writeBytes error path when buffer is full.
+func TestWriteBytes_Error(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	// Fill buffer to near max
+	buf.Pos = MaxPacketSize - 5
+	// Try to write 10 bytes - should fail
+	data := []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+	err := writeBytes(buf, data)
+	if err == nil {
+		t.Error("Expected error when buffer is full")
+	}
+}
+
+// TestWriteCanonicalRData_A_InvalidIP tests A record with invalid IP.
+func TestWriteCanonicalRData_A_InvalidIP(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	record := DNSRecord{
+		Name:  "example.com.",
+		Type:  A,
+		IP:    []byte{1, 2}, // Invalid - too short for IPv4
+	}
+
+	err := writeCanonicalRData(&record, buf)
+	if err == nil {
+		t.Error("Expected error for invalid IPv4 address")
+	}
+	if err != nil && err.Error() != "invalid IPv4 address" {
+		t.Errorf("Expected 'invalid IPv4 address' error, got %v", err)
+	}
 }
