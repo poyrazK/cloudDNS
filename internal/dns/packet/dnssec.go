@@ -177,7 +177,7 @@ func writeSignCanonicalRData(r *DNSRecord, buf *BytePacketBuffer) error {
 	switch r.Type {
 	case A:
 		// A record needs IP; if missing, fall through to data fallback
-		if r.IP == nil || len(r.IP) == 0 {
+		if len(r.IP) == 0 {
 			break
 		}
 		if err := buf.Writeu16(4); err != nil {
