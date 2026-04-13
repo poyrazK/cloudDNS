@@ -136,3 +136,11 @@ func TestRun_ConfigError(t *testing.T) {
 		t.Error("Expected error for invalid DB URL")
 	}
 }
+
+func TestRun_DBOpenError(t *testing.T) {
+	// Use a DSN that fails at Open level (unusable URL scheme)
+	t.Setenv("DATABASE_URL", "scheme:///invalid")
+	if err := Run(nil); err == nil {
+		t.Error("Expected error for DB open failure")
+	}
+}
