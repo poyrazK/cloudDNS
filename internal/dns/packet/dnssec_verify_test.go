@@ -19,10 +19,10 @@ func TestVerifyRRSet_ValidSignature(t *testing.T) {
 
 	// Create a DNSKEY
 	dnskey := DNSRecord{
-		Name:     "example.com.",
-		Type:     DNSKEY,
-		Flags:    256,
-		Protocol: 3,
+		Name:      "example.com.",
+		Type:      DNSKEY,
+		Flags:     256,
+		Protocol:  3,
 		Algorithm: 13, // ECDSAP256SHA256
 		PublicKey: encodeECDSAPublicKey(&pubKey),
 	}
@@ -40,7 +40,7 @@ func TestVerifyRRSet_ValidSignature(t *testing.T) {
 
 	// Sign the RRSet
 	now := uint32(1600000000)
-	inception := now - 3600 // 1 hour ago
+	inception := now - 3600   // 1 hour ago
 	expiration := now + 86400 // 1 day ahead
 	keyTag := dnskey.ComputeKeyTag()
 
@@ -65,10 +65,10 @@ func TestVerifyRRSet_RoundTrip(t *testing.T) {
 	pubKey := privKey.PublicKey
 
 	dnskey := DNSRecord{
-		Name:     "example.com.",
-		Type:     DNSKEY,
-		Flags:    256,
-		Protocol: 3,
+		Name:      "example.com.",
+		Type:      DNSKEY,
+		Flags:     256,
+		Protocol:  3,
 		Algorithm: 13,
 		PublicKey: encodeECDSAPublicKey(&pubKey),
 	}
@@ -153,10 +153,10 @@ func TestVerifyRRSet_ExpiredSignature(t *testing.T) {
 	pubKey := privKey.PublicKey
 
 	dnskey := DNSRecord{
-		Name:     "example.com.",
-		Type:     DNSKEY,
-		Flags:    256,
-		Protocol: 3,
+		Name:      "example.com.",
+		Type:      DNSKEY,
+		Flags:     256,
+		Protocol:  3,
 		Algorithm: 13,
 		PublicKey: encodeECDSAPublicKey(&pubKey),
 	}
@@ -172,8 +172,8 @@ func TestVerifyRRSet_ExpiredSignature(t *testing.T) {
 	}
 
 	now := uint32(time.Now().Unix())
-	inception := now - 86400 * 2 // 2 days ago
-	expiration := now - 3600 // 1 hour ago (expired)
+	inception := now - 86400*2 // 2 days ago
+	expiration := now - 3600   // 1 hour ago (expired)
 	keyTag := dnskey.ComputeKeyTag()
 
 	sig, err := SignRRSet(rrset, privKey, "example.com.", keyTag, inception, expiration)
@@ -193,10 +193,10 @@ func TestVerifyRRSet_NotYetValid(t *testing.T) {
 	pubKey := privKey.PublicKey
 
 	dnskey := DNSRecord{
-		Name:     "example.com.",
-		Type:     DNSKEY,
-		Flags:    256,
-		Protocol: 3,
+		Name:      "example.com.",
+		Type:      DNSKEY,
+		Flags:     256,
+		Protocol:  3,
 		Algorithm: 13,
 		PublicKey: encodeECDSAPublicKey(&pubKey),
 	}
@@ -213,7 +213,7 @@ func TestVerifyRRSet_NotYetValid(t *testing.T) {
 
 	now := uint32(time.Now().Unix())
 	inception := now + 86400 // 1 day in the future
-	expiration := now + 86400 * 2
+	expiration := now + 86400*2
 	keyTag := dnskey.ComputeKeyTag()
 
 	sig, err := SignRRSet(rrset, privKey, "example.com.", keyTag, inception, expiration)
@@ -233,10 +233,10 @@ func TestVerifyRRSet_KeyTagMismatch(t *testing.T) {
 	pubKey := privKey.PublicKey
 
 	dnskey := DNSRecord{
-		Name:     "example.com.",
-		Type:     DNSKEY,
-		Flags:    256,
-		Protocol: 3,
+		Name:      "example.com.",
+		Type:      DNSKEY,
+		Flags:     256,
+		Protocol:  3,
 		Algorithm: 13,
 		PublicKey: encodeECDSAPublicKey(&pubKey),
 	}
@@ -269,10 +269,10 @@ func TestVerifyRRSet_AlgorithmMismatch(t *testing.T) {
 	pubKey := privKey.PublicKey
 
 	dnskey := DNSRecord{
-		Name:     "example.com.",
-		Type:     DNSKEY,
-		Flags:    256,
-		Protocol: 3,
+		Name:      "example.com.",
+		Type:      DNSKEY,
+		Flags:     256,
+		Protocol:  3,
 		Algorithm: 13,
 		PublicKey: encodeECDSAPublicKey(&pubKey),
 	}
@@ -305,10 +305,10 @@ func TestVerifyRRSet_InvalidSignature(t *testing.T) {
 	pubKey := privKey.PublicKey
 
 	dnskey := DNSRecord{
-		Name:     "example.com.",
-		Type:     DNSKEY,
-		Flags:    256,
-		Protocol: 3,
+		Name:      "example.com.",
+		Type:      DNSKEY,
+		Flags:     256,
+		Protocol:  3,
 		Algorithm: 13,
 		PublicKey: encodeECDSAPublicKey(&pubKey),
 	}
@@ -349,10 +349,10 @@ func TestVerifyDNSKEYMatchesDS_Valid(t *testing.T) {
 	pubKey := privKey.PublicKey
 
 	dnskey := DNSRecord{
-		Name:     "example.com.",
-		Type:     DNSKEY,
-		Flags:    257,
-		Protocol: 3,
+		Name:      "example.com.",
+		Type:      DNSKEY,
+		Flags:     257,
+		Protocol:  3,
 		Algorithm: 13,
 		PublicKey: encodeECDSAPublicKey(&pubKey),
 	}
@@ -379,10 +379,10 @@ func TestVerifyDNSKEYMatchesDS_Invalid(t *testing.T) {
 	pubKey := privKey.PublicKey
 
 	dnskey := DNSRecord{
-		Name:     "example.com.",
-		Type:     DNSKEY,
-		Flags:    257,
-		Protocol: 3,
+		Name:      "example.com.",
+		Type:      DNSKEY,
+		Flags:     257,
+		Protocol:  3,
 		Algorithm: 13,
 		PublicKey: encodeECDSAPublicKey(&pubKey),
 	}
@@ -404,10 +404,10 @@ func TestVerifyDNSKEYSelfSignature_Valid(t *testing.T) {
 	pubKey := privKey.PublicKey
 
 	dnskey := DNSRecord{
-		Name:     "example.com.",
-		Type:     DNSKEY,
-		Flags:    257,
-		Protocol: 3,
+		Name:      "example.com.",
+		Type:      DNSKEY,
+		Flags:     257,
+		Protocol:  3,
 		Algorithm: 13,
 		PublicKey: encodeECDSAPublicKey(&pubKey),
 	}
@@ -498,12 +498,12 @@ func TestCanonicalWireMarshal_DNSKEY(t *testing.T) {
 
 	buf := NewBytePacketBuffer()
 	record := DNSRecord{
-		Name:     "example.COM.",
-		Type:     DNSKEY,
-		Class:    1,
-		TTL:      300,
-		Flags:    257,
-		Protocol: 3,
+		Name:      "example.COM.",
+		Type:      DNSKEY,
+		Class:     1,
+		TTL:       300,
+		Flags:     257,
+		Protocol:  3,
 		Algorithm: 13,
 		PublicKey: encodeECDSAPublicKey(&pubKey),
 	}
@@ -546,20 +546,20 @@ func TestFindMatchingDNSKEY(t *testing.T) {
 
 	// Create first DNSKEY (non-matching)
 	dnskey1 := DNSRecord{
-		Name:     "example.com.",
-		Type:     DNSKEY,
-		Flags:    256,
-		Protocol: 3,
+		Name:      "example.com.",
+		Type:      DNSKEY,
+		Flags:     256,
+		Protocol:  3,
 		Algorithm: 13,
 		PublicKey: encodeECDSAPublicKey(&pubKey1),
 	}
 
 	// Create second DNSKEY (matching) - compute its actual key tag
 	dnskey2 := DNSRecord{
-		Name:     "example.com.",
-		Type:     DNSKEY,
-		Flags:    256,
-		Protocol: 3,
+		Name:      "example.com.",
+		Type:      DNSKEY,
+		Flags:     256,
+		Protocol:  3,
 		Algorithm: 13,
 		PublicKey: encodeECDSAPublicKey(&pubKey2),
 	}
@@ -587,16 +587,16 @@ func TestFindMatchingDNSKEY(t *testing.T) {
 func TestFindMatchingDNSKEY_NotFound(t *testing.T) {
 	dnskeys := []DNSRecord{
 		{
-			Name:     "example.com.",
-			Type:     DNSKEY,
+			Name:      "example.com.",
+			Type:      DNSKEY,
 			Algorithm: 13,
 		},
 	}
 
 	rrsig := DNSRecord{
 		TypeCovered: uint16(A),
-		Algorithm:  14, // Different algorithm
-		KeyTag:     12345,
+		Algorithm:   14, // Different algorithm
+		KeyTag:      12345,
 	}
 
 	found := FindMatchingDNSKEY(rrsig, dnskeys)

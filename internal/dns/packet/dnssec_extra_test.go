@@ -41,11 +41,11 @@ func TestComputeDS_Unsupported(t *testing.T) {
 func TestSignRRSet_SignError(t *testing.T) {
 	// Create a dummy private key that might fail (not really possible with standard ecdsa)
 	// But we can test other paths.
-	
+
 	// inception > expiration
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	rrset := []DNSRecord{{Name: "test.", Type: A, TTL: 60}}
-	
+
 	sig, err := SignRRSet(rrset, key, "signer.", 1, 200, 100) // inception > expiration
 	if err != nil {
 		t.Fatalf("SignRRSet failed: %v", err)

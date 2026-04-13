@@ -17,11 +17,19 @@ func (r *DNSRecord) ComputeKeyTag() uint16 {
 	}
 
 	buf := NewBytePacketBuffer()
-	if err := buf.Writeu16(r.Flags); err != nil { return 0 }
-	if err := buf.Write(3); err != nil { return 0 } // Protocol: MUST be 3 (RFC 4034 Section 2.1.2)
-	if err := buf.Write(r.Algorithm); err != nil { return 0 }
+	if err := buf.Writeu16(r.Flags); err != nil {
+		return 0
+	}
+	if err := buf.Write(3); err != nil {
+		return 0
+	} // Protocol: MUST be 3 (RFC 4034 Section 2.1.2)
+	if err := buf.Write(r.Algorithm); err != nil {
+		return 0
+	}
 	for _, b := range r.PublicKey {
-		if err := buf.Write(b); err != nil { return 0 }
+		if err := buf.Write(b); err != nil {
+			return 0
+		}
 	}
 
 	data := buf.Buf[:buf.Position()]
@@ -49,12 +57,22 @@ func (r *DNSRecord) ComputeDS(digestType uint8) (DNSRecord, error) {
 	// 1. Prepare Buffer: The digest is calculated over [owner name | DNSKEY RDATA]
 	// Owner name MUST be in its canonical wire format (lowercase, no compression).
 	buf := NewBytePacketBuffer()
-	if err := buf.WriteName(strings.ToLower(r.Name)); err != nil { return DNSRecord{}, err }
-	if err := buf.Writeu16(r.Flags); err != nil { return DNSRecord{}, err }
-	if err := buf.Write(3); err != nil { return DNSRecord{}, err } // Protocol
-	if err := buf.Write(r.Algorithm); err != nil { return DNSRecord{}, err }
+	if err := buf.WriteName(strings.ToLower(r.Name)); err != nil {
+		return DNSRecord{}, err
+	}
+	if err := buf.Writeu16(r.Flags); err != nil {
+		return DNSRecord{}, err
+	}
+	if err := buf.Write(3); err != nil {
+		return DNSRecord{}, err
+	} // Protocol
+	if err := buf.Write(r.Algorithm); err != nil {
+		return DNSRecord{}, err
+	}
 	for _, b := range r.PublicKey {
-		if err := buf.Write(b); err != nil { return DNSRecord{}, err }
+		if err := buf.Write(b); err != nil {
+			return DNSRecord{}, err
+		}
 	}
 
 	// 2. Calculate the cryptographic digest
@@ -96,7 +114,7 @@ func SignRRSet(records []DNSRecord, privKey *ecdsa.PrivateKey, signerName string
 		Class:       1,
 		TTL:         records[0].TTL,
 		TypeCovered: uint16(records[0].Type),
-		Algorithm:   13, // ECDSAP256SHA256
+		Algorithm:   13,                                  // ECDSAP256SHA256
 		Labels:      uint8(countLabels(records[0].Name)), // #nosec G115
 		OrigTTL:     records[0].TTL,
 		Expiration:  expiration,
@@ -146,7 +164,9 @@ func SignRRSet(records []DNSRecord, privKey *ecdsa.PrivateKey, signerName string
 
 func countLabels(name string) int {
 	name = strings.TrimSuffix(name, ".")
-	if name == "" { return 0 }
+	if name == "" {
+		return 0
+	}
 	return len(strings.Split(name, "."))
 }
 
