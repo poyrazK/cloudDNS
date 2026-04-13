@@ -645,7 +645,7 @@ func TestCanonicalWireMarshal_DS(t *testing.T) {
 		TTL:        300,
 		KeyTag:     12345,
 		Algorithm:  13,
-		DigestType:  2,
+		DigestType: 2,
 		Digest:     []byte{0x01, 0x02, 0x03, 0x04},
 	}
 
@@ -717,7 +717,7 @@ func TestCanonicalWireMarshal_NSEC(t *testing.T) {
 		Class:      1,
 		TTL:        300,
 		NextName:   "example2.com.",
-		TypeBitMap:  []byte{0x00, 0x03, 0x00, 0x00, 0x01, 0x00, 0x00, 0x1c, 0x00, 0x00, 0x00, 0x05},
+		TypeBitMap: []byte{0x00, 0x03, 0x00, 0x00, 0x01, 0x00, 0x00, 0x1c, 0x00, 0x00, 0x00, 0x05},
 	}
 
 	err := CanonicalWireMarshal(&record, buf)
@@ -747,9 +747,9 @@ func TestCanonicalWireMarshal_Default(t *testing.T) {
 func TestWriteCanonicalRData_NS(t *testing.T) {
 	buf := NewBytePacketBuffer()
 	record := DNSRecord{
-		Name:  "example.com.",
-		Type:  NS,
-		Host:  "ns1.example.com.",
+		Name: "example.com.",
+		Type: NS,
+		Host: "ns1.example.com.",
 	}
 
 	err := writeCanonicalRData(&record, buf)
@@ -762,9 +762,9 @@ func TestWriteCanonicalRData_NS(t *testing.T) {
 func TestWriteCanonicalRData_CNAME(t *testing.T) {
 	buf := NewBytePacketBuffer()
 	record := DNSRecord{
-		Name:  "www.example.com.",
-		Type:  CNAME,
-		Host:  "example.com.",
+		Name: "www.example.com.",
+		Type: CNAME,
+		Host: "example.com.",
 	}
 
 	err := writeCanonicalRData(&record, buf)
@@ -777,9 +777,9 @@ func TestWriteCanonicalRData_CNAME(t *testing.T) {
 func TestWriteCanonicalRData_PTR(t *testing.T) {
 	buf := NewBytePacketBuffer()
 	record := DNSRecord{
-		Name:  "1.0.0.127.in-addr.arpa.",
-		Type:  PTR,
-		Host:  "localhost.",
+		Name: "1.0.0.127.in-addr.arpa.",
+		Type: PTR,
+		Host: "localhost.",
 	}
 
 	err := writeCanonicalRData(&record, buf)
@@ -861,7 +861,7 @@ func TestWriteCanonicalRData_DS(t *testing.T) {
 		Type:       DS,
 		KeyTag:     12345,
 		Algorithm:  13,
-		DigestType:  2,
+		DigestType: 2,
 		Digest:     []byte{0x01, 0x02, 0x03, 0x04},
 	}
 
@@ -883,7 +883,7 @@ func TestWriteCanonicalRData_NSEC(t *testing.T) {
 		Name:       "example.com.",
 		Type:       NSEC,
 		NextName:   "example2.com.",
-		TypeBitMap:  []byte{0x00, 0x03, 0x00, 0x00, 0x01, 0x00, 0x00, 0x1c},
+		TypeBitMap: []byte{0x00, 0x03, 0x00, 0x00, 0x01, 0x00, 0x00, 0x1c},
 	}
 
 	err := writeCanonicalRData(&record, buf)
@@ -896,9 +896,9 @@ func TestWriteCanonicalRData_NSEC(t *testing.T) {
 func TestWriteCanonicalRData_Default(t *testing.T) {
 	buf := NewBytePacketBuffer()
 	record := DNSRecord{
-		Name:  "example.com.",
-		Type:  UNKNOWN,
-		Data:  []byte{0x01, 0x02, 0x03},
+		Name: "example.com.",
+		Type: UNKNOWN,
+		Data: []byte{0x01, 0x02, 0x03},
 	}
 
 	err := writeCanonicalRData(&record, buf)
@@ -977,6 +977,135 @@ func TestVerifyDNSKEYSelfSignature_UnsupportedAlgorithm(t *testing.T) {
 	}
 }
 
+// TestWriteCanonicalRData_SOA_BufferFull tests SOA error when buffer is nearly full.
+func TestWriteCanonicalRData_SOA_BufferFull(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	buf.Pos = MaxPacketSize - 1 // Only 1 byte left
+	record := DNSRecord{
+		Name:    "example.com.",
+		Type:    SOA,
+		MName:   "ns1.example.com.",
+		RName:   "admin.example.com.",
+		Serial:  2024010101,
+		Refresh: 3600,
+		Retry:   3600,
+		Expire:  3600,
+		Minimum: 300,
+	}
+
+	err := writeCanonicalRData(&record, buf)
+	if err == nil {
+		t.Error("Expected buffer-full error for SOA")
+	}
+}
+
+// TestWriteCanonicalRData_SRV_BufferFull tests SRV error when buffer is nearly full.
+func TestWriteCanonicalRData_SRV_BufferFull(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	buf.Pos = MaxPacketSize - 2 // Only 2 bytes left
+	record := DNSRecord{
+		Name:     "_http._tcp.example.com.",
+		Type:     SRV,
+		Priority: 10,
+		Weight:   20,
+		Port:     8080,
+		Host:     "server.example.com.",
+	}
+
+	err := writeCanonicalRData(&record, buf)
+	if err == nil {
+		t.Error("Expected buffer-full error for SRV")
+	}
+}
+
+// TestWriteCanonicalRData_DNSKEY_BufferFull tests DNSKEY error when buffer is nearly full.
+func TestWriteCanonicalRData_DNSKEY_BufferFull(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	buf.Pos = MaxPacketSize - 2 // Only 2 bytes left
+	record := DNSRecord{
+		Name:      "example.com.",
+		Type:      DNSKEY,
+		Flags:     257,
+		Protocol:  3,
+		Algorithm: 13,
+		PublicKey: make([]byte, 65),
+	}
+
+	err := writeCanonicalRData(&record, buf)
+	if err == nil {
+		t.Error("Expected buffer-full error for DNSKEY")
+	}
+}
+
+// TestWriteCanonicalRData_DS_BufferFull tests DS error when buffer is nearly full.
+func TestWriteCanonicalRData_DS_BufferFull(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	buf.Pos = MaxPacketSize - 2 // Only 2 bytes left
+	record := DNSRecord{
+		Name:       "example.com.",
+		Type:       DS,
+		KeyTag:     12345,
+		Algorithm:  13,
+		DigestType: 2,
+		Digest:     []byte{1, 2, 3, 4},
+	}
+
+	err := writeCanonicalRData(&record, buf)
+	if err == nil {
+		t.Error("Expected buffer-full error for DS")
+	}
+}
+
+// TestWriteCanonicalRData_TXT_BufferFull tests TXT error when buffer is nearly full.
+func TestWriteCanonicalRData_TXT_BufferFull(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	buf.Pos = MaxPacketSize - 3 // Only 3 bytes left
+	record := DNSRecord{
+		Name: "example.com.",
+		Type: TXT,
+		Txt:  "long chunk that won't fit",
+	}
+
+	err := writeCanonicalRData(&record, buf)
+	if err == nil {
+		t.Error("Expected buffer-full error for TXT")
+	}
+}
+
+// TestWriteCanonicalRData_NSEC_BufferFull tests NSEC error when buffer is nearly full.
+func TestWriteCanonicalRData_NSEC_BufferFull(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	buf.Pos = MaxPacketSize - 3 // Only 3 bytes left
+	record := DNSRecord{
+		Name:       "example.com.",
+		Type:       NSEC,
+		NextName:   "example2.com.",
+		TypeBitMap: []byte{1, 2, 3},
+	}
+
+	err := writeCanonicalRData(&record, buf)
+	if err == nil {
+		t.Error("Expected buffer-full error for NSEC")
+	}
+}
+
+// TestWriteCanonicalRData_MX_BufferFull tests MX error when buffer is nearly full.
+func TestWriteCanonicalRData_MX_BufferFull(t *testing.T) {
+	buf := NewBytePacketBuffer()
+	buf.Pos = MaxPacketSize - 2 // Only 2 bytes left
+	record := DNSRecord{
+		Name:     "example.com.",
+		Type:     MX,
+		Priority: 10,
+		Host:     "mail.example.com.",
+	}
+
+	err := writeCanonicalRData(&record, buf)
+	if err == nil {
+		t.Error("Expected buffer-full error for MX")
+	}
+}
+
 // encodeECDSAPublicKey encodes an ECDSA public key into DNSKEY format.
 func encodeECDSAPublicKey(pub *ecdsa.PublicKey) []byte {
 	// Uncompressed point format: 0x04 || X || Y
@@ -1017,9 +1146,9 @@ func TestWriteBytes_Error(t *testing.T) {
 func TestWriteCanonicalRData_A_InvalidIP(t *testing.T) {
 	buf := NewBytePacketBuffer()
 	record := DNSRecord{
-		Name:  "example.com.",
-		Type:  A,
-		IP:    []byte{1, 2}, // Invalid - too short for IPv4
+		Name: "example.com.",
+		Type: A,
+		IP:   []byte{1, 2}, // Invalid - too short for IPv4
 	}
 
 	err := writeCanonicalRData(&record, buf)
