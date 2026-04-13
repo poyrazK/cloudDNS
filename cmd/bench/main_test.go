@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"flag"
@@ -451,4 +452,42 @@ func TestSeedDatabase_ZoneConflict(t *testing.T) {
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("unmet sqlmock expectations: %v", err)
 	}
+}
+
+// TestRunAndCaptureScale_Mock tests runAndCaptureScale with a mocked command runner
+func TestRunAndCaptureScale_Mock(t *testing.T) {
+	orig := runCommand
+	defer func() { runCommand = orig }()
+
+	var buf bytes.Buffer
+	buf.WriteString("Throughput:       123.45 queries/sec\nP50 (Median):     1.2ms\nP99:              5.5ms\nReliability:      100.00%")
+
+	runCommand = func(name string, args ...string) commandRunner {
+		return &mockCommand{out: &buf}
+	}
+
+	result := runAndCaptureScale("127.0.0.1:10053", 1, 1, 100, "TEST")
+
+	if result.Throughput != "123.45" {
+		t.Errorf("Expected throughput 123.45, got %s", result.Throughput)
+	}
+	if result.Success != "100.00" {
+		t.Errorf("Expected success 100.00, got %s", result.Success)
+	}
+}
+
+type mockCommand struct {
+	stdout *bytes.Buffer
+	out    *bytes.Buffer
+}
+
+func (m *mockCommand) SetStdout(buf *bytes.Buffer) {
+	m.out = buf
+}
+
+func (m *mockCommand) Run() error {
+	if m.out != nil {
+		m.out.WriteString("Throughput:       123.45 queries/sec\nP50 (Median):     1.2ms\nP99:              5.5ms\nReliability:      100.00%")
+	}
+	return nil
 }

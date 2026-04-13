@@ -365,12 +365,34 @@ func runScaleTest(count int, concurrency int) {
 	fmt.Println("==========================================================")
 }
 
+type commandRunner interface {
+	Run() error
+	SetStdout(*bytes.Buffer)
+}
+
+type goCommand struct {
+	cmd   *exec.Cmd
+	stdou *bytes.Buffer
+}
+
+func (g *goCommand) SetStdout(buf *bytes.Buffer) {
+	g.stdou = buf
+	g.cmd.Stdout = buf
+}
+
+func (g *goCommand) Run() error {
+	return g.cmd.Run()
+}
+
+var runCommand func(string, ...string) commandRunner = func(name string, args ...string) commandRunner {
+	return &goCommand{cmd: exec.Command(name, args...)}
+}
+
 func runAndCaptureScale(addr string, n int, c int, rangeLimit int, phase string) Result {
 	fmt.Printf("Running Phase: %s...\n", phase)
-	args := []string{"run", "cmd/bench/main.go", "-server", addr, "-n", strconv.Itoa(n), "-c", strconv.Itoa(c), "-range", strconv.Itoa(rangeLimit)}
-	cmd := exec.Command("go", args...) // #nosec G204
+	cmd := runCommand("go", "run", "cmd/bench/main.go", "-server", addr, "-n", strconv.Itoa(n), "-c", strconv.Itoa(c), "-range", strconv.Itoa(rangeLimit))
 	var out bytes.Buffer
-	cmd.Stdout = &out
+	cmd.SetStdout(&out)
 	_ = cmd.Run()
 	output := out.String()
 	return Result{
