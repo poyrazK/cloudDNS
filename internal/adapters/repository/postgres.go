@@ -151,6 +151,61 @@ func (r *PostgresRepository) GetZone(ctx context.Context, name string) (*domain.
 	return &z, nil
 }
 
+func (r *PostgresRepository) GetDNSKEYs(ctx context.Context, zoneName string) ([]domain.Record, error) {
+	// First get the zone to find zone ID
+	zone, err := r.GetZone(ctx, zoneName)
+	if err != nil {
+		return nil, err
+	}
+	if zone == nil {
+		return nil, nil
+	}
+
+	query := `
+		SELECT r.id, r.zone_id, r.name, r.type, r.content, r.ttl, r.priority, r.weight, r.port, r.network,
+		       r.health_check_type, r.health_check_target, COALESCE(h.status, 'UNKNOWN')
+		FROM dns_records r
+		LEFT JOIN record_health h ON r.id = h.record_id
+		WHERE r.zone_id = $1 AND r.type = 'DNSKEY'`
+	rows, errQuery := r.db.QueryContext(ctx, query, zone.ID)
+	if errQuery != nil {
+		return nil, errQuery
+	}
+	defer func() {
+		if errClose := rows.Close(); errClose != nil {
+			log.Printf("failed to close rows: %v", errClose)
+		}
+	}()
+
+	var records []domain.Record
+	for rows.Next() {
+		var rec domain.Record
+		var priority, weight, port sql.NullInt32
+		var hcType, hcTarget, hStatus sql.NullString
+		if errScan := rows.Scan(
+			&rec.ID, &rec.ZoneID, &rec.Name, &rec.Type, &rec.Content, &rec.TTL, &priority, &weight, &port, &rec.Network,
+			&hcType, &hcTarget, &hStatus,
+		); errScan != nil {
+			return nil, errScan
+		}
+		if priority.Valid {
+			p := int(priority.Int32)
+			rec.Priority = &p
+		}
+		if weight.Valid {
+			w := int(weight.Int32)
+			rec.Weight = &w
+		}
+		if port.Valid {
+			p := int(port.Int32)
+			rec.Port = &p
+		}
+		records = append(records, rec)
+	}
+
+	return records, rows.Err()
+}
+
 func (r *PostgresRepository) GetRecord(ctx context.Context, id string, zoneID string, tenantID string) (*domain.Record, error) {
 	query := `
 		SELECT r.id, r.zone_id, r.name, r.type, r.content, r.ttl, r.priority, r.weight, r.port, r.network,

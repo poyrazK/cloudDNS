@@ -219,6 +219,31 @@ func TestPostgresRepository_Unit(t *testing.T) {
 		}
 	})
 
+	// 11b. Test GetDNSKEYs
+	t.Run("GetDNSKEYs", func(t *testing.T) {
+		// First mock GetZone
+		zoneRows := sqlmock.NewRows([]string{"id", "tenant_id", "name", "vpc_id", "description", "role", "master_server", "created_at", "updated_at"}).
+			AddRow("z1", "t1", "test.com.", "", "", "master", "", time.Now(), time.Now())
+		mock.ExpectQuery(`SELECT .* FROM dns_zones WHERE LOWER\(name\) = LOWER\(\$1\)`).
+			WithArgs("test.com.").
+			WillReturnRows(zoneRows)
+
+		// Then mock GetDNSKEYs query
+		dnskeyRows := sqlmock.NewRows([]string{"id", "zone_id", "name", "type", "content", "ttl", "priority", "weight", "port", "network", "health_check_type", "health_check_target", "status"}).
+			AddRow("dk1", "z1", "test.com.", "DNSKEY", " AwAAAEEAE....", 300, nil, nil, nil, nil, nil, nil, "UNKNOWN")
+		mock.ExpectQuery(`SELECT r\.id, r\.zone_id, r\.name, r\.type, r\.content, r\.ttl, r\.priority, r\.weight, r\.port, r\.network, r\.health_check_type, r\.health_check_target, COALESCE\(h\.status, 'UNKNOWN'\) FROM dns_records r LEFT JOIN record_health h ON r\.id = h\.record_id WHERE r\.zone_id = \$1 AND r\.type = 'DNSKEY'`).
+			WithArgs("z1").
+			WillReturnRows(dnskeyRows)
+
+		recs, err := repo.GetDNSKEYs(ctx, "test.com.")
+		if err != nil {
+			t.Errorf("GetDNSKEYs failed: %v", err)
+		}
+		if len(recs) != 1 || recs[0].Type != "DNSKEY" {
+			t.Errorf("Unexpected records: %+v", recs)
+		}
+	})
+
 	// 12. Test CreateZoneWithRecords
 	t.Run("CreateZoneWithRecords", func(t *testing.T) {
 		mock.ExpectBegin()

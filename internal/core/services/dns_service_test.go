@@ -175,6 +175,7 @@ func (m *mockRepo) ListKeysForZone(_ context.Context, _ string) ([]domain.DNSSEC
 	return nil, m.err
 }
 func (m *mockRepo) UpdateKey(_ context.Context, _ *domain.DNSSECKey) error { return m.err }
+func (m *mockRepo) GetDNSKEYs(_ context.Context, _ string) ([]domain.Record, error) { return nil, nil }
 
 func (m *mockRepo) GetAPIKeyByHash(_ context.Context, _ string) (*domain.APIKey, error) {
 	return nil, m.err

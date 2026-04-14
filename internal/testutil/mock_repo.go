@@ -154,6 +154,11 @@ func (m *MockRepo) UpdateKey(ctx context.Context, key *domain.DNSSECKey) error {
 	return args.Error(0)
 }
 
+func (m *MockRepo) GetDNSKEYs(ctx context.Context, zoneName string) ([]domain.Record, error) {
+	args := m.Called(zoneName)
+	return args.Get(0).([]domain.Record), args.Error(1)
+}
+
 func (m *MockRepo) GetAPIKeyByHash(ctx context.Context, keyHash string) (*domain.APIKey, error) {
 	args := m.Called(keyHash)
 	if args.Get(0) == nil {

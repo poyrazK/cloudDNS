@@ -107,6 +107,10 @@ func (m *mockDNSSECRepo) UpdateKey(_ context.Context, key *domain.DNSSECKey) err
 	return nil
 }
 
+func (m *mockDNSSECRepo) GetDNSKEYs(_ context.Context, _ string) ([]domain.Record, error) {
+	return nil, nil
+}
+
 func (m *mockDNSSECRepo) GetAPIKeyByHash(_ context.Context, _ string) (*domain.APIKey, error) {
 	return nil, nil
 }
