@@ -18,6 +18,7 @@ import (
 	"github.com/poyrazK/cloudDNS/internal/adapters/api"
 	"github.com/poyrazK/cloudDNS/internal/adapters/repository"
 	"github.com/poyrazK/cloudDNS/internal/adapters/routing"
+	"github.com/poyrazK/cloudDNS/internal/core/config"
 	"github.com/poyrazK/cloudDNS/internal/core/ports"
 	"github.com/poyrazK/cloudDNS/internal/core/services"
 	"github.com/poyrazK/cloudDNS/internal/dns/server"
@@ -232,6 +233,9 @@ func run(ctx context.Context) error {
 	dnsServer := server.NewServer(dnsAddr, repo, logger)
 	dnsServer.Redis = redisCache
 
+	// Configure DNSSEC if trust anchors are provided
+	dnsServer.DNSSECConfig = parseDNSSECConfig()
+
 	go func() {
 		if err := dnsServer.Run(runCtx); err != nil {
 			logger.Error("DNS server failed", "error", err)
@@ -324,4 +328,29 @@ func getEnvUint32(key string, def uint32) uint32 {
 		return def
 	}
 	return uint32(u)
+}
+
+// parseDNSSECConfig reads DNSSEC configuration from environment variables.
+// TRUST_ANCHOR_<zone> contains base64-encoded DNSKEY RDATA.
+// DNSSEC_MODE can be "disabled", "ad-bit-only", or "strict".
+func parseDNSSECConfig() *config.DNSSECConfig {
+	mode := os.Getenv("DNSSEC_MODE")
+	anchors := make(map[string]string)
+	for _, env := range os.Environ() {
+		if strings.HasPrefix(env, "TRUST_ANCHOR_") {
+			parts := strings.SplitN(env, "=", 2)
+			if len(parts) == 2 {
+				zone := strings.TrimPrefix(parts[0], "TRUST_ANCHOR_")
+				zone = strings.ToLower(zone)
+				anchors[zone] = parts[1]
+			}
+		}
+	}
+	if len(anchors) == 0 && mode == "" {
+		return nil
+	}
+	return &config.DNSSECConfig{
+		Mode:         mode,
+		TrustAnchors: anchors,
+	}
 }

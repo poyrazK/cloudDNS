@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/poyrazK/cloudDNS/internal/adapters/repository"
+	"github.com/poyrazK/cloudDNS/internal/core/config"
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
 	"github.com/poyrazK/cloudDNS/internal/core/ports"
 	"github.com/poyrazK/cloudDNS/internal/core/services"
@@ -52,6 +53,7 @@ type Server struct {
 	RecursionEnabled bool
 	CookieSecret     []byte
 	DNSSECMode      string // "disabled", "ad-bit-only", "strict"
+	DNSSECConfig     *config.DNSSECConfig
 
 	// Testing/Chaos flags
 	SimulateDBLatency  time.Duration
@@ -219,6 +221,20 @@ func (s *Server) startInvalidationListener(ctx context.Context) {
 
 func (s *Server) Run(ctx context.Context) error {
 	s.Logger.Info("starting parallel server", "addr", s.Addr, "listeners", runtime.NumCPU())
+
+	// Initialize DNSSECValidator from config if provided
+	if s.DNSSECConfig != nil {
+		anchors, err := s.DNSSECConfig.ToMap()
+		if err != nil {
+			s.Logger.Warn("failed to parse DNSSEC trust anchors", "error", err)
+		} else {
+			s.DNSSECValidator = services.NewDNSSECValidator(anchors)
+			s.Logger.Info("DNSSEC validator initialized", "zones", len(anchors))
+		}
+		if s.DNSSECMode == "" && s.DNSSECConfig.Mode != "" {
+			s.DNSSECMode = s.DNSSECConfig.Mode
+		}
+	}
 
 	// Start cache invalidation listener if Redis is enabled
 	if s.Redis != nil {
