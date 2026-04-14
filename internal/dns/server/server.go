@@ -1471,7 +1471,9 @@ func (s *Server) validateDNSSEC(ctx context.Context, zoneName string, response *
 		}
 		rrsigName := parts[0]
 		coveredType := packet.QueryType(0)
-		fmt.Sscanf(parts[1], "%d", &coveredType)
+		if _, err := fmt.Sscanf(parts[1], "%d", &coveredType); err != nil {
+			continue
+		}
 
 		// Build the RRset from response.Answers and response.Authorities
 		var rrset []packet.DNSRecord
