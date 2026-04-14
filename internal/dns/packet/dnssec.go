@@ -65,7 +65,7 @@ func (r *DNSRecord) ComputeDS(digestType uint8) (DNSRecord, error) {
 	}
 	if err := buf.Write(3); err != nil {
 		return DNSRecord{}, err
-	} // Protocol
+	} // Protocol: MUST be 3 per RFC 4034
 	if err := buf.Write(r.Algorithm); err != nil {
 		return DNSRecord{}, err
 	}

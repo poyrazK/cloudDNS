@@ -42,6 +42,7 @@ type Result struct {
 	P50        string
 	P99        string
 	Success    string
+	Err       string
 }
 
 var tlds = []string{"com", "net", "org", "io", "dev", "ai", "cloud", "gov", "edu", "tr", "com.tr", "me", "info"}
@@ -393,7 +394,9 @@ func runAndCaptureScale(addr string, n int, c int, rangeLimit int, phase string)
 	cmd := runCommand("go", "run", "cmd/bench/main.go", "-server", addr, "-n", strconv.Itoa(n), "-c", strconv.Itoa(c), "-range", strconv.Itoa(rangeLimit))
 	var out bytes.Buffer
 	cmd.SetStdout(&out)
-	_ = cmd.Run()
+	if err := cmd.Run(); err != nil {
+		return Result{Err: err.Error()}
+	}
 	output := out.String()
 	return Result{
 		Throughput: extractRegex(output, `Throughput:\s+([0-9.]+)`),

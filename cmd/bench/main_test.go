@@ -460,7 +460,7 @@ func TestRunAndCaptureScale_Mock(t *testing.T) {
 	defer func() { runCommand = orig }()
 
 	var buf bytes.Buffer
-	buf.WriteString("Throughput:       123.45 queries/sec\nP50 (Median):     1.2ms\nP99:              5.5ms\nReliability:      100.00%")
+	// buf starts empty; SetStdout will inject expected output via mockCommand
 
 	runCommand = func(name string, args ...string) commandRunner {
 		return &mockCommand{out: &buf}
@@ -482,11 +482,10 @@ type mockCommand struct {
 
 func (m *mockCommand) SetStdout(buf *bytes.Buffer) {
 	m.out = buf
+	// Inject expected output when stdout is set
+	buf.WriteString("Throughput:       123.45 queries/sec\nP50 (Median):     1.2ms\nP99:              5.5ms\nReliability:      100.00%")
 }
 
 func (m *mockCommand) Run() error {
-	if m.out != nil {
-		m.out.WriteString("Throughput:       123.45 queries/sec\nP50 (Median):     1.2ms\nP99:              5.5ms\nReliability:      100.00%")
-	}
 	return nil
 }

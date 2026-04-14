@@ -120,10 +120,11 @@ jobs:
 
       - name: Verify Coverage Threshold
         run: |
+          COVERAGE_THRESHOLD=80
           COVERAGE=$(go tool cover -func=coverage.txt | grep total | awk '{print $3}' | sed 's/%//')
           echo "Total coverage: $COVERAGE%"
-          if (( $(echo "$COVERAGE < 80" | bc -l) )); then
-            echo "Coverage is below 80% threshold!"
+          if (( $(echo "$COVERAGE < $COVERAGE_THRESHOLD" | bc -l) )); then
+            echo "Coverage is below ${COVERAGE_THRESHOLD}% threshold!"
             exit 1
           fi
 
