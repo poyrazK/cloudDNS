@@ -33,34 +33,34 @@ func TestComputeDS(t *testing.T) {
 		PublicKey: []byte{0x01, 0x02, 0x03, 0x04},
 	}
 	// Test SHA-256 (Type 2)
-	ds, err := record.ComputeDS(2) 
+	ds, err := record.ComputeDS(2)
 	if err != nil {
 		t.Fatalf("ComputeDS failed: %v", err)
 	}
 	if ds.Type != DS || len(ds.Digest) == 0 {
 		t.Errorf("Invalid DS record generated for SHA-256")
 	}
-	
+
 	// Test SHA-1 (Type 1)
 	ds1, _ := record.ComputeDS(1)
-	if len(ds1.Digest) == 0 { 
-		t.Errorf("Invalid DS record generated for SHA-1") 
+	if len(ds1.Digest) == 0 {
+		t.Errorf("Invalid DS record generated for SHA-1")
 	}
 }
 
-// TestSignRRSet_ECDSA ensures that an RRSet can be correctly signed using 
+// TestSignRRSet_ECDSA ensures that an RRSet can be correctly signed using
 // an ECDSA P-256 private key to produce a valid RRSIG.
 func TestSignRRSet_ECDSA(t *testing.T) {
 	privKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	records := []DNSRecord{
 		{Name: "www.test.", Type: A, TTL: 300, IP: []byte{1, 2, 3, 4}, Class: 1},
 	}
-	
+
 	sig, err := SignRRSet(records, privKey, "test.", 1234, 1600000000, 1700000000)
 	if err != nil {
 		t.Fatalf("SignRRSet failed: %v", err)
 	}
-	
+
 	if sig.Type != RRSIG || len(sig.Signature) != 64 {
 		t.Errorf("Invalid RRSIG generated for ECDSA P-256")
 	}

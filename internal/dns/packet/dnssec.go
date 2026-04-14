@@ -17,11 +17,19 @@ func (r *DNSRecord) ComputeKeyTag() uint16 {
 	}
 
 	buf := NewBytePacketBuffer()
-	if err := buf.Writeu16(r.Flags); err != nil { return 0 }
-	if err := buf.Write(3); err != nil { return 0 } // Protocol: MUST be 3 (RFC 4034 Section 2.1.2)
-	if err := buf.Write(r.Algorithm); err != nil { return 0 }
+	if err := buf.Writeu16(r.Flags); err != nil {
+		return 0
+	}
+	if err := buf.Write(3); err != nil {
+		return 0
+	} // Protocol: MUST be 3 (RFC 4034 Section 2.1.2)
+	if err := buf.Write(r.Algorithm); err != nil {
+		return 0
+	}
 	for _, b := range r.PublicKey {
-		if err := buf.Write(b); err != nil { return 0 }
+		if err := buf.Write(b); err != nil {
+			return 0
+		}
 	}
 
 	data := buf.Buf[:buf.Position()]
@@ -49,12 +57,22 @@ func (r *DNSRecord) ComputeDS(digestType uint8) (DNSRecord, error) {
 	// 1. Prepare Buffer: The digest is calculated over [owner name | DNSKEY RDATA]
 	// Owner name MUST be in its canonical wire format (lowercase, no compression).
 	buf := NewBytePacketBuffer()
-	if err := buf.WriteName(strings.ToLower(r.Name)); err != nil { return DNSRecord{}, err }
-	if err := buf.Writeu16(r.Flags); err != nil { return DNSRecord{}, err }
-	if err := buf.Write(3); err != nil { return DNSRecord{}, err } // Protocol
-	if err := buf.Write(r.Algorithm); err != nil { return DNSRecord{}, err }
+	if err := buf.WriteName(strings.ToLower(r.Name)); err != nil {
+		return DNSRecord{}, err
+	}
+	if err := buf.Writeu16(r.Flags); err != nil {
+		return DNSRecord{}, err
+	}
+	if err := buf.Write(3); err != nil {
+		return DNSRecord{}, err
+	} // Protocol: MUST be 3 per RFC 4034
+	if err := buf.Write(r.Algorithm); err != nil {
+		return DNSRecord{}, err
+	}
 	for _, b := range r.PublicKey {
-		if err := buf.Write(b); err != nil { return DNSRecord{}, err }
+		if err := buf.Write(b); err != nil {
+			return DNSRecord{}, err
+		}
 	}
 
 	// 2. Calculate the cryptographic digest
@@ -96,7 +114,7 @@ func SignRRSet(records []DNSRecord, privKey *ecdsa.PrivateKey, signerName string
 		Class:       1,
 		TTL:         records[0].TTL,
 		TypeCovered: uint16(records[0].Type),
-		Algorithm:   13, // ECDSAP256SHA256
+		Algorithm:   13,                                  // ECDSAP256SHA256
 		Labels:      uint8(countLabels(records[0].Name)), // #nosec G115
 		OrigTTL:     records[0].TTL,
 		Expiration:  expiration,
@@ -106,21 +124,51 @@ func SignRRSet(records []DNSRecord, privKey *ecdsa.PrivateKey, signerName string
 	}
 
 	buf := NewBytePacketBuffer()
-	if err := buf.Writeu16(sig.TypeCovered); err != nil { return DNSRecord{}, err }
-	if err := buf.Write(sig.Algorithm); err != nil { return DNSRecord{}, err }
-	if err := buf.Write(sig.Labels); err != nil { return DNSRecord{}, err }
-	if err := buf.Writeu32(sig.OrigTTL); err != nil { return DNSRecord{}, err }
-	if err := buf.Writeu32(sig.Expiration); err != nil { return DNSRecord{}, err }
-	if err := buf.Writeu32(sig.Inception); err != nil { return DNSRecord{}, err }
-	if err := buf.Writeu16(sig.KeyTag); err != nil { return DNSRecord{}, err }
-	if err := buf.WriteName(sig.SignerName); err != nil { return DNSRecord{}, err }
 
+	// Prepend RRSIG RDATA fields (excluding Signature) per RFC 4034 Section 8.1
+	if err := buf.Writeu16(sig.TypeCovered); err != nil {
+		return DNSRecord{}, err
+	}
+	if err := buf.Write(sig.Algorithm); err != nil {
+		return DNSRecord{}, err
+	}
+	if err := buf.Write(sig.Labels); err != nil {
+		return DNSRecord{}, err
+	}
+	if err := buf.Writeu32(sig.OrigTTL); err != nil {
+		return DNSRecord{}, err
+	}
+	if err := buf.Writeu32(sig.Expiration); err != nil {
+		return DNSRecord{}, err
+	}
+	if err := buf.Writeu32(sig.Inception); err != nil {
+		return DNSRecord{}, err
+	}
+	if err := buf.Writeu16(sig.KeyTag); err != nil {
+		return DNSRecord{}, err
+	}
+	if err := buf.WriteName(strings.ToLower(sig.SignerName)); err != nil {
+		return DNSRecord{}, err
+	}
+
+	// Write canonical RRset per RFC 4034: owner|type|class|Original TTL|RDLENGTH|RDATA
 	for _, r := range records {
-		if err := buf.WriteName(strings.ToLower(r.Name)); err != nil { return DNSRecord{}, err }
-		if err := buf.Writeu16(uint16(r.Type)); err != nil { return DNSRecord{}, err }
-		if err := buf.Writeu16(uint16(1)); err != nil { return DNSRecord{}, err } // Class IN
-		if err := buf.Writeu32(r.TTL); err != nil { return DNSRecord{}, err }
-		// Simplified: Real DNSSEC requires canonical RDATA serialization here
+		if err := buf.WriteName(strings.ToLower(r.Name)); err != nil {
+			return DNSRecord{}, err
+		}
+		if err := buf.Writeu16(uint16(r.Type)); err != nil {
+			return DNSRecord{}, err
+		}
+		if err := buf.Writeu16(1); err != nil {
+			return DNSRecord{}, err
+		} // Class IN
+		if err := buf.Writeu32(sig.OrigTTL); err != nil {
+			return DNSRecord{}, err
+		}
+		// Write RDATA in canonical form
+		if err := writeSignCanonicalRData(&r, buf); err != nil {
+			return DNSRecord{}, err
+		}
 	}
 
 	hashed := crypto.SHA256.New()
@@ -132,18 +180,126 @@ func SignRRSet(records []DNSRecord, privKey *ecdsa.PrivateKey, signerName string
 		return DNSRecord{}, err
 	}
 
-	rBytes := rb.Bytes()
-	sBytes := sb.Bytes()
+	rBytes := rb.FillBytes(make([]byte, 32))
+	sBytes := sb.FillBytes(make([]byte, 32))
 	sigData := make([]byte, 64)
-	copy(sigData[32-len(rBytes):], rBytes)
-	copy(sigData[64-len(sBytes):], sBytes)
-	
+	copy(sigData[0:32], rBytes)
+	copy(sigData[32:64], sBytes)
+
 	sig.Signature = sigData
 	return sig, nil
 }
 
 func countLabels(name string) int {
 	name = strings.TrimSuffix(name, ".")
-	if name == "" { return 0 }
+	if name == "" {
+		return 0
+	}
 	return len(strings.Split(name, "."))
+}
+
+// writeSignCanonicalRData writes the RDATA portion of a record in canonical form for signing.
+// Handles all record types per RFC 4034 canonical wire format.
+func writeSignCanonicalRData(r *DNSRecord, buf *BytePacketBuffer) error {
+	switch r.Type {
+	case A:
+		ip4 := r.IP.To4()
+		if ip4 == nil {
+			break
+		}
+		if err := buf.Writeu16(4); err != nil {
+			return err
+		}
+		for _, b := range ip4 {
+			if err := buf.Write(b); err != nil {
+				return err
+			}
+		}
+		return nil
+	case AAAA:
+		if err := buf.Writeu16(16); err != nil {
+			return err
+		}
+		return writeBytes(buf, r.IP.To16())
+	case CNAME, NS, PTR:
+		return buf.WriteName(strings.ToLower(r.Host))
+	case MX:
+		if err := buf.Writeu16(r.Priority); err != nil {
+			return err
+		}
+		return buf.WriteName(strings.ToLower(r.Host))
+	case TXT:
+		for _, chunk := range stringsToChunks(r.Txt) {
+			if err := buf.Write(byte(len(chunk))); err != nil {
+				return err
+			}
+			if err := writeBytes(buf, []byte(chunk)); err != nil {
+				return err
+			}
+		}
+		return nil
+	case SOA:
+		if err := buf.WriteName(strings.ToLower(r.MName)); err != nil {
+			return err
+		}
+		if err := buf.WriteName(strings.ToLower(r.RName)); err != nil {
+			return err
+		}
+		if err := buf.Writeu32(r.Serial); err != nil {
+			return err
+		}
+		if err := buf.Writeu32(r.Refresh); err != nil {
+			return err
+		}
+		if err := buf.Writeu32(r.Retry); err != nil {
+			return err
+		}
+		if err := buf.Writeu32(r.Expire); err != nil {
+			return err
+		}
+		return buf.Writeu32(r.Minimum)
+	case SRV:
+		if err := buf.Writeu16(r.Priority); err != nil {
+			return err
+		}
+		if err := buf.Writeu16(r.Weight); err != nil {
+			return err
+		}
+		if err := buf.Writeu16(r.Port); err != nil {
+			return err
+		}
+		return buf.WriteName(strings.ToLower(r.Host))
+	case DNSKEY:
+		if err := buf.Writeu16(r.Flags); err != nil {
+			return err
+		}
+		if err := buf.Write(3); err != nil {
+			return err
+		}
+		if err := buf.Write(r.Algorithm); err != nil {
+			return err
+		}
+		return writeBytes(buf, r.PublicKey)
+	case DS:
+		if err := buf.Writeu16(r.KeyTag); err != nil {
+			return err
+		}
+		if err := buf.Write(r.Algorithm); err != nil {
+			return err
+		}
+		if err := buf.Write(r.DigestType); err != nil {
+			return err
+		}
+		return writeBytes(buf, r.Digest)
+	case NSEC:
+		if err := buf.WriteName(strings.ToLower(r.NextName)); err != nil {
+			return err
+		}
+		return writeBytes(buf, r.TypeBitMap)
+	default:
+		if len(r.Data) > 0 {
+			return writeBytes(buf, r.Data)
+		}
+	}
+	return nil
 }

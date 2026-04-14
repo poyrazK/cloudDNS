@@ -20,10 +20,10 @@ func TestDNSRecord_ReadWrite_DNSKEY(t *testing.T) {
 	buffer := NewBytePacketBuffer()
 	_, _ = record.Write(buffer)
 	_ = buffer.Seek(0)
-	
+
 	parsed := DNSRecord{}
 	_ = parsed.Read(buffer)
-	
+
 	if parsed.Flags != 256 || parsed.Algorithm != 13 || string(parsed.PublicKey) != string(record.PublicKey) {
 		t.Errorf("DNSKEY mismatch: %+v", parsed)
 	}
@@ -43,10 +43,10 @@ func TestDNSRecord_ReadWrite_DS(t *testing.T) {
 	buffer := NewBytePacketBuffer()
 	_, _ = record.Write(buffer)
 	_ = buffer.Seek(0)
-	
+
 	parsed := DNSRecord{}
 	_ = parsed.Read(buffer)
-	
+
 	if parsed.KeyTag != 12345 || parsed.Algorithm != 13 || parsed.DigestType != 2 || string(parsed.Digest) != string(record.Digest) {
 		t.Errorf("DS mismatch: %+v", parsed)
 	}
@@ -71,10 +71,10 @@ func TestDNSRecord_ReadWrite_RRSIG(t *testing.T) {
 	buffer := NewBytePacketBuffer()
 	_, _ = record.Write(buffer)
 	_ = buffer.Seek(0)
-	
+
 	parsed := DNSRecord{}
 	_ = parsed.Read(buffer)
-	
+
 	if parsed.TypeCovered != uint16(A) || parsed.KeyTag != 123 || parsed.SignerName != "example.com." {
 		t.Errorf("RRSIG mismatch: %+v", parsed)
 	}
@@ -92,10 +92,10 @@ func TestDNSRecord_ReadWrite_NSEC(t *testing.T) {
 	buffer := NewBytePacketBuffer()
 	_, _ = record.Write(buffer)
 	_ = buffer.Seek(0)
-	
+
 	parsed := DNSRecord{}
 	_ = parsed.Read(buffer)
-	
+
 	if parsed.NextName != "z.example.com." || string(parsed.TypeBitMap) != string(record.TypeBitMap) {
 		t.Errorf("NSEC mismatch: %+v", parsed)
 	}
@@ -109,7 +109,7 @@ func TestSignRRSet_Simple(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ecdsa.GenerateKey failed: %v", err)
 	}
-	
+
 	sig, err := SignRRSet(rrset, priv, "test.com.", 1234, 1600000000, 1700000000)
 	if err != nil {
 		t.Fatalf("SignRRSet failed: %v", err)
