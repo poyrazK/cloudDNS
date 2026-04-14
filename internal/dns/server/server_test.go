@@ -527,6 +527,18 @@ func (m *mockServerRepo) UpdateKey(ctx context.Context, key *domain.DNSSECKey) e
 	return nil
 }
 
+func (m *mockServerRepo) GetDNSKEYs(ctx context.Context, zoneName string) ([]domain.Record, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var res []domain.Record
+	for _, r := range m.records {
+		if r.Name == zoneName && r.Type == "DNSKEY" {
+			res = append(res, r)
+		}
+	}
+	return res, nil
+}
+
 func (m *mockServerRepo) Ping(ctx context.Context) error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
