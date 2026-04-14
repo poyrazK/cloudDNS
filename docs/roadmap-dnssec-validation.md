@@ -81,18 +81,20 @@ Implement full DNSSEC validation MVP across small, reviewable PRs.
 
 ---
 
-### PR 5: `dnssec-trust-anchors-config`
+### PR 5: `dnssec-trust-anchors-config` ✅ COMPLETED
 **Focus**: Configuration for trust anchors
 
-**Files**: Config files + `server.go`
+**Files**: `internal/core/config/dnssec.go` (NEW), `internal/dns/server/server.go` (MODIFY), `cmd/clouddns/main.go` (MODIFY)
 
 **Contents**:
-- Add `DNSSECConfig` struct with `TrustAnchors` map and `ValidationEnabled` bool
-- Load trust anchors from config/env
+- Add `DNSSECConfig` struct with `TrustAnchors` map and `Mode` string
+- Load trust anchors from config/env (`TRUST_ANCHOR_<zone>`, `DNSSEC_MODE`)
 - Initialize validator on server startup
 - Support multiple trust anchors (root, TLDs)
 
 **Rationale**: Production-ready configuration management
+
+**Status**: Merged in `0b7938c`
 
 ---
 
