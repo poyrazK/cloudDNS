@@ -890,7 +890,14 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 
 	// DNSSEC validation (if validator is configured)
 	if zone != nil {
-		s.validateDNSSEC(ctx, zone.Name, response)
+		if err := s.validateDNSSEC(ctx, zone.Name, response); err != nil {
+			// Validation failed in strict mode - convert to SERVFAIL
+			if s.DNSSECMode == "strict" {
+				response.Header.ResCode = packet.RcodeServFail
+				response.Answers = nil
+				response.Authorities = nil
+			}
+		}
 	}
 
 	// Handle Truncation
@@ -1385,85 +1392,115 @@ func (s *Server) signResponse(ctx context.Context, zone *domain.Zone, response *
 
 // validateDNSSEC validates DNSSEC signatures on a response.
 // It checks the AD bit based on validation result and dnssecMode.
-func (s *Server) validateDNSSEC(ctx context.Context, zoneName string, response *packet.DNSPacket) {
+// Returns an error if validation failed (in strict mode) or if DNSKEYs could not be fetched.
+func (s *Server) validateDNSSEC(ctx context.Context, zoneName string, response *packet.DNSPacket) error {
 	if s.DNSSECValidator == nil || s.DNSSECMode == "disabled" {
-		return
+		return nil
 	}
 
-	// Collect all RRSIGs from the response
-	var rrsigs []packet.DNSRecord
+	// Collect all RRSIGs from the response, grouped by covered rrset
+	// Key: "name:typeCovered" -> value: []packet.DNSRecord of RRSIGs
+	rrsigGroups := make(map[string][]packet.DNSRecord)
 	for _, rec := range response.Answers {
 		if rec.Type == packet.RRSIG {
-			rrsigs = append(rrsigs, rec)
+			key := fmt.Sprintf("%s:%d", strings.ToLower(rec.Name), rec.TypeCovered)
+			rrsigGroups[key] = append(rrsigGroups[key], rec)
 		}
 	}
 	for _, rec := range response.Authorities {
 		if rec.Type == packet.RRSIG {
-			rrsigs = append(rrsigs, rec)
+			key := fmt.Sprintf("%s:%d", strings.ToLower(rec.Name), rec.TypeCovered)
+			rrsigGroups[key] = append(rrsigGroups[key], rec)
 		}
 	}
 
-	if len(rrsigs) == 0 {
-		return // No signatures to validate
+	if len(rrsigGroups) == 0 {
+		return nil // No signatures to validate
 	}
 
 	// Fetch DNSKEYs for validation
 	dnskeyRecords, err := s.Repo.GetDNSKEYs(ctx, zoneName)
-	if err != nil || len(dnskeyRecords) == 0 {
-		// Can't validate without DNSKEYs
+	if err != nil {
+		// Error fetching DNSKEYs - can't validate
 		if s.DNSSECMode == "strict" {
-			response.Header.AuthedData = false
+			return fmt.Errorf("dnssec: failed to fetch dnskeys: %w", err)
 		}
-		return
+		return nil
+	}
+	if len(dnskeyRecords) == 0 {
+		// No DNSKEYs available - can't validate
+		if s.DNSSECMode == "strict" {
+			return fmt.Errorf("dnssec: no dnskeys available for validation")
+		}
+		return nil
 	}
 
 	// Convert domain records to packet records for validation
 	var dnskeys []packet.DNSRecord
 	for _, rec := range dnskeyRecords {
 		pRec, errConv := repository.ConvertDomainToPacketRecord(rec)
-		if errConv == nil && pRec.Type == packet.DNSKEY {
+		if errConv != nil {
+			continue
+		}
+		if pRec.Type != packet.DNSKEY {
+			continue
+		}
+		// Verify it's actually a DNSKEY record
+		if pRec.Type == packet.DNSKEY && len(pRec.PublicKey) > 0 {
 			dnskeys = append(dnskeys, pRec)
 		}
 	}
 
 	if len(dnskeys) == 0 {
-		return
+		if s.DNSSECMode == "strict" {
+			return fmt.Errorf("dnssec: no valid dnskeys found")
+		}
+		return nil
 	}
 
 	// Get current time for validation
 	now := uint32(time.Now().Unix())
 
-	// Validate each RRset with its signatures
+	// Validate each unique RRset with its matching RRSIGs
 	allValid := true
-	for _, rrsig := range rrsigs {
-		// Find the RRset covered by this RRSIG
-		coveredType := packet.QueryType(rrsig.TypeCovered)
-		var rrset []packet.DNSRecord
+	for key, sigs := range rrsigGroups {
+		// Parse key to get name and type
+		parts := strings.Split(key, ":")
+		if len(parts) != 2 {
+			continue
+		}
+		rrsigName := parts[0]
+		coveredType := packet.QueryType(0)
+		fmt.Sscanf(parts[1], "%d", &coveredType)
 
+		// Build the RRset from response.Answers and response.Authorities
+		var rrset []packet.DNSRecord
 		for _, ans := range response.Answers {
-			if ans.Type == coveredType && ans.Name == rrsig.Name {
+			if ans.Type == coveredType && strings.ToLower(ans.Name) == rrsigName {
 				rrset = append(rrset, ans)
 			}
 		}
 		for _, auth := range response.Authorities {
-			if auth.Type == coveredType && auth.Name == rrsig.Name {
+			if auth.Type == coveredType && strings.ToLower(auth.Name) == rrsigName {
 				rrset = append(rrset, auth)
 			}
 		}
 
 		if len(rrset) == 0 {
-			continue
+			continue // No matching rrset for this group of RRSIGs
 		}
 
-		result := s.DNSSECValidator.ValidateRRSet(rrset, []packet.DNSRecord{rrsig}, dnskeys, now)
+		result := s.DNSSECValidator.ValidateRRSet(rrset, sigs, dnskeys, now)
 		if !result.Valid {
 			allValid = false
-			// In strict mode, we would return SERVFAIL here
-			// For now, we just set AD bit based on validation result
+			if s.DNSSECMode == "strict" {
+				return fmt.Errorf("dnssec: validation failed for %s: %v", rrsigName, result.EDE)
+			}
 		}
 	}
 
 	response.Header.AuthedData = allValid
+	return nil
 }
 
 func (s *Server) groupRecords(records []packet.DNSRecord) [][]packet.DNSRecord {
