@@ -165,12 +165,8 @@ func (v *DNSSECValidator) ValidateDNSKEYChain(dnskeys []packet.DNSRecord, ds, pa
 		return fmt.Errorf("dnssec: invalid dnskey format: %w", err)
 	}
 
-	// If parent DNSKEY is provided, verify the chain
-	if parentDNSKEY.Type == packet.DNSKEY {
-		// Verify parent signed the child DNSKEY
-		// This would require an RRSIG over the child DNSKEY, which is typically
-		// handled by ValidateRRSet for actual signature verification
-	}
+	// parentDNSKEY validation would go here when implementing parent-signed chain validation
+	_ = parentDNSKEY
 
 	return nil
 }

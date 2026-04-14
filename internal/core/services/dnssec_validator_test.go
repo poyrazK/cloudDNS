@@ -39,22 +39,6 @@ func makeTestDNSKEY(t *testing.T) (packet.DNSRecord, *ecdsa.PrivateKey) {
 	return dnskey, privKey
 }
 
-func makeTestRRSIG(t *testing.T, privKey *ecdsa.PrivateKey, coveredType packet.QueryType, signerName string, now uint32) packet.DNSRecord {
-	t.Helper()
-
-	// Sign a dummy record to get a valid signature
-	rrset := []packet.DNSRecord{
-		{Name: "www.example.com.", Type: packet.A, IP: net.ParseIP("1.2.3.4"), TTL: 300, Class: 1},
-	}
-
-	sig, err := packet.SignRRSet(rrset, privKey, signerName, 12345, now-60, now+3600)
-	if err != nil {
-		t.Fatalf("Failed to sign RRSet: %v", err)
-	}
-
-	return sig
-}
-
 func TestNewDNSSECValidator(t *testing.T) {
 	trustAnchors := map[string]packet.DNSRecord{
 		"example.com.": {Name: "example.com.", Type: packet.DNSKEY},
