@@ -41,6 +41,7 @@ type Server struct {
 	Cache            *DNSCache
 	Redis            *RedisCache
 	DNSSEC           *services.DNSSECService
+	DNSSECValidator  *services.DNSSECValidator
 	WorkerCount      int
 	udpQueue         chan udpTask
 	Logger           *slog.Logger
@@ -50,6 +51,7 @@ type Server struct {
 	NodeID           string
 	RecursionEnabled bool
 	CookieSecret     []byte
+	DNSSECMode      string // "disabled", "ad-bit-only", "strict"
 
 	// Testing/Chaos flags
 	SimulateDBLatency  time.Duration
@@ -886,6 +888,11 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 		s.signResponse(ctx, zone, response)
 	}
 
+	// DNSSEC validation (if validator is configured)
+	if zone != nil {
+		s.validateDNSSEC(ctx, zone.Name, response)
+	}
+
 	// Handle Truncation
 	for _, res := range request.Resources {
 		if res.Type == packet.OPT {
@@ -1374,6 +1381,89 @@ func (s *Server) signResponse(ctx context.Context, zone *domain.Zone, response *
 			}
 		}
 	}
+}
+
+// validateDNSSEC validates DNSSEC signatures on a response.
+// It checks the AD bit based on validation result and dnssecMode.
+func (s *Server) validateDNSSEC(ctx context.Context, zoneName string, response *packet.DNSPacket) {
+	if s.DNSSECValidator == nil || s.DNSSECMode == "disabled" {
+		return
+	}
+
+	// Collect all RRSIGs from the response
+	var rrsigs []packet.DNSRecord
+	for _, rec := range response.Answers {
+		if rec.Type == packet.RRSIG {
+			rrsigs = append(rrsigs, rec)
+		}
+	}
+	for _, rec := range response.Authorities {
+		if rec.Type == packet.RRSIG {
+			rrsigs = append(rrsigs, rec)
+		}
+	}
+
+	if len(rrsigs) == 0 {
+		return // No signatures to validate
+	}
+
+	// Fetch DNSKEYs for validation
+	dnskeyRecords, err := s.Repo.GetDNSKEYs(ctx, zoneName)
+	if err != nil || len(dnskeyRecords) == 0 {
+		// Can't validate without DNSKEYs
+		if s.DNSSECMode == "strict" {
+			response.Header.AuthedData = false
+		}
+		return
+	}
+
+	// Convert domain records to packet records for validation
+	var dnskeys []packet.DNSRecord
+	for _, rec := range dnskeyRecords {
+		pRec, errConv := repository.ConvertDomainToPacketRecord(rec)
+		if errConv == nil && pRec.Type == packet.DNSKEY {
+			dnskeys = append(dnskeys, pRec)
+		}
+	}
+
+	if len(dnskeys) == 0 {
+		return
+	}
+
+	// Get current time for validation
+	now := uint32(time.Now().Unix())
+
+	// Validate each RRset with its signatures
+	allValid := true
+	for _, rrsig := range rrsigs {
+		// Find the RRset covered by this RRSIG
+		coveredType := packet.QueryType(rrsig.TypeCovered)
+		var rrset []packet.DNSRecord
+
+		for _, ans := range response.Answers {
+			if ans.Type == coveredType && ans.Name == rrsig.Name {
+				rrset = append(rrset, ans)
+			}
+		}
+		for _, auth := range response.Authorities {
+			if auth.Type == coveredType && auth.Name == rrsig.Name {
+				rrset = append(rrset, auth)
+			}
+		}
+
+		if len(rrset) == 0 {
+			continue
+		}
+
+		result := s.DNSSECValidator.ValidateRRSet(rrset, []packet.DNSRecord{rrsig}, dnskeys, now)
+		if !result.Valid {
+			allValid = false
+			// In strict mode, we would return SERVFAIL here
+			// For now, we just set AD bit based on validation result
+		}
+	}
+
+	response.Header.AuthedData = allValid
 }
 
 func (s *Server) groupRecords(records []packet.DNSRecord) [][]packet.DNSRecord {
