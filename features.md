@@ -27,7 +27,7 @@ Built-in orchestration for global Anycast networks using BGP.
 *   **Historical Tracking**: Maintains a record of health check results and error messages for debugging.
 
 ## 5. Advanced DNS Standards
-*   **DNSSEC**: Automated Key (KSK/ZSK) management, signing, and Double-Signature rollover.
+*   **DNSSEC**: Automated Key (KSK/ZSK) management, signing, validation, AD bit support, and RFC 8914 EDE codes. See [docs/dnssec.md](docs/dnssec.md) for details.
 *   **DoH (DNS over HTTPS)**: Privacy-focused resolution over HTTP/2 using both `GET` and `POST`.
 *   **Dynamic Updates (RFC 2136)**: Standardized dynamic record management.
 *   **IXFR (Incremental Zone Transfer)**: RFC 1995 compliant synchronization using transactional delta logging, with intelligent AXFR fallback.
