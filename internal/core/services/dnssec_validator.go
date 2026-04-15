@@ -115,7 +115,7 @@ func (v *DNSSECValidator) ValidateRRSet(rrset, rrsigs, dnskeys []packet.DNSRecor
 	if len(rrset) == 0 || len(rrsigs) == 0 || len(dnskeys) == 0 {
 		return ValidationResult{
 			Valid: false,
-			EDE:   &EDE{Code: 0, Info: "missing required records"},
+			EDE:   &EDE{Code: EDECodeBogus, Info: "missing required records"},
 		}
 	}
 
@@ -131,7 +131,7 @@ func (v *DNSSECValidator) ValidateRRSet(rrset, rrsigs, dnskeys []packet.DNSRecor
 	if rrsig == nil {
 		return ValidationResult{
 			Valid: false,
-			EDE:   &EDE{Code: 0, Info: "no matching RRSIG found"},
+			EDE:   &EDE{Code: EDECodeBogus, Info: "no matching RRSIG found"},
 		}
 	}
 
@@ -140,7 +140,7 @@ func (v *DNSSECValidator) ValidateRRSet(rrset, rrsigs, dnskeys []packet.DNSRecor
 	if dnskey == nil {
 		return ValidationResult{
 			Valid: false,
-			EDE:   &EDE{Code: 6, Info: "dnskey-missing"},
+			EDE:   &EDE{Code: EDECodeDNSKEYMissing, Info: "dnskey-missing"},
 		}
 	}
 
@@ -148,7 +148,7 @@ func (v *DNSSECValidator) ValidateRRSet(rrset, rrsigs, dnskeys []packet.DNSRecor
 	if valid, err := packet.ValidateDNSKEYFormat(*dnskey); !valid || err != nil {
 		return ValidationResult{
 			Valid: false,
-			EDE:   &EDE{Code: 7, Info: "invalidDNSKEY"},
+			EDE:   &EDE{Code: EDECodeBogus, Info: "invalid-dnskey-format"},
 		}
 	}
 
@@ -159,32 +159,32 @@ func (v *DNSSECValidator) ValidateRRSet(rrset, rrsigs, dnskeys []packet.DNSRecor
 		case packet.ErrSignatureExpired:
 			return ValidationResult{
 				Valid: false,
-				EDE:   &EDE{Code: 2, Info: "signature-expired"},
+				EDE:   &EDE{Code: EDECodeSignatureExpired, Info: "signature-expired"},
 			}
 		case packet.ErrSignatureNotYetValid:
 			return ValidationResult{
 				Valid: false,
-				EDE:   &EDE{Code: 2, Info: "signature-not-yet-valid"},
+				EDE:   &EDE{Code: EDECodeSignatureNotYetValid, Info: "signature-not-yet-valid"},
 			}
 		case packet.ErrKeyTagMismatch:
 			return ValidationResult{
 				Valid: false,
-				EDE:   &EDE{Code: 2, Info: "key-tag-mismatch"},
+				EDE:   &EDE{Code: EDECodeBogus, Info: "key-tag-mismatch"},
 			}
 		case packet.ErrAlgorithmMismatch:
 			return ValidationResult{
 				Valid: false,
-				EDE:   &EDE{Code: 3, Info: "algorithm-mismatch"},
+				EDE:   &EDE{Code: EDECodeUnsupportedDNSKEYAlgo, Info: "algorithm-mismatch"},
 			}
 		case packet.ErrInvalidSignature:
 			return ValidationResult{
 				Valid: false,
-				EDE:   &EDE{Code: 2, Info: "invalid-signature"},
+				EDE:   &EDE{Code: EDECodeBogus, Info: "invalid-signature"},
 			}
 		default:
 			return ValidationResult{
 				Valid: false,
-				EDE:   &EDE{Code: 0, Info: err.Error()},
+				EDE:   &EDE{Code: EDECodeOther, Info: err.Error()},
 			}
 		}
 	}
@@ -192,7 +192,7 @@ func (v *DNSSECValidator) ValidateRRSet(rrset, rrsigs, dnskeys []packet.DNSRecor
 	if !valid {
 		return ValidationResult{
 			Valid: false,
-			EDE:   &EDE{Code: 2, Info: "signature verification failed"},
+			EDE:   &EDE{Code: EDECodeBogus, Info: "signature verification failed"},
 		}
 	}
 
