@@ -98,18 +98,19 @@ Implement full DNSSEC validation MVP across small, reviewable PRs.
 
 ---
 
-### PR 6: `dnssec-recursive-keys`
+### PR 6: `dnssec-recursive-keys` ✅ COMPLETED
 **Focus**: Fetch DNSKEYs during recursive resolution
 
-**Files**: `internal/dns/server/recursive.go` (MODIFY)
+**Files**: `internal/dns/server/server.go` (MODIFY)
 
 **Contents**:
-- Add `FetchDNSKEYWithDS(ctx, zone)` method
-- When resolving, if response has RRSIGs, fetch DNSKEYs
-- Cache DNSKEYs separately for validation
-- Handle DS record fetching from parent
+- Add `fetchDNSKEYFromNetwork()` method for querying DNSKEY records
+- When no trust anchors configured and recursion is enabled, fetch DNSKEYs via recursive resolution
+- Convert network-fetched DNSKEYs to domain records for validation
 
 **Rationale**: Enables validation without pre-configured keys for every zone
+
+**Status**: Merged in `8e37d2f`
 
 ---
 
