@@ -27,25 +27,25 @@ type EDE struct {
 
 // RFC 8914 Extended DNS Error Codes
 const (
-	EDECodeOther              uint16 = 0  // Other Error
-	EDECodeUnsupportedDNSKEYAlgo = 1  // Unsupported DNSKEY Algorithm
-	EDECodeUnsupportedDSDigest     = 2  // Unsupported DS Digest Type (reused for signature errors)
-	EDECodeStaleAnswer            = 3  // Stale Answer
-	EDECodeForgedAnswer            = 4  // Forged Answer
-	EDECodeIndeterminate           = 5  // DNSSEC Indeterminate
-	EDECodeBogus                   = 6  // DNSSEC Bogus (also used for dnskey-missing)
-	EDECodeSignatureExpired        = 7  // Signature Expired
-	EDECodeSignatureNotYetValid    = 8  // Signature Not Yet Valid
-	EDECodeDNSKEYMissing          = 9  // DNSKEY Missing
-	EDECodeDSMissing              = 10 // DS Missing
-	EDECodeNoZoneKeyBitSet        = 11 // No Zone Key Bit Set
-	EDECodeSignatureUnsupported   = 12 // Signature Unsupported Algorithm
-	EDECodeDNSKEYNotAnchor         = 13 // DNSKEY Not Anchor
-	EDECodeTrustAnchorUnknown      = 14 // Trust Anchor Unknown
-	EDECodeExpectedAnswerAfterDNL  = 15 // Expected Answer After DNL
-	EDECodeDelegationNotServed     = 16 // Delegation Not Served
-	EDECodeTTLMismatch            = 17 // TTL Mismatch
-	EDECodeCachedValidatedResponse = 18 // Cached Validated Response
+	EDECodeOther              uint16 = iota // Other Error
+	EDECodeUnsupportedDNSKEYAlgo            // Unsupported DNSKEY Algorithm
+	EDECodeUnsupportedDSDigest              // Unsupported DS Digest Type (reused for signature errors)
+	EDECodeStaleAnswer                     // Stale Answer
+	EDECodeForgedAnswer                    // Forged Answer
+	EDECodeIndeterminate                   // DNSSEC Indeterminate
+	EDECodeBogus                           // DNSSEC Bogus (also used for dnskey-missing)
+	EDECodeSignatureExpired                // Signature Expired
+	EDECodeSignatureNotYetValid            // Signature Not Yet Valid
+	EDECodeDNSKEYMissing                   // DNSKEY Missing
+	EDECodeDSMissing                       // DS Missing
+	EDECodeNoZoneKeyBitSet                 // No Zone Key Bit Set
+	EDECodeSignatureUnsupported            // Signature Unsupported Algorithm
+	EDECodeDNSKEYNotAnchor                 // DNSKEY Not Anchor
+	EDECodeTrustAnchorUnknown              // Trust Anchor Unknown
+	EDECodeExpectedAnswerAfterDNL           // Expected Answer After DNL
+	EDECodeDelegationNotServed             // Delegation Not Served
+	EDECodeTTLMismatch                     // TTL Mismatch
+	EDECodeCachedValidatedResponse          // Cached Validated Response
 )
 
 // String returns a human-readable description of the EDE code per RFC 8914.
