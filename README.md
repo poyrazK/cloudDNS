@@ -9,6 +9,13 @@ cloudDNS is a high-performance, authoritative, and recursive DNS server built fr
 
 ## Key Features
 
+### DNSSEC (DNS Security Extensions)
+*   **Signing**: Automated KSK/ZSK generation, rotation, and zone signing with Double-Signature rollover for zero-downtime key rotation.
+*   **Validation**: Response validation with ECDSA P-256, AD bit support, and RFC 8914 Extended DNS Error (EDE) codes for debugging.
+*   **Modes**: Three validation modes - `disabled`, `ad-bit-only`, or `strict` (SERVFAIL on invalid).
+*   **NSEC/NSEC3**: Authenticated denial of existence for secure proof of non-existence.
+*   **Documentation**: See [docs/dnssec.md](docs/dnssec.md) for full details.
+
 ### Core Protocol & Performance
 *   **Manual Wire Format (RFC 1035)**: Custom binary parser and serializer for maximum control over DNS packets.
 *   **Dual-Stack Transport**: Parallel high-performance UDP listener pool and framed TCP handlers.
@@ -28,10 +35,6 @@ cloudDNS is a high-performance, authoritative, and recursive DNS server built fr
 *   **Dynamic Updates (RFC 2136)**: Secure, atomic updates to zone records at runtime.
 *   **Incremental Zone Transfer (IXFR - RFC 1995)**: Efficient replication that transfers only changes, not the entire zone.
 *   **DNS NOTIFY (RFC 1996)**: Real-time notification to secondary servers upon zone changes.
-*   **DNSSEC (RFC 4034/4035/5155)**:
-    *   **Automated Lifecycle**: Background worker handles Key (KSK/ZSK) generation and rotation.
-    *   **Double-Signature Rollover**: Zero-downtime key rotation orchestration.
-    *   **NSEC/NSEC3**: Authenticated denial of existence.
 *   **DNS over HTTPS (DoH - RFC 8484)**: Secure DNS queries via HTTP/2, supporting both `GET` (base64url) and `POST` (binary).
 *   **EDNS(0) & Truncation (RFC 6891)**: Extended payload support with automatic TCP fallback.
 *   **TSIG (RFC 2845)**: HMAC-authenticated transactions for secure updates and transfers.

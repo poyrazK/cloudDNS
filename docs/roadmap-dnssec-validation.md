@@ -34,7 +34,7 @@ Implement full DNSSEC validation MVP across small, reviewable PRs.
 
 ---
 
-### PR 2: `dnssec-validator-service`
+### PR 2: `dnssec-validator-service` ✅ COMPLETED
 **Focus**: Trust chain validation service
 
 **Files**: `internal/core/services/dnssec_validator.go` (NEW)
@@ -48,9 +48,11 @@ Implement full DNSSEC validation MVP across small, reviewable PRs.
 
 **Rationale**: Depends on PR1 for verification functions
 
+**Status**: Merged in `d59e189`
+
 ---
 
-### PR 3: `dnssec-port-methods`
+### PR 3: `dnssec-port-methods` ✅ COMPLETED
 **Focus**: Add ports for key fetching
 
 **Files**: `internal/core/ports/` (MODIFY)
@@ -63,9 +65,11 @@ Implement full DNSSEC validation MVP across small, reviewable PRs.
 
 **Rationale**: Provides interface for fetching keys from repository/network
 
+**Status**: Merged in `a982a42`
+
 ---
 
-### PR 4: `dnssec-server-integration`
+### PR 4: `dnssec-server-integration` ✅ COMPLETED
 **Focus**: Server integration with AD bit and EDE
 
 **Files**: `internal/dns/server/server.go` (MODIFY)
@@ -78,6 +82,8 @@ Implement full DNSSEC validation MVP across small, reviewable PRs.
 - Add `dnssecMode` config (disabled/ad-bit-only/strict)
 
 **Rationale**: Hooks validation into the packet handling pipeline
+
+**Status**: Merged in `16b4065`, `97901ac`
 
 ---
 
@@ -133,9 +139,11 @@ Implement full DNSSEC validation MVP across small, reviewable PRs.
 
 **Status**: Merged in `feat/dnssec-error-handling` branch
 
+**Status**: Merged in `e493445`, `d630253`
+
 ---
 
-### PR 8: `dnssec-integration-tests`
+### PR 8: `dnssec-integration-tests` ✅ COMPLETED
 **Focus**: End-to-end integration tests
 
 **Files**: New integration test files
@@ -148,6 +156,8 @@ Implement full DNSSEC validation MVP across small, reviewable PRs.
 - Test with real recursive resolution
 
 **Rationale**: Validates the full flow works in production-like scenarios
+
+**Status**: Merged in `701561c`
 
 ---
 
