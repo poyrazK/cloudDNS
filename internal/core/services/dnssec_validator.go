@@ -265,7 +265,7 @@ func (v *DNSSECValidator) ValidateWithTrustAnchor(zone string, rrset, rrsigs, dn
 	if trustDNSKEY == nil {
 		return ValidationResult{
 			Valid: false,
-			EDE:   &EDE{Code: 6, Info: "trust-anchor-not-found"},
+			EDE:   &EDE{Code: EDECodeTrustAnchorUnknown, Info: "trust-anchor-not-found"},
 		}
 	}
 
@@ -281,16 +281,51 @@ func (v *DNSSECValidator) ValidateWithTrustAnchor(zone string, rrset, rrsigs, dn
 	if rrsig == nil {
 		return ValidationResult{
 			Valid: false,
-			EDE:   &EDE{Code: 0, Info: "no matching rrsig found"},
+			EDE:   &EDE{Code: EDECodeBogus, Info: "no matching rrsig found"},
 		}
 	}
 
 	// Verify using trust anchor DNSKEY
 	valid, err := packet.VerifyRRSet(rrset, *rrsig, *trustDNSKEY, now)
-	if !valid || err != nil {
+	if err != nil {
+		switch err {
+		case packet.ErrSignatureExpired:
+			return ValidationResult{
+				Valid: false,
+				EDE:   &EDE{Code: EDECodeSignatureExpired, Info: "signature-expired"},
+			}
+		case packet.ErrSignatureNotYetValid:
+			return ValidationResult{
+				Valid: false,
+				EDE:   &EDE{Code: EDECodeSignatureNotYetValid, Info: "signature-not-yet-valid"},
+			}
+		case packet.ErrKeyTagMismatch:
+			return ValidationResult{
+				Valid: false,
+				EDE:   &EDE{Code: EDECodeBogus, Info: "key-tag-mismatch"},
+			}
+		case packet.ErrAlgorithmMismatch:
+			return ValidationResult{
+				Valid: false,
+				EDE:   &EDE{Code: EDECodeUnsupportedDNSKEYAlgo, Info: "algorithm-mismatch"},
+			}
+		case packet.ErrInvalidSignature:
+			return ValidationResult{
+				Valid: false,
+				EDE:   &EDE{Code: EDECodeBogus, Info: "invalid-signature"},
+			}
+		default:
+			return ValidationResult{
+				Valid: false,
+				EDE:   &EDE{Code: EDECodeOther, Info: err.Error()},
+			}
+		}
+	}
+
+	if !valid {
 		return ValidationResult{
 			Valid: false,
-			EDE:   &EDE{Code: 2, Info: "trust-anchor validation failed"},
+			EDE:   &EDE{Code: EDECodeBogus, Info: "trust-anchor validation failed"},
 		}
 	}
 
