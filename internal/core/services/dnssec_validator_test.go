@@ -189,8 +189,8 @@ func TestValidateRRSet_InvalidDNSKEYFormat(t *testing.T) {
 	if result.Valid {
 		t.Error("Expected invalid for bad DNSKEY format")
 	}
-	if result.EDE == nil || result.EDE.Info != "invalidDNSKEY" {
-		t.Errorf("Expected 'invalidDNSKEY', got %v", result.EDE)
+	if result.EDE == nil || result.EDE.Info != "invalid-dnskey-format" {
+		t.Errorf("Expected 'invalid-dnskey-format', got %v", result.EDE)
 	}
 }
 
