@@ -43,6 +43,9 @@ type Server struct {
 	Redis            *RedisCache
 	DNSSEC           *services.DNSSECService
 	DNSSECValidator  *services.DNSSECValidator
+	DNSSECMode       string // "disabled", "ad-bit-only", "strict"
+	DNSSECConfig     *config.DNSSECConfig
+	dnskeyCache      *DNSCache // cached DNSKEY records for DNSSEC validation
 	WorkerCount      int
 	udpQueue         chan udpTask
 	Logger           *slog.Logger
@@ -52,8 +55,6 @@ type Server struct {
 	NodeID           string
 	RecursionEnabled bool
 	CookieSecret     []byte
-	DNSSECMode      string // "disabled", "ad-bit-only", "strict"
-	DNSSECConfig     *config.DNSSECConfig
 
 	// Testing/Chaos flags
 	SimulateDBLatency  time.Duration
@@ -91,6 +92,7 @@ func NewServer(addr string, repo ports.DNSRepository, logger *slog.Logger) *Serv
 		Addr:             addr,
 		Repo:             repo,
 		Cache:            NewDNSCache(),
+		dnskeyCache:      NewDNSCache(),
 		DNSSEC:           services.NewDNSSECService(repo),
 		WorkerCount:      runtime.NumCPU() * 32, // High concurrency tuning
 		udpQueue:         make(chan udpTask, 50000),
@@ -1437,14 +1439,26 @@ func (s *Server) validateDNSSEC(ctx context.Context, zoneName string, response *
 	// Fetch DNSKEYs for validation
 	dnskeyRecords, err := s.Repo.GetDNSKEYs(ctx, zoneName)
 	if err != nil {
-		// Error fetching DNSKEYs - can't validate
 		if s.DNSSECMode == "strict" {
 			return fmt.Errorf("dnssec: failed to fetch dnskeys: %w", err)
 		}
 		return nil
 	}
+
+	// If no DNSKEYs from repo, try fetching from network
+	if len(dnskeyRecords) == 0 && s.RecursionEnabled {
+		netDNSKEYs, netErr := s.fetchDNSKEYFromNetwork(ctx, zoneName)
+		if netErr == nil {
+			// Convert network DNSKEYs to domain records
+			for _, dk := range netDNSKEYs {
+				if domRec, err := repository.ConvertPacketRecordToDomain(dk, ""); err == nil {
+					dnskeyRecords = append(dnskeyRecords, domRec)
+				}
+			}
+		}
+	}
+
 	if len(dnskeyRecords) == 0 {
-		// No DNSKEYs available - can't validate
 		if s.DNSSECMode == "strict" {
 			return fmt.Errorf("dnssec: no dnskeys available for validation")
 		}
@@ -1461,7 +1475,6 @@ func (s *Server) validateDNSSEC(ctx context.Context, zoneName string, response *
 		if pRec.Type != packet.DNSKEY {
 			continue
 		}
-		// Verify it's actually a DNSKEY record
 		if pRec.Type == packet.DNSKEY && len(pRec.PublicKey) > 0 {
 			dnskeys = append(dnskeys, pRec)
 		}
@@ -1519,6 +1532,35 @@ func (s *Server) validateDNSSEC(ctx context.Context, zoneName string, response *
 
 	response.Header.AuthedData = allValid
 	return nil
+}
+
+// fetchDNSKEYFromNetwork queries DNSKEY records for a zone from the network.
+// It returns the DNSKEY records and an error if the query failed.
+func (s *Server) fetchDNSKEYFromNetwork(ctx context.Context, zoneName string) ([]packet.DNSRecord, error) {
+	// First try to resolve DNSKEY via recursive resolution
+	dnskeyResp, err := s.resolveRecursive(zoneName, packet.DNSKEY)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve DNSKEY for %s: %w", zoneName, err)
+	}
+
+	var dnskeys []packet.DNSRecord
+	// Collect DNSKEY records from answers
+	for _, rec := range dnskeyResp.Answers {
+		if rec.Type == packet.DNSKEY && len(rec.PublicKey) > 0 {
+			dnskeys = append(dnskeys, rec)
+		}
+	}
+	// Also check authorities (some servers put DNSKEYs there)
+	for _, rec := range dnskeyResp.Authorities {
+		if rec.Type == packet.DNSKEY && len(rec.PublicKey) > 0 {
+			dnskeys = append(dnskeys, rec)
+		}
+	}
+
+	if len(dnskeys) == 0 {
+		return nil, fmt.Errorf("no DNSKEY records found for %s", zoneName)
+	}
+	return dnskeys, nil
 }
 
 func (s *Server) groupRecords(records []packet.DNSRecord) [][]packet.DNSRecord {
