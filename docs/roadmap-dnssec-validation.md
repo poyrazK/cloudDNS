@@ -34,7 +34,7 @@ Implement full DNSSEC validation MVP across small, reviewable PRs.
 
 ---
 
-### PR 2: `dnssec-validator-service`
+### PR 2: `dnssec-validator-service` ✅ COMPLETED
 **Focus**: Trust chain validation service
 
 **Files**: `internal/core/services/dnssec_validator.go` (NEW)
@@ -48,9 +48,11 @@ Implement full DNSSEC validation MVP across small, reviewable PRs.
 
 **Rationale**: Depends on PR1 for verification functions
 
+**Status**: Merged in `d59e189`
+
 ---
 
-### PR 3: `dnssec-port-methods`
+### PR 3: `dnssec-port-methods` ✅ COMPLETED
 **Focus**: Add ports for key fetching
 
 **Files**: `internal/core/ports/` (MODIFY)
@@ -63,9 +65,11 @@ Implement full DNSSEC validation MVP across small, reviewable PRs.
 
 **Rationale**: Provides interface for fetching keys from repository/network
 
+**Status**: Merged in `a982a42`
+
 ---
 
-### PR 4: `dnssec-server-integration`
+### PR 4: `dnssec-server-integration` ✅ COMPLETED
 **Focus**: Server integration with AD bit and EDE
 
 **Files**: `internal/dns/server/server.go` (MODIFY)
@@ -79,9 +83,11 @@ Implement full DNSSEC validation MVP across small, reviewable PRs.
 
 **Rationale**: Hooks validation into the packet handling pipeline
 
+**Status**: Merged in `16b4065`, `97901ac`
+
 ---
 
-### PR 5: `dnssec-trust-anchors-config`
+### PR 5: `dnssec-trust-anchors-config` ✅ COMPLETED
 **Focus**: Configuration for trust anchors
 
 **Files**: Config files + `server.go`
@@ -94,9 +100,11 @@ Implement full DNSSEC validation MVP across small, reviewable PRs.
 
 **Rationale**: Production-ready configuration management
 
+**Status**: Merged in `0b7938c`
+
 ---
 
-### PR 6: `dnssec-recursive-keys`
+### PR 6: `dnssec-recursive-keys` ✅ COMPLETED
 **Focus**: Fetch DNSKEYs during recursive resolution
 
 **Files**: `internal/dns/server/recursive.go` (MODIFY)
@@ -109,9 +117,11 @@ Implement full DNSSEC validation MVP across small, reviewable PRs.
 
 **Rationale**: Enables validation without pre-configured keys for every zone
 
+**Status**: Merged in `8e37d2f`
+
 ---
 
-### PR 7: `dnssec-error-handling`
+### PR 7: `dnssec-error-handling` ✅ COMPLETED
 **Focus**: Comprehensive EDE codes for validation failures
 
 **Files**: `internal/dns/packet/packet.go` + EDE constants
@@ -127,9 +137,11 @@ Implement full DNSSEC validation MVP across small, reviewable PRs.
 
 **Rationale**: Better debugging for DNSSEC failures
 
+**Status**: Merged in `e493445`, `d630253`
+
 ---
 
-### PR 8: `dnssec-integration-tests`
+### PR 8: `dnssec-integration-tests` ✅ COMPLETED
 **Focus**: End-to-end integration tests
 
 **Files**: New integration test files
@@ -142,6 +154,8 @@ Implement full DNSSEC validation MVP across small, reviewable PRs.
 - Test with real recursive resolution
 
 **Rationale**: Validates the full flow works in production-like scenarios
+
+**Status**: Merged in `701561c`
 
 ---
 
