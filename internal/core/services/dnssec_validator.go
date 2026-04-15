@@ -25,6 +25,75 @@ type EDE struct {
 	Info   string
 }
 
+// RFC 8914 Extended DNS Error Codes
+const (
+	EDECodeOther              uint16 = iota // Other Error
+	EDECodeUnsupportedDNSKEYAlgo            // Unsupported DNSKEY Algorithm
+	EDECodeUnsupportedDSDigest              // Unsupported DS Digest Type (reused for signature errors)
+	EDECodeStaleAnswer                     // Stale Answer
+	EDECodeForgedAnswer                    // Forged Answer
+	EDECodeIndeterminate                   // DNSSEC Indeterminate
+	EDECodeBogus                           // DNSSEC Bogus (also used for dnskey-missing)
+	EDECodeSignatureExpired                // Signature Expired
+	EDECodeSignatureNotYetValid            // Signature Not Yet Valid
+	EDECodeDNSKEYMissing                   // DNSKEY Missing
+	EDECodeDSMissing                       // DS Missing
+	EDECodeNoZoneKeyBitSet                 // No Zone Key Bit Set
+	EDECodeSignatureUnsupported            // Signature Unsupported Algorithm
+	EDECodeDNSKEYNotAnchor                 // DNSKEY Not Anchor
+	EDECodeTrustAnchorUnknown              // Trust Anchor Unknown
+	EDECodeExpectedAnswerAfterDNL           // Expected Answer After DNL
+	EDECodeDelegationNotServed             // Delegation Not Served
+	EDECodeTTLMismatch                     // TTL Mismatch
+	EDECodeCachedValidatedResponse          // Cached Validated Response
+)
+
+// String returns a human-readable description of the EDE code per RFC 8914.
+func (e *EDE) String() string {
+	switch e.Code {
+	case EDECodeOther:
+		return "other error"
+	case EDECodeUnsupportedDNSKEYAlgo:
+		return "unsupported-dnskey-algorithm"
+	case EDECodeUnsupportedDSDigest:
+		return "unsupported-ds-digest"
+	case EDECodeStaleAnswer:
+		return "stale-answer"
+	case EDECodeForgedAnswer:
+		return "forged-answer"
+	case EDECodeIndeterminate:
+		return "dnssec-indeterminate"
+	case EDECodeBogus:
+		return "dnssec-bogus"
+	case EDECodeSignatureExpired:
+		return "signature-expired"
+	case EDECodeSignatureNotYetValid:
+		return "signature-not-yet-valid"
+	case EDECodeDNSKEYMissing:
+		return "dnskey-missing"
+	case EDECodeDSMissing:
+		return "ds-missing"
+	case EDECodeNoZoneKeyBitSet:
+		return "no-zone-key-bit-set"
+	case EDECodeSignatureUnsupported:
+		return "signature-unsupported"
+	case EDECodeDNSKEYNotAnchor:
+		return "dnskey-not-anchor"
+	case EDECodeTrustAnchorUnknown:
+		return "trust-anchor-unknown"
+	case EDECodeExpectedAnswerAfterDNL:
+		return "expected-answer-after-dnl"
+	case EDECodeDelegationNotServed:
+		return "delegation-not-served"
+	case EDECodeTTLMismatch:
+		return "ttl-mismatch"
+	case EDECodeCachedValidatedResponse:
+		return "cached-validated-response"
+	default:
+		return "unknown-error"
+	}
+}
+
 // ValidationResult contains the result of DNSSEC validation.
 type ValidationResult struct {
 	Valid   bool
