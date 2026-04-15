@@ -114,21 +114,24 @@ Implement full DNSSEC validation MVP across small, reviewable PRs.
 
 ---
 
-### PR 7: `dnssec-error-handling`
+### PR 7: `dnssec-error-handling` ✅ COMPLETED
 **Focus**: Comprehensive EDE codes for validation failures
 
-**Files**: `internal/dns/packet/packet.go` + EDE constants
+**Files**: `internal/core/services/dnssec_validator.go` (MODIFY)
 
 **Contents**:
-- Add EDE codes 0-18 per RFC 8914
-- Map validation errors to appropriate EDE codes:
-  - Bogus signature → EDE 2 (signature-expired/fraudulent)
-  - Missing DNSKEY → EDE 6 (dnskey-missing)
-  - Invalid DNSKEY flags → EDE 7 (invalidDNSKEY)
-  - etc.
-- Tests for EDE mapping
+- Add RFC 8914 EDE constants (0-18)
+- Add `String()` method to EDE for human-readable descriptions
+- Update error code mappings:
+  - Bogus → EDE 6 (dnssec-bogus)
+  - Signature expired → EDE 7 (signature-expired)
+  - Missing DNSKEY → EDE 9 (dnskey-missing)
+  - Algorithm mismatch → EDE 1 (unsupported-dnskey-algorithm)
+- Update tests to reflect new Info strings
 
-**Rationale**: Better debugging for DNSSEC failures
+**Rationale**: Better debugging for DNSSEC failures with RFC-compliant EDE codes
+
+**Status**: Merged in `feat/dnssec-error-handling` branch
 
 ---
 
