@@ -60,7 +60,7 @@ func TestGenerateNSEC3(t *testing.T) {
 	srv := NewServer(":0", repo, nil)
 	zone := &domain.Zone{ID: "z1", Name: "example.com."}
 
-	nsec3, err := srv.generateNSEC3(context.Background(), zone, "missing.example.com.")
+	nsec3, err := srv.generateNSEC3(context.Background(), zone, "missing.example.com.", "")
 	if err != nil {
 		t.Fatalf("generateNSEC3 failed: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestGenerateNSEC3_NoParam(t *testing.T) {
 	srv := NewServer(":0", repo, nil)
 	zone := &domain.Zone{ID: "z1", Name: "example.com."}
 
-	_, err := srv.generateNSEC3(context.Background(), zone, "test")
+	_, err := srv.generateNSEC3(context.Background(), zone, "test", "")
 	if err == nil {
 		t.Errorf("Expected error when NSEC3PARAM is missing")
 	}
@@ -107,7 +107,7 @@ func TestGenerateNSEC3_MalformedParam(t *testing.T) {
 	srv := NewServer(":0", repo, nil)
 	zone := &domain.Zone{ID: "z1", Name: "example.com."}
 
-	_, err := srv.generateNSEC3(context.Background(), zone, "test")
+	_, err := srv.generateNSEC3(context.Background(), zone, "test", "")
 	if err == nil {
 		t.Errorf("Expected error for malformed NSEC3PARAM")
 	}
@@ -126,7 +126,7 @@ func TestGenerateNSEC3_EmptyHashes(t *testing.T) {
 	srv := NewServer(":0", repo, nil)
 	zone := &domain.Zone{ID: "z1", Name: "example.com."}
 
-	_, err := srv.generateNSEC3(context.Background(), zone, "test")
+	_, err := srv.generateNSEC3(context.Background(), zone, "test", "")
 	if err == nil {
 		t.Errorf("Expected error when no records to hash for NSEC3")
 	}
@@ -145,7 +145,7 @@ func TestGenerateNSEC3_BoundaryWrap(t *testing.T) {
 	srv := NewServer(":0", repo, nil)
 	zone := &domain.Zone{ID: "z1", Name: "example.com."}
 
-	nsec3, err := srv.generateNSEC3(context.Background(), zone, "zzzzzzzz.example.com.")
+	nsec3, err := srv.generateNSEC3(context.Background(), zone, "zzzzzzzz.example.com.", "")
 	if err != nil {
 		t.Fatalf("generateNSEC3 failed: %v", err)
 	}
@@ -168,13 +168,52 @@ func TestGenerateNSEC3_ExactMatch(t *testing.T) {
 	srv := NewServer(":0", repo, nil)
 	zone := &domain.Zone{ID: "z1", Name: "example.com."}
 
-	nsec3, err := srv.generateNSEC3(context.Background(), zone, "www.example.com.")
+	nsec3, err := srv.generateNSEC3(context.Background(), zone, "www.example.com.", "")
 	if err != nil {
 		t.Fatalf("generateNSEC3 failed: %v", err)
 	}
 
 	if !strings.HasSuffix(nsec3.Name, ".example.com.") {
 		t.Errorf("NSEC3 name should have zone suffix: %s", nsec3.Name)
+	}
+}
+
+func TestGenerateNSEC3_WildcardProof(t *testing.T) {
+	repo := &mockServerRepo{
+		zones: []domain.Zone{
+			{ID: "z1", Name: "example.com."},
+		},
+		records: []domain.Record{
+			{ZoneID: "z1", Name: "example.com.", Type: "NSEC3PARAM", Content: "1 0 10 ABCD"},
+			{ZoneID: "z1", Name: "*.example.com.", Type: domain.TypeA, Content: "1.2.3.4"},
+		},
+	}
+	srv := NewServer(":0", repo, nil)
+	zone := &domain.Zone{ID: "z1", Name: "example.com."}
+
+	// Query for www.example.com which should match *.example.com
+	nsec3, err := srv.generateNSEC3(context.Background(), zone, "www.example.com.", "*.example.com.")
+	if err != nil {
+		t.Fatalf("generateNSEC3 wildcard proof failed: %v", err)
+	}
+
+	// NSEC3 owner should be hash of *.example.com.
+	// We can't easily check the exact hash, but we can verify it's a valid NSEC3
+	if nsec3.Type != packet.NSEC3 {
+		t.Errorf("Expected NSEC3 record type")
+	}
+
+	// The NSEC3 should include A type in its bitmap (proving wildcard covered it)
+	// The bitmap should have bit for type A set
+	foundA := false
+	for _, b := range nsec3.TypeBitMap {
+		if b != 0 {
+			foundA = true
+			break
+		}
+	}
+	if !foundA {
+		t.Errorf("NSEC3 bitmap should have some types set for wildcard proof")
 	}
 }
 

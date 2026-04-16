@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -8,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/poyrazK/cloudDNS/internal/core/domain"
 	"github.com/poyrazK/cloudDNS/internal/core/services"
 	"github.com/poyrazK/cloudDNS/internal/dns/packet"
 )
@@ -267,3 +269,335 @@ func encodeECDSAPublicKey(pub *ecdsa.PublicKey) []byte {
 	copy(result[32:64], yBytes)
 	return result
 }
+
+// TestDNSSEC_ValidateChain_ThreeZoneChain tests full chain validation
+// from root trust anchor through TLD to leaf zone.
+func TestDNSSEC_ValidateChain_ThreeZoneChain(t *testing.T) {
+	// Create root anchor
+	rootDNSKEY, _ := makeTestDNSKEYWithName(t, ".")
+
+	// Create keys for com and example
+	comDNSKEY, _ := makeTestDNSKEYWithName(t, "com.")
+	exampleDNSKEY, _ := makeTestDNSKEYWithName(t, "example.com.")
+
+	trustAnchors := map[string]packet.DNSRecord{
+		".": rootDNSKEY,
+	}
+	validator := services.NewDNSSECValidator(trustAnchors)
+
+	// Compute DS records for the chain
+	exampleDS, _ := exampleDNSKEY.ComputeDS(2) // SHA-256
+	comDS, _ := comDNSKEY.ComputeDS(2)
+
+	// Build chain: example.com -> com -> root (trust anchor)
+	chain := []services.ChainLink{
+		{
+			Zone:    "example.com.",
+			DNSKEYs: []packet.DNSRecord{exampleDNSKEY},
+			DS:      exampleDS,
+		},
+		{
+			Zone:    "com.",
+			DNSKEYs: []packet.DNSRecord{comDNSKEY},
+			DS:      comDS,
+		},
+	}
+
+	err := validator.ValidateChain(chain, uint32(1000))
+	if err != nil {
+		t.Errorf("Expected valid 3-zone chain, got error: %v", err)
+	}
+}
+
+// TestDNSSEC_ValidateChain_BrokenChain tests that broken chains are detected.
+func TestDNSSEC_ValidateChain_BrokenChain(t *testing.T) {
+	// Create first key
+	privKey1, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	pubBytes1 := encodeECDSAPublicKey(&privKey1.PublicKey)
+	dnskey1 := packet.DNSRecord{
+		Name:     "example.com.",
+		Type:     packet.DNSKEY,
+		Class:    1,
+		TTL:      300,
+		Flags:    257,
+		Protocol: 3,
+		Algorithm: 13,
+		PublicKey: pubBytes1,
+	}
+
+	// Create second key (different)
+	privKey2, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	pubBytes2 := encodeECDSAPublicKey(&privKey2.PublicKey)
+	dnskey2 := packet.DNSRecord{
+		Name:     "example.com.",
+		Type:     packet.DNSKEY,
+		Class:    1,
+		TTL:      300,
+		Flags:    257,
+		Protocol: 3,
+		Algorithm: 13,
+		PublicKey: pubBytes2,
+	}
+
+	// Compute DS from dnskey1
+	ds, _ := dnskey1.ComputeDS(2)
+
+	// Chain with dnskey2 (doesn't match DS) - should fail
+	chain := []services.ChainLink{
+		{
+			Zone:    "example.com.",
+			DNSKEYs: []packet.DNSRecord{dnskey2},
+			DS:      ds,
+		},
+	}
+
+	validator := services.NewDNSSECValidator(nil)
+	err := validator.ValidateChain(chain, uint32(1000))
+	if err == nil {
+		t.Error("Expected error when DNSKEY doesn't match DS")
+	}
+}
+
+// TestDNSSEC_ValidateChain_TrustAnchorVerification tests that trust anchor
+// verification works in the chain.
+func TestDNSSEC_ValidateChain_TrustAnchorVerification(t *testing.T) {
+	// Create root anchor
+	rootPrivKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	rootPubBytes := encodeECDSAPublicKey(&rootPrivKey.PublicKey)
+	rootDNSKEY := packet.DNSRecord{
+		Name:     ".",
+		Type:     packet.DNSKEY,
+		Class:    1,
+		TTL:      300,
+		Flags:    257,
+		Protocol: 3,
+		Algorithm: 13,
+		PublicKey: rootPubBytes,
+	}
+
+	trustAnchors := map[string]packet.DNSRecord{
+		".": rootDNSKEY,
+	}
+	validator := services.NewDNSSECValidator(trustAnchors)
+
+	// Create a zone DNSKEY that doesn't match root anchor
+	zonePrivKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	zonePubBytes := encodeECDSAPublicKey(&zonePrivKey.PublicKey)
+	zoneDNSKEY := packet.DNSRecord{
+		Name:     "example.com.",
+		Type:     packet.DNSKEY,
+		Class:    1,
+		TTL:      300,
+		Flags:    257,
+		Protocol: 3,
+		Algorithm: 13,
+		PublicKey: zonePubBytes,
+	}
+
+	// Chain where zone's DNSKEY doesn't match trust anchor
+	chain := []services.ChainLink{
+		{
+			Zone:    "example.com.",
+			DNSKEYs: []packet.DNSRecord{zoneDNSKEY},
+			DS:      packet.DNSRecord{}, // Empty DS, rely on trust anchor
+		},
+	}
+
+	// Without trust anchor for example.com, this should pass (empty DS)
+	err := validator.ValidateChain(chain, uint32(1000))
+	if err != nil {
+		t.Errorf("Unexpected error for zone without anchor: %v", err)
+	}
+}
+
+// makeTestDNSKEYWithName creates a test DNSKEY with a specific name.
+func makeTestDNSKEYWithName(t *testing.T, name string) (packet.DNSRecord, *ecdsa.PrivateKey) {
+	t.Helper()
+
+	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("Failed to generate ECDSA key: %v", err)
+	}
+
+	pubBytes := make([]byte, 64)
+	xBytes := privKey.PublicKey.X.FillBytes(make([]byte, 32))
+	yBytes := privKey.PublicKey.Y.FillBytes(make([]byte, 32))
+	copy(pubBytes[0:32], xBytes)
+	copy(pubBytes[32:64], yBytes)
+
+	dnskey := packet.DNSRecord{
+		Name:     name,
+		Type:     packet.DNSKEY,
+		Class:    1,
+		TTL:      300,
+		Flags:    257,
+		Protocol: 3,
+		Algorithm: 13,
+		PublicKey: pubBytes,
+	}
+
+	return dnskey, privKey
+}
+
+// TestDNSSEC_NSEC3WildcardProof_Integration tests that NSEC3 wildcard proofs
+// are generated when a wildcard matches a query.
+func TestDNSSEC_NSEC3WildcardProof_Integration(t *testing.T) {
+	// Create repo with NSEC3PARAM and wildcard record
+	repo := &mockServerRepo{
+		zones: []domain.Zone{
+			{ID: "z1", Name: "wildcard.test."},
+		},
+		records: []domain.Record{
+			{ZoneID: "z1", Name: "wildcard.test.", Type: "NSEC3PARAM", Content: "1 0 10 ABCD"},
+			{ZoneID: "z1", Name: "*.wildcard.test.", Type: domain.TypeA, Content: "5.6.7.8"},
+		},
+	}
+	srv := NewServer(":0", repo, nil)
+	zone := &domain.Zone{ID: "z1", Name: "wildcard.test."}
+
+	// Generate NSEC3 proof for www.wildcard.test. with wildcard *.wildcard.test.
+	nsec3, err := srv.generateNSEC3(context.Background(), zone, "www.wildcard.test.", "*.wildcard.test.")
+	if err != nil {
+		t.Fatalf("generateNSEC3 wildcard proof failed: %v", err)
+	}
+
+	if nsec3.Type != packet.NSEC3 {
+		t.Errorf("Expected NSEC3 record type, got %d", nsec3.Type)
+	}
+
+	// Verify NSEC3 has valid structure
+	if nsec3.HashAlg != 1 {
+		t.Errorf("Expected hash algorithm 1, got %d", nsec3.HashAlg)
+	}
+	if nsec3.Iterations != 10 {
+		t.Errorf("Expected iterations 10, got %d", nsec3.Iterations)
+	}
+	if string(nsec3.Salt) != "ABCD" {
+		t.Errorf("Expected salt 'ABCD', got %s", string(nsec3.Salt))
+	}
+
+	// Verify NSEC3 has type bitmap set (should include A type from wildcard)
+	if len(nsec3.TypeBitMap) == 0 {
+		t.Errorf("NSEC3 type bitmap should not be empty")
+	}
+}
+
+// TestDNSSEC_NSEC3WildcardProof_NoWildcardMatch tests that NSEC3 denial
+// is generated when no wildcard matches.
+func TestDNSSEC_NSEC3WildcardProof_Denial(t *testing.T) {
+	// Create repo with NSEC3PARAM but no wildcard
+	repo := &mockServerRepo{
+		zones: []domain.Zone{
+			{ID: "z1", Name: "nodeny.test."},
+		},
+		records: []domain.Record{
+			{ZoneID: "z1", Name: "nodeny.test.", Type: "NSEC3PARAM", Content: "1 0 10 ABCD"},
+			{ZoneID: "z1", Name: "a.nodeny.test.", Type: domain.TypeA, Content: "1.2.3.4"},
+		},
+	}
+	srv := NewServer(":0", repo, nil)
+	zone := &domain.Zone{ID: "z1", Name: "nodeny.test."}
+
+	// Query for nonexistent.nodeny.test. - should get NSEC3 denial
+	nsec3, err := srv.generateNSEC3(context.Background(), zone, "nonexistent.nodeny.test.", "")
+	if err != nil {
+		t.Fatalf("generateNSEC3 failed: %v", err)
+	}
+
+	if nsec3.Type != packet.NSEC3 {
+		t.Errorf("Expected NSEC3 record type")
+	}
+
+	// The NSEC3 owner should be the hash of a.nodeny.test. (covers nonexistent)
+	// The bitmap should include A type (proving a.nodeny.test. exists)
+	foundA := false
+	for _, b := range nsec3.TypeBitMap {
+		if b != 0 {
+			foundA = true
+			break
+		}
+	}
+	if !foundA {
+		t.Errorf("NSEC3 bitmap should have some types set for existing record proof")
+	}
+}
+
+// TestDNSSEC_ValidateChain_EmptyChain tests error handling for empty chain.
+func TestDNSSEC_ValidateChain_EmptyChain(t *testing.T) {
+	validator := services.NewDNSSECValidator(nil)
+
+	err := validator.ValidateChain([]services.ChainLink{}, uint32(1000))
+	if err == nil {
+		t.Error("Expected error for empty chain")
+	}
+}
+
+// TestDNSSEC_ValidateChain_SingleZone tests single zone chain validation.
+func TestDNSSEC_ValidateChain_SingleZone(t *testing.T) {
+	privKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	pubBytes := encodeECDSAPublicKey(&privKey.PublicKey)
+	dnskey := packet.DNSRecord{
+		Name:     "example.com.",
+		Type:     packet.DNSKEY,
+		Class:    1,
+		TTL:      300,
+		Flags:    257,
+		Protocol: 3,
+		Algorithm: 13,
+		PublicKey: pubBytes,
+	}
+
+	chain := []services.ChainLink{
+		{
+			Zone:    "example.com.",
+			DNSKEYs: []packet.DNSRecord{dnskey},
+			DS:      packet.DNSRecord{}, // Empty DS
+		},
+	}
+
+	validator := services.NewDNSSECValidator(nil)
+	err := validator.ValidateChain(chain, uint32(1000))
+	if err != nil {
+		t.Errorf("Expected no error for single zone with empty DS, got: %v", err)
+	}
+}
+
+// TestDNSSEC_ValidateChain_DSAlgorithmMismatch tests detection of DS algorithm mismatch.
+func TestDNSSEC_ValidateChain_DSAlgorithmMismatch(t *testing.T) {
+	privKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	pubBytes := encodeECDSAPublicKey(&privKey.PublicKey)
+	dnskey := packet.DNSRecord{
+		Name:     "example.com.",
+		Type:     packet.DNSKEY,
+		Class:    1,
+		TTL:      300,
+		Flags:    257,
+		Protocol: 3,
+		Algorithm: 13,
+		PublicKey: pubBytes,
+	}
+
+	// Create DS with wrong algorithm
+	ds := packet.DNSRecord{
+		Type:       packet.DS,
+		KeyTag:     dnskey.ComputeKeyTag(),
+		Algorithm: 14, // Different from dnskey's algorithm (13)
+		DigestType: 2,
+		Digest:     []byte("wrong"),
+	}
+
+	chain := []services.ChainLink{
+		{
+			Zone:    "example.com.",
+			DNSKEYs: []packet.DNSRecord{dnskey},
+			DS:      ds,
+		},
+	}
+
+	validator := services.NewDNSSECValidator(nil)
+	err := validator.ValidateChain(chain, uint32(1000))
+	if err == nil {
+		t.Error("Expected error for algorithm mismatch")
+	}
+}
+

@@ -816,6 +816,17 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 						response.Answers = append(response.Answers, pRec)
 					}
 				}
+				// DNSSEC: If DO bit is set and wildcard matched, include NSEC3 proof
+				// Per RFC 5155 Section 7.2.14, prove the wildcard existed
+				if dnssecOK && len(response.Answers) > 0 {
+					nsec3params, _ := s.Repo.GetRecords(ctx, zone.Name, "NSEC3PARAM", "")
+					if len(nsec3params) > 0 {
+						nsec3, errNsec := s.generateNSEC3(ctx, zone, q.Name, wildcardName)
+						if errNsec == nil {
+							response.Authorities = append(response.Authorities, nsec3)
+						}
+					}
+				}
 				break
 			}
 		}
@@ -839,7 +850,7 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 				// Check for NSEC3PARAM to decide between NSEC and NSEC3
 				nsec3params, _ := s.Repo.GetRecords(ctx, zone.Name, "NSEC3PARAM", "")
 				if len(nsec3params) > 0 {
-					nsec3, errNsec := s.generateNSEC3(ctx, zone, q.Name)
+					nsec3, errNsec := s.generateNSEC3(ctx, zone, q.Name, "")
 					if errNsec == nil {
 						response.Authorities = append(response.Authorities, nsec3)
 					}
@@ -1859,7 +1870,7 @@ func (s *Server) generateNSEC(ctx context.Context, zone *domain.Zone, queryName 
 	return nsec, nil
 }
 
-func (s *Server) generateNSEC3(ctx context.Context, zone *domain.Zone, queryName string) (packet.DNSRecord, error) {
+func (s *Server) generateNSEC3(ctx context.Context, zone *domain.Zone, queryName string, wildcardName string) (packet.DNSRecord, error) {
 	params, errParams := s.Repo.GetRecords(ctx, zone.Name, "NSEC3PARAM", "")
 	if errParams != nil || len(params) == 0 {
 		return packet.DNSRecord{}, fmt.Errorf("no NSEC3PARAM")
@@ -1906,6 +1917,11 @@ func (s *Server) generateNSEC3(ctx context.Context, zone *domain.Zone, queryName
 		return bytes.Compare(hashes[i].hash, hashes[j].hash) < 0
 	})
 
+	// If wildcardName is provided, generate NSEC3 for wildcard proof
+	if wildcardName != "" {
+		return s.generateNSEC3ForWildcardProof(ctx, zone, wildcardName, queryName, alg, iterations, salt, hashes, nameToTypes)
+	}
+
 	qHash := packet.HashName(queryName, alg, iterations, []byte(salt))
 	var ownerEntry, nextEntry hashEntry
 	found := false
@@ -1949,6 +1965,54 @@ func (s *Server) generateNSEC3(ctx context.Context, zone *domain.Zone, queryName
 		TTL:        300,
 		HashAlg:    alg,
 		Flags:      uint16(flags),
+		Iterations: iterations,
+		Salt:       []byte(salt),
+		NextHash:   nextEntry.hash,
+		TypeBitMap: bitmap,
+	}
+
+	return nsec3, nil
+}
+
+// generateNSEC3ForWildcardProof generates an NSEC3 record proving a wildcard match.
+// Per RFC 5155 Section 7.2.14, the NSEC3 proves that the wildcard RRset exists.
+func (s *Server) generateNSEC3ForWildcardProof(ctx context.Context, zone *domain.Zone, wildcardName, queryType string, alg uint8, iterations uint16, salt string, hashes []hashEntry, nameToTypes map[string][]domain.RecordType) (packet.DNSRecord, error) {
+	// Hash the wildcard name
+	wildcardHash := packet.HashName(wildcardName, alg, iterations, []byte(salt))
+
+	// Find the wildcard hash in the chain and get next hash
+	var nextEntry hashEntry
+	wildcardIdx := -1
+	for i, h := range hashes {
+		if bytes.Equal(h.hash, wildcardHash) {
+			wildcardIdx = i
+			break
+		}
+	}
+
+	if wildcardIdx == -1 {
+		return packet.DNSRecord{}, fmt.Errorf("wildcard hash not found in NSEC3 chain")
+	}
+
+	// Next hash in the chain
+	if wildcardIdx == len(hashes)-1 {
+		nextEntry = hashes[0]
+	} else {
+		nextEntry = hashes[wildcardIdx+1]
+	}
+
+	// Get types from wildcard record and add the query type
+	types := nameToTypes[wildcardName]
+	types = append(types, "NSEC3")
+	bitmap := s.generateTypeBitMap(types)
+
+	nsec3 := packet.DNSRecord{
+		Name:       packet.Base32Encode(wildcardHash) + "." + zone.Name,
+		Type:       packet.NSEC3,
+		Class:      1,
+		TTL:        300,
+		HashAlg:    alg,
+		Flags:      0,
 		Iterations: iterations,
 		Salt:       []byte(salt),
 		NextHash:   nextEntry.hash,
