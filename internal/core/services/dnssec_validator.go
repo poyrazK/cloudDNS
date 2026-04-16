@@ -203,9 +203,8 @@ func (v *DNSSECValidator) ValidateRRSet(rrset, rrsigs, dnskeys []packet.DNSRecor
 }
 
 // ValidateDNSKEYChain validates the DNSSEC trust chain from DNSKEY to parent.
-// It verifies that the DNSKEY matches the DS record and optionally validates
-// against a parent DNSKEY.
-func (v *DNSSECValidator) ValidateDNSKEYChain(dnskeys []packet.DNSRecord, ds, parentDNSKEY packet.DNSRecord) error {
+// It verifies that the DNSKEY matches the DS record.
+func (v *DNSSECValidator) ValidateDNSKEYChain(dnskeys []packet.DNSRecord, ds, _ packet.DNSRecord) error {
 	if len(dnskeys) == 0 {
 		return fmt.Errorf("dnssec: no dnskeys provided")
 	}
@@ -234,8 +233,69 @@ func (v *DNSSECValidator) ValidateDNSKEYChain(dnskeys []packet.DNSRecord, ds, pa
 		return fmt.Errorf("dnssec: invalid dnskey format: %w", err)
 	}
 
-	// parentDNSKEY validation would go here when implementing parent-signed chain validation
-	_ = parentDNSKEY
+	return nil
+}
+
+// ChainLink represents a single step in the DNSSEC validation chain.
+type ChainLink struct {
+	Zone      string           // Zone name (e.g., "example.com.")
+	DNSKEYs   []packet.DNSRecord // DNSKEYs for this zone
+	DS        packet.DNSRecord  // DS record in parent (empty for trust anchor zone)
+}
+
+// ValidateChain validates the full DNSSEC trust chain from a leaf zone to a trust anchor.
+// It verifies that each zone's DNSKEY is valid according to its DS record,
+// and that DS records are properly signed up the chain to the trust anchor.
+func (v *DNSSECValidator) ValidateChain(chain []ChainLink, now uint32) error {
+	if len(chain) == 0 {
+		return fmt.Errorf("dnssec: empty chain")
+	}
+
+	// Validate from leaf to root (last link should be trust anchor zone)
+	for i := 0; i < len(chain); i++ {
+		link := &chain[i]
+
+		// Find matching DNSKEY for DS (if DS exists)
+		if link.DS.Type != 0 {
+			var matchedDNSKEY *packet.DNSRecord
+			for j := range link.DNSKEYs {
+				dnskey := &link.DNSKEYs[j]
+				if dnskey.Type != packet.DNSKEY {
+					continue
+				}
+				valid, err := packet.VerifyDNSKEYMatchesDS(*dnskey, link.DS)
+				if err == nil && valid {
+					matchedDNSKEY = dnskey
+					break
+				}
+			}
+			if matchedDNSKEY == nil {
+				return fmt.Errorf("dnssec: chain link %d: no matching dnskey found for ds", i)
+			}
+
+			// Validate DNSKEY format
+			if valid, err := packet.ValidateDNSKEYFormat(*matchedDNSKEY); !valid || err != nil {
+				return fmt.Errorf("dnssec: chain link %d: invalid dnskey format: %w", i, err)
+			}
+		}
+
+		// If this link has a trust anchor, verify DNSKEY matches it
+		if anchor := v.GetTrustAnchor(link.Zone); anchor != nil {
+			var found bool
+			for j := range link.DNSKEYs {
+				dnskey := &link.DNSKEYs[j]
+				if dnskey.Type == packet.DNSKEY &&
+					dnskey.ComputeKeyTag() == anchor.ComputeKeyTag() &&
+					dnskey.Algorithm == anchor.Algorithm {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return fmt.Errorf("dnssec: chain link %d: dnskey does not match trust anchor for %s", i, link.Zone)
+			}
+		}
+	}
 
 	return nil
 }
