@@ -56,7 +56,7 @@ func TestSignRRSet_ECDSA(t *testing.T) {
 		{Name: "www.test.", Type: A, TTL: 300, IP: []byte{1, 2, 3, 4}, Class: 1},
 	}
 
-	sig, err := SignRRSet(records, privKey, "test.", 1234, 1600000000, 1700000000)
+	sig, err := SignRRSet(records, privKey, AlgorithmECDSAP256, "test.", 1234, 1600000000, 1700000000)
 	if err != nil {
 		t.Fatalf("SignRRSet failed: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestComputeDS_WrongType(t *testing.T) {
 // correctly returns an empty record.
 func TestSignRRSet_EmptyRRSet(t *testing.T) {
 	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	sig, err := SignRRSet([]DNSRecord{}, priv, "test.", 0, 0, 0)
+	sig, err := SignRRSet([]DNSRecord{}, priv, AlgorithmECDSAP256, "test.", 0, 0, 0)
 	if err != nil || sig.Type != UNKNOWN {
 		t.Errorf("Expected empty record for empty RRSet")
 	}

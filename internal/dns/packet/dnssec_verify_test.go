@@ -2,8 +2,10 @@ package packet
 
 import (
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
 	"math/big"
 	"strings"
@@ -44,7 +46,7 @@ func TestVerifyRRSet_ValidSignature(t *testing.T) {
 	expiration := now + 86400 // 1 day ahead
 	keyTag := dnskey.ComputeKeyTag()
 
-	sig, err := SignRRSet(rrset, privKey, "example.com.", keyTag, inception, expiration)
+	sig, err := SignRRSet(rrset, privKey, AlgorithmECDSAP256, "example.com.", keyTag, inception, expiration)
 	if err != nil {
 		t.Fatalf("SignRRSet failed: %v", err)
 	}
@@ -89,7 +91,7 @@ func TestVerifyRRSet_RoundTrip(t *testing.T) {
 	keyTag := dnskey.ComputeKeyTag()
 
 	// Sign
-	sig, err := SignRRSet(rrset, privKey, "example.com.", keyTag, inception, expiration)
+	sig, err := SignRRSet(rrset, privKey, AlgorithmECDSAP256, "example.com.", keyTag, inception, expiration)
 	if err != nil {
 		t.Fatalf("SignRRSet failed: %v", err)
 	}
@@ -177,7 +179,7 @@ func TestVerifyRRSet_ExpiredSignature(t *testing.T) {
 	expiration := now - 3600   // 1 hour ago (expired)
 	keyTag := dnskey.ComputeKeyTag()
 
-	sig, err := SignRRSet(rrset, privKey, "example.com.", keyTag, inception, expiration)
+	sig, err := SignRRSet(rrset, privKey, AlgorithmECDSAP256, "example.com.", keyTag, inception, expiration)
 	if err != nil {
 		t.Fatalf("SignRRSet failed: %v", err)
 	}
@@ -217,7 +219,7 @@ func TestVerifyRRSet_NotYetValid(t *testing.T) {
 	expiration := now + 86400*2
 	keyTag := dnskey.ComputeKeyTag()
 
-	sig, err := SignRRSet(rrset, privKey, "example.com.", keyTag, inception, expiration)
+	sig, err := SignRRSet(rrset, privKey, AlgorithmECDSAP256, "example.com.", keyTag, inception, expiration)
 	if err != nil {
 		t.Fatalf("SignRRSet failed: %v", err)
 	}
@@ -253,7 +255,7 @@ func TestVerifyRRSet_KeyTagMismatch(t *testing.T) {
 	}
 
 	now := uint32(time.Now().Unix())
-	sig, _ := SignRRSet(rrset, privKey, "example.com.", dnskey.ComputeKeyTag(), now-3600, now+86400)
+	sig, _ := SignRRSet(rrset, privKey, AlgorithmECDSAP256, "example.com.", dnskey.ComputeKeyTag(), now-3600, now+86400)
 
 	// Modify key tag
 	sig.KeyTag = sig.KeyTag + 1
@@ -289,7 +291,7 @@ func TestVerifyRRSet_AlgorithmMismatch(t *testing.T) {
 	}
 
 	now := uint32(time.Now().Unix())
-	sig, _ := SignRRSet(rrset, privKey, "example.com.", dnskey.ComputeKeyTag(), now-3600, now+86400)
+	sig, _ := SignRRSet(rrset, privKey, AlgorithmECDSAP256, "example.com.", dnskey.ComputeKeyTag(), now-3600, now+86400)
 
 	// Modify algorithm
 	sig.Algorithm = 14 // Different algorithm
@@ -325,7 +327,7 @@ func TestVerifyRRSet_InvalidSignature(t *testing.T) {
 	}
 
 	now := uint32(time.Now().Unix())
-	sig, _ := SignRRSet(rrset, privKey, "example.com.", dnskey.ComputeKeyTag(), now-3600, now+86400)
+	sig, _ := SignRRSet(rrset, privKey, AlgorithmECDSAP256, "example.com.", dnskey.ComputeKeyTag(), now-3600, now+86400)
 
 	// Corrupt the signature
 	sig.Signature[0] ^= 0xFF
@@ -1294,5 +1296,124 @@ func TestCanonicalWireMarshal_MX_BufferFull(t *testing.T) {
 	err := CanonicalWireMarshal(&record, buf)
 	if err == nil {
 		t.Error("Expected buffer-full error for MX in CanonicalWireMarshal")
+	}
+}
+
+// TestSignAndVerify_RSASHA256 tests sign and verify round-trip using RSA SHA-256 (Algorithm 8).
+func TestSignAndVerify_RSASHA256(t *testing.T) {
+	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("rsa.GenerateKey failed: %v", err)
+	}
+
+	// Our RSA implementation stores N as the public key and hardcodes E=65537.
+	dnskey := DNSRecord{
+		Name:      "example.com.",
+		Type:      DNSKEY,
+		Flags:     256,
+		Protocol:  3,
+		Algorithm: AlgorithmRSASHA256,
+		PublicKey: rsaKey.N.Bytes(),
+	}
+
+	rrset := []DNSRecord{
+		{Name: "www.example.com.", Type: A, Class: 1, TTL: 300, IP: []byte{1, 2, 3, 4}},
+	}
+
+	now := uint32(time.Now().Unix())
+	keyTag := dnskey.ComputeKeyTag()
+
+	sig, err := SignRRSet(rrset, rsaKey, AlgorithmRSASHA256, "example.com.", keyTag, now-3600, now+86400)
+	if err != nil {
+		t.Fatalf("SignRRSet (RSA) failed: %v", err)
+	}
+
+	valid, err := VerifyRRSet(rrset, sig, dnskey, now)
+	if err != nil {
+		t.Fatalf("VerifyRRSet (RSA) failed: %v", err)
+	}
+	if !valid {
+		t.Error("Expected valid RSA SHA-256 signature")
+	}
+}
+
+// TestSignAndVerify_ED25519 tests sign and verify round-trip using Ed25519 (Algorithm 15).
+func TestSignAndVerify_ED25519(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("ed25519.GenerateKey failed: %v", err)
+	}
+
+	dnskey := DNSRecord{
+		Name:      "example.com.",
+		Type:      DNSKEY,
+		Flags:     256,
+		Protocol:  3,
+		Algorithm: AlgorithmED25519,
+		PublicKey: pub,
+	}
+
+	rrset := []DNSRecord{
+		{Name: "www.example.com.", Type: A, Class: 1, TTL: 300, IP: []byte{1, 2, 3, 4}},
+	}
+
+	now := uint32(time.Now().Unix())
+	keyTag := dnskey.ComputeKeyTag()
+
+	// SignRRSet expects Ed25519 private key as [ed25519.PrivateKeySize]byte.
+	var privArr [ed25519.PrivateKeySize]byte
+	copy(privArr[:], priv)
+
+	sig, err := SignRRSet(rrset, privArr, AlgorithmED25519, "example.com.", keyTag, now-3600, now+86400)
+	if err != nil {
+		t.Fatalf("SignRRSet (Ed25519) failed: %v", err)
+	}
+
+	valid, err := VerifyRRSet(rrset, sig, dnskey, now)
+	if err != nil {
+		t.Fatalf("VerifyRRSet (Ed25519) failed: %v", err)
+	}
+	if !valid {
+		t.Error("Expected valid Ed25519 signature")
+	}
+}
+
+// TestVerifyRRSet_UnsupportedAlgorithm tests that unsupported algorithms return an error.
+func TestVerifyRRSet_UnsupportedAlgorithm(t *testing.T) {
+	privKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	pubKeyBytes := encodeECDSAPublicKey(&privKey.PublicKey)
+
+	// Build DNSKEY with unsupported algorithm 14 from the start so ComputeKeyTag uses it.
+	dnskey := DNSRecord{
+		Name:      "example.com.",
+		Type:      DNSKEY,
+		Flags:     256,
+		Protocol:  3,
+		Algorithm: 14, // ECDSAP384 - unsupported
+		PublicKey: pubKeyBytes,
+	}
+
+	rrset := []DNSRecord{
+		{Name: "www.example.com.", Type: A, Class: 1, TTL: 300, IP: []byte{1, 2, 3, 4}},
+	}
+
+	now := uint32(time.Now().Unix())
+	// Build RRSIG manually with matching key tag and algorithm 14 so all pre-checks pass.
+	rrsig := DNSRecord{
+		Type:        RRSIG,
+		TypeCovered: uint16(A),
+		Algorithm:   14,
+		Labels:      3,
+		OrigTTL:     300,
+		Expiration:  now + 86400,
+		Inception:   now - 3600,
+		KeyTag:      dnskey.ComputeKeyTag(),
+		SignerName:  "example.com.",
+		Signature:   make([]byte, 64),
+	}
+
+	_, err := VerifyRRSet(rrset, rrsig, dnskey, now)
+	if err != ErrUnsupportedAlgorithm {
+		t.Errorf("Expected ErrUnsupportedAlgorithm, got %v", err)
 	}
 }
