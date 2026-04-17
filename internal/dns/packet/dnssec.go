@@ -3,10 +3,19 @@ package packet
 import (
 	"crypto"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha1" // #nosec G505 -- SHA-1 required for DNSSEC DS records (RFC 4034)
 	"crypto/sha256"
 	"strings"
+)
+
+// DNSSEC Algorithm numbers per RFC 8624
+const (
+	AlgorithmRSASHA256 uint8 = 8
+	AlgorithmECDSAP256 uint8 = 13
+	AlgorithmED25519   uint8 = 15
 )
 
 // ComputeKeyTag calculates the key tag for a DNSKEY record according to RFC 4034 Appendix B.
@@ -102,8 +111,8 @@ func (r *DNSRecord) ComputeDS(digestType uint8) (DNSRecord, error) {
 }
 
 // SignRRSet generates an RRSIG for a set of records.
-// This is a simplified implementation optimized for ECDSA P-256 (Algorithm 13).
-func SignRRSet(records []DNSRecord, privKey *ecdsa.PrivateKey, signerName string, keyTag uint16, inception, expiration uint32) (DNSRecord, error) {
+// Supports ECDSA P-256 (Algorithm 13), RSA SHA-256 (Algorithm 8), and Ed25519 (Algorithm 15).
+func SignRRSet(records []DNSRecord, privKey any, algorithm uint8, signerName string, keyTag uint16, inception, expiration uint32) (DNSRecord, error) {
 	if len(records) == 0 {
 		return DNSRecord{}, nil
 	}
@@ -114,7 +123,7 @@ func SignRRSet(records []DNSRecord, privKey *ecdsa.PrivateKey, signerName string
 		Class:       1,
 		TTL:         records[0].TTL,
 		TypeCovered: uint16(records[0].Type),
-		Algorithm:   13,                                  // ECDSAP256SHA256
+		Algorithm:   algorithm,
 		Labels:      uint8(countLabels(records[0].Name)), // #nosec G115
 		OrigTTL:     records[0].TTL,
 		Expiration:  expiration,
@@ -175,16 +184,44 @@ func SignRRSet(records []DNSRecord, privKey *ecdsa.PrivateKey, signerName string
 	hashed.Write(buf.Buf[:buf.Position()])
 	h := hashed.Sum(nil)
 
-	rb, sb, err := ecdsa.Sign(rand.Reader, privKey, h)
-	if err != nil {
-		return DNSRecord{}, err
-	}
+	var sigData []byte
+	switch algorithm {
+	case AlgorithmECDSAP256:
+		ecdsaPriv, ok := privKey.(*ecdsa.PrivateKey)
+		if !ok {
+			return DNSRecord{}, ErrInvalidSignature
+		}
+		rb, sb, err := ecdsa.Sign(rand.Reader, ecdsaPriv, h)
+		if err != nil {
+			return DNSRecord{}, err
+		}
+		rBytes := rb.FillBytes(make([]byte, 32))
+		sBytes := sb.FillBytes(make([]byte, 32))
+		sigData = make([]byte, 64)
+		copy(sigData[0:32], rBytes)
+		copy(sigData[32:64], sBytes)
 
-	rBytes := rb.FillBytes(make([]byte, 32))
-	sBytes := sb.FillBytes(make([]byte, 32))
-	sigData := make([]byte, 64)
-	copy(sigData[0:32], rBytes)
-	copy(sigData[32:64], sBytes)
+	case AlgorithmRSASHA256:
+		rsaPriv, ok := privKey.(*rsa.PrivateKey)
+		if !ok {
+			return DNSRecord{}, ErrInvalidSignature
+		}
+		var err error
+		sigData, err = rsa.SignPKCS1v15(rand.Reader, rsaPriv, crypto.SHA256, h)
+		if err != nil {
+			return DNSRecord{}, err
+		}
+
+	case AlgorithmED25519:
+		ed25519Priv, ok := privKey.([ed25519.PrivateKeySize]byte)
+		if !ok {
+			return DNSRecord{}, ErrInvalidSignature
+		}
+		sigData = ed25519.Sign(ed25519Priv[:], buf.Buf[:buf.Position()])
+
+	default:
+		return DNSRecord{}, ErrUnsupportedAlgorithm
+	}
 
 	sig.Signature = sigData
 	return sig, nil
