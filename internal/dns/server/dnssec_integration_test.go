@@ -42,7 +42,7 @@ func TestDNSSEC_TrustAnchorValidation(t *testing.T) {
 	}
 	now := uint32(time.Now().Unix())
 	keyTag := trustAnchor.ComputeKeyTag()
-	rrsig, err := packet.SignRRSet(rrset, privKey, "example.com.", keyTag, now-60, now+3600)
+	rrsig, err := packet.SignRRSet(rrset, privKey, packet.AlgorithmECDSAP256, "example.com.", keyTag, now-60, now+3600)
 	if err != nil {
 		t.Fatalf("Failed to sign: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestDNSSEC_ExpiredSignatureEDE(t *testing.T) {
 	// Create an EXPIRED signature (expiration in the past)
 	now := uint32(time.Now().Unix())
 	keyTag := trustAnchor.ComputeKeyTag()
-	rrsig, _ := packet.SignRRSet(rrset, privKey, "example.com.", keyTag, now-7200, now-3600) // expired
+	rrsig, _ := packet.SignRRSet(rrset, privKey, packet.AlgorithmECDSAP256, "example.com.", keyTag, now-7200, now-3600) // expired
 
 	result := validator.ValidateWithTrustAnchor("example.com.", rrset, []packet.DNSRecord{rrsig}, []packet.DNSRecord{trustAnchor}, now)
 	if result.Valid {
@@ -106,7 +106,7 @@ func TestDNSSEC_MissingDNSKEYEDE(t *testing.T) {
 	// Create RRSIG but no matching DNSKEY
 	privKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	now := uint32(time.Now().Unix())
-	rrsig, _ := packet.SignRRSet(rrset, privKey, "example.com.", 12345, now-60, now+3600)
+	rrsig, _ := packet.SignRRSet(rrset, privKey, packet.AlgorithmECDSAP256, "example.com.", 12345, now-60, now+3600)
 
 	result := validator.ValidateRRSet(rrset, []packet.DNSRecord{rrsig}, []packet.DNSRecord{}, now)
 	if result.Valid {
@@ -146,8 +146,8 @@ func TestDNSSEC_RRSIGGrouping(t *testing.T) {
 	keyTag := trustAnchor.ComputeKeyTag()
 
 	// Sign with same key but different inception times
-	rrsig1, _ := packet.SignRRSet(rrset, privKey, "example.com.", keyTag, now-60, now+3600)
-	rrsig2, _ := packet.SignRRSet(rrset, privKey, "example.com.", keyTag, now-120, now+3600)
+	rrsig1, _ := packet.SignRRSet(rrset, privKey, packet.AlgorithmECDSAP256, "example.com.", keyTag, now-60, now+3600)
+	rrsig2, _ := packet.SignRRSet(rrset, privKey, packet.AlgorithmECDSAP256, "example.com.", keyTag, now-120, now+3600)
 
 	// Both RRSIGs should be for the same RRset (same name and typeCovered)
 	if rrsig1.Name != rrsig2.Name || rrsig1.TypeCovered != rrsig2.TypeCovered {
@@ -208,7 +208,7 @@ func TestDNSSEC_BogusOnInvalidSignature(t *testing.T) {
 	}
 	now := uint32(time.Now().Unix())
 	keyTag := trustAnchor.ComputeKeyTag()
-	rrsig, _ := packet.SignRRSet(rrset, privKey, "example.com.", keyTag, now-60, now+3600)
+	rrsig, _ := packet.SignRRSet(rrset, privKey, packet.AlgorithmECDSAP256, "example.com.", keyTag, now-60, now+3600)
 
 	// Tamper with the signature to make it invalid
 	rrsig.Signature[0] ^= 0xFF
@@ -249,7 +249,7 @@ func TestDNSSEC_NoZoneKeyBitEDE(t *testing.T) {
 	}
 	now := uint32(time.Now().Unix())
 	keyTag := trustAnchor.ComputeKeyTag()
-	rrsig, _ := packet.SignRRSet(rrset, privKey, "example.com.", keyTag, now-60, now+3600)
+	rrsig, _ := packet.SignRRSet(rrset, privKey, packet.AlgorithmECDSAP256, "example.com.", keyTag, now-60, now+3600)
 
 	// Even with wrong flags, if the key matches the trust anchor it validates
 	result := validator.ValidateWithTrustAnchor("example.com.", rrset, []packet.DNSRecord{rrsig}, []packet.DNSRecord{trustAnchor}, now)
