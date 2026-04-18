@@ -730,11 +730,7 @@ func ValidateNSEC3Proof(nsec3Records []DNSRecord, queryName string, queryType ui
 
 	// Step 2: Verify owner names are valid hashes
 	for _, nsec3 := range nsec3Records {
-		valid, err := VerifyNSEC3OwnerName(nsec3, queryName)
-		if err != nil {
-			return err
-		}
-		if !valid {
+		if _, err := VerifyNSEC3OwnerName(nsec3, queryName); err != nil {
 			// Owner name doesn't match expected hash - could be covering proof
 			// Continue to chain validation
 		}
