@@ -27,25 +27,30 @@ type EDE struct {
 
 // RFC 8914 Extended DNS Error Codes
 const (
-	EDECodeOther              uint16 = iota // Other Error
-	EDECodeUnsupportedDNSKEYAlgo            // Unsupported DNSKEY Algorithm
-	EDECodeUnsupportedDSDigest              // Unsupported DS Digest Type (reused for signature errors)
-	EDECodeStaleAnswer                     // Stale Answer
-	EDECodeForgedAnswer                    // Forged Answer
-	EDECodeIndeterminate                   // DNSSEC Indeterminate
-	EDECodeBogus                           // DNSSEC Bogus (also used for dnskey-missing)
-	EDECodeSignatureExpired                // Signature Expired
-	EDECodeSignatureNotYetValid            // Signature Not Yet Valid
-	EDECodeDNSKEYMissing                   // DNSKEY Missing
-	EDECodeDSMissing                       // DS Missing
-	EDECodeNoZoneKeyBitSet                 // No Zone Key Bit Set
-	EDECodeSignatureUnsupported            // Signature Unsupported Algorithm
-	EDECodeDNSKEYNotAnchor                 // DNSKEY Not Anchor
-	EDECodeTrustAnchorUnknown              // Trust Anchor Unknown
-	EDECodeExpectedAnswerAfterDNL           // Expected Answer After DNL
-	EDECodeDelegationNotServed             // Delegation Not Served
-	EDECodeTTLMismatch                     // TTL Mismatch
-	EDECodeCachedValidatedResponse          // Cached Validated Response
+	EDECodeOther                  uint16 = 0  // Other Error
+	EDECodeUnsupportedDNSKEYAlgo   uint16 = 1  // Unsupported DNSKEY Algorithm
+	EDECodeUnsupportedDSDigest     uint16 = 2  // Unsupported DS Digest Type (reused for signature errors)
+	EDECodeStaleAnswer           uint16 = 3  // Stale Answer
+	EDECodeForgedAnswer          uint16 = 4  // Forged Answer
+	EDECodeIndeterminate         uint16 = 5  // DNSSEC Indeterminate
+	EDECodeBogus                 uint16 = 6  // DNSSEC Bogus (also used for dnskey-missing)
+	EDECodeSignatureExpired      uint16 = 7  // Signature Expired
+	EDECodeSignatureNotYetValid  uint16 = 8  // Signature Not Yet Valid
+	EDECodeDNSKEYMissing         uint16 = 9  // DNSKEY Missing
+	EDECodeDSMissing            uint16 = 10 // DS Missing
+	EDECodeNoZoneKeyBitSet       uint16 = 11 // No Zone Key Bit Set
+	EDECodeSignatureUnsupported  uint16 = 12 // Signature Unsupported Algorithm
+	EDECodeDNSKEYNotAnchor       uint16 = 13 // DNSKEY Not Anchor
+	EDECodeTrustAnchorUnknown    uint16 = 17 // Trust Anchor Unknown
+	EDECodeExpectedAnswerAfterDNL  uint16 = 18 // Expected Answer After DNL
+	EDECodeDelegationNotServed   uint16 = 20 // Delegation Not Served
+	EDECodeTTLMismatch          uint16 = 21 // TTL Mismatch
+	EDECodeCachedValidatedResponse uint16 = 22 // Cached Validated Response
+	// NSEC3-specific (not defined in RFC 8914, using high values to avoid future conflicts)
+	EDECodeNSEC3HashAlgoUnsupported uint16 = 23 // NSEC3 hash algorithm not supported
+	EDECodeNSEC3InvalidProof       uint16 = 24 // NSEC3 proof does not cover name
+	EDECodeNSEC3ChainBroken        uint16 = 25 // NSEC3 hash chain is broken
+	EDECodeNSEC3NoMatchingName     uint16 = 26 // NSEC3 owner name hash doesn't match
 )
 
 // String returns a human-readable description of the EDE code per RFC 8914.
@@ -89,6 +94,14 @@ func (e *EDE) String() string {
 		return "ttl-mismatch"
 	case EDECodeCachedValidatedResponse:
 		return "cached-validated-response"
+	case EDECodeNSEC3HashAlgoUnsupported:
+		return "nsec3-hash-algo-unsupported"
+	case EDECodeNSEC3InvalidProof:
+		return "nsec3-invalid-proof"
+	case EDECodeNSEC3ChainBroken:
+		return "nsec3-chain-broken"
+	case EDECodeNSEC3NoMatchingName:
+		return "nsec3-no-matching-name"
 	default:
 		return "unknown-error"
 	}
