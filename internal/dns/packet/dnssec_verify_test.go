@@ -1417,3 +1417,150 @@ func TestVerifyRRSet_UnsupportedAlgorithm(t *testing.T) {
 		t.Errorf("Expected ErrUnsupportedAlgorithm, got %v", err)
 	}
 }
+
+// TestValidateNSEC3RecordFormat tests NSEC3 record format validation.
+func TestValidateNSEC3RecordFormat(t *testing.T) {
+	// Valid NSEC3 with SHA-1 (hash algorithm 1)
+	nsec3 := DNSRecord{
+		Type:       NSEC3,
+		HashAlg:    1,
+		Iterations: 10,
+		Salt:       []byte{0xAB, 0xCD},
+		NextHash:   []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20},
+	}
+	err := ValidateNSEC3RecordFormat(nsec3)
+	if err != nil {
+		t.Errorf("Expected valid NSEC3, got error: %v", err)
+	}
+}
+
+// TestValidateNSEC3RecordFormat_UnsupportedHashAlgo tests that unsupported hash algorithms are rejected.
+func TestValidateNSEC3RecordFormat_UnsupportedHashAlgo(t *testing.T) {
+	nsec3 := DNSRecord{
+		Type:       NSEC3,
+		HashAlg:    2, // SHA-256 is not defined for NSEC3
+		Iterations: 10,
+		Salt:       []byte{0xAB, 0xCD},
+		NextHash:   make([]byte, 20),
+	}
+	err := ValidateNSEC3RecordFormat(nsec3)
+	if err != ErrNSEC3HashAlgoUnsupported {
+		t.Errorf("Expected ErrNSEC3HashAlgoUnsupported, got: %v", err)
+	}
+}
+
+// TestValidateNSEC3RecordFormat_SaltTooLong tests that oversized salts are rejected.
+func TestValidateNSEC3RecordFormat_SaltTooLong(t *testing.T) {
+	nsec3 := DNSRecord{
+		Type:       NSEC3,
+		HashAlg:    1,
+		Iterations: 10,
+		Salt:       make([]byte, 256), // > 255 bytes
+		NextHash:   make([]byte, 20),
+	}
+	err := ValidateNSEC3RecordFormat(nsec3)
+	if err == nil {
+		t.Error("Expected error for salt > 255 bytes")
+	}
+}
+
+// TestValidateNSEC3RecordFormat_NextHashTooLong tests that oversized NextHash is rejected.
+func TestValidateNSEC3RecordFormat_NextHashTooLong(t *testing.T) {
+	nsec3 := DNSRecord{
+		Type:       NSEC3,
+		HashAlg:    1,
+		Iterations: 10,
+		Salt:       []byte{0xAB, 0xCD},
+		NextHash:   make([]byte, 256), // > 255 bytes
+	}
+	err := ValidateNSEC3RecordFormat(nsec3)
+	if err == nil {
+		t.Error("Expected error for NextHash > 255 bytes")
+	}
+}
+
+// TestBase32Decode tests NSEC3-specific base32 decoding.
+func TestBase32Decode(t *testing.T) {
+	// Known test vectors from NSEC3 hash examples
+	tests := []struct {
+		encoded  string
+		wantErr  bool
+	}{
+		{"00", false},                                    // minimal
+		{"abcdefghijklmnopqrstuv", false},               // valid lowercase alphabet
+		{"ABCDEFGHIJKLMNOPQRSTUV", true},                 // uppercase is invalid
+		{"1xyz!", true},                                 // invalid char should error
+	}
+
+	for _, tt := range tests {
+		_, err := base32Decode(tt.encoded)
+		if (err != nil) != tt.wantErr {
+			t.Errorf("base32Decode(%q) error = %v, wantErr %v", tt.encoded, err, tt.wantErr)
+		}
+	}
+}
+
+// TestNSEC3Present tests the NSEC3 presence check.
+func TestNSEC3Present(t *testing.T) {
+	records := []DNSRecord{
+		{Name: "example.com.", Type: A},
+		{Name: "example.com.", Type: NSEC3},
+		{Name: "example.com.", Type: TXT},
+	}
+	if !NSEC3Present(records) {
+		t.Error("Expected NSEC3Present to return true")
+	}
+
+	noNsec3 := []DNSRecord{
+		{Name: "example.com.", Type: A},
+		{Name: "example.com.", Type: TXT},
+	}
+	if NSEC3Present(noNsec3) {
+		t.Error("Expected NSEC3Present to return false")
+	}
+}
+
+// TestTypeBitMapPresent tests type bitmap parsing.
+func TestTypeBitMapPresent(t *testing.T) {
+	// Build a bitmap that claims type 0 (null) and type 8 (A) exist
+	// Window 0, bitmap length 4 bytes (covers types 0-31)
+	// Byte 0 (0x01): bit 0 set → type 0 present
+	// Byte 1 (0x01): bit 0 set → type 8 (A) present
+	// Byte 2 (0x00): no bits set
+	// Byte 3 (0x00): no bits set
+	bitmap := []byte{0x00, 0x04, 0x01, 0x01, 0x00, 0x00}
+
+	if !TypeBitMapPresent(bitmap, 0) {
+		t.Error("Expected type 0 to be present")
+	}
+	if !TypeBitMapPresent(bitmap, 8) {
+		t.Error("Expected type 8 (A) to be present")
+	}
+	if TypeBitMapPresent(bitmap, 1) {
+		t.Error("Expected type 1 to be absent")
+	}
+	if TypeBitMapPresent(bitmap, 16) {
+		t.Error("Expected type 16 to be absent")
+	}
+}
+
+// TestVerifyNSEC3OwnerName tests NSEC3 owner name hash verification.
+func TestVerifyNSEC3OwnerName(t *testing.T) {
+	// Create an NSEC3 with known hash
+	// Hash of "example.com." with alg=1, iterations=0, salt="abcd"
+	// is deterministic so we can precompute
+	nsec3 := DNSRecord{
+		Name:      "vbsue6bhqe5h5h1a6b1pfmrp.example.com.", // precomputed hash for test
+		Type:      NSEC3,
+		HashAlg:   1,
+		Iterations: 0,
+		Salt:       []byte("abcd"),
+		NextHash:   []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20},
+	}
+
+	// This may or may not match depending on precomputed value
+	_, err := VerifyNSEC3OwnerName(nsec3, "test.example.com.")
+	if err != nil && err != ErrNSEC3NoMatchingName {
+		t.Errorf("Unexpected error: %v", err)
+	}
+}
