@@ -46,6 +46,10 @@ const (
 	EDECodeDelegationNotServed             // Delegation Not Served
 	EDECodeTTLMismatch                     // TTL Mismatch
 	EDECodeCachedValidatedResponse          // Cached Validated Response
+	EDECodeNSEC3HashAlgoUnsupported         // NSEC3 hash algorithm not supported
+	EDECodeNSEC3InvalidProof               // NSEC3 proof does not cover name
+	EDECodeNSEC3ChainBroken                 // NSEC3 hash chain is broken
+	EDECodeNSEC3NoMatchingName              // NSEC3 owner name hash doesn't match
 )
 
 // String returns a human-readable description of the EDE code per RFC 8914.
@@ -89,6 +93,14 @@ func (e *EDE) String() string {
 		return "ttl-mismatch"
 	case EDECodeCachedValidatedResponse:
 		return "cached-validated-response"
+	case EDECodeNSEC3HashAlgoUnsupported:
+		return "nsec3-hash-algo-unsupported"
+	case EDECodeNSEC3InvalidProof:
+		return "nsec3-invalid-proof"
+	case EDECodeNSEC3ChainBroken:
+		return "nsec3-chain-broken"
+	case EDECodeNSEC3NoMatchingName:
+		return "nsec3-no-matching-name"
 	default:
 		return "unknown-error"
 	}

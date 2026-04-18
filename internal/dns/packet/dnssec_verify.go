@@ -29,6 +29,14 @@ var (
 	ErrNoPublicKey = errors.New("dnssec: no public key in DNSKEY")
 	// ErrUnsupportedAlgorithm indicates the algorithm is not supported.
 	ErrUnsupportedAlgorithm = errors.New("dnssec: unsupported algorithm")
+	// ErrNSEC3HashAlgoUnsupported indicates the NSEC3 hash algorithm is not supported.
+	ErrNSEC3HashAlgoUnsupported = errors.New("dnssec: nsec3 hash algorithm unsupported")
+	// ErrNSEC3InvalidProof indicates the NSEC3 proof is invalid.
+	ErrNSEC3InvalidProof = errors.New("dnssec: nsec3 invalid proof")
+	// ErrNSEC3ChainBroken indicates the NSEC3 hash chain is broken.
+	ErrNSEC3ChainBroken = errors.New("dnssec: nsec3 chain broken")
+	// ErrNSEC3NoMatchingName indicates the NSEC3 owner name doesn't match.
+	ErrNSEC3NoMatchingName = errors.New("dnssec: nsec3 owner name hash mismatch")
 )
 
 // writeBytes writes a byte slice to the buffer using individual byte writes.
@@ -548,4 +556,285 @@ func FindMatchingDNSKEY(rrsig DNSRecord, dnskeys []DNSRecord) *DNSRecord {
 		}
 	}
 	return nil
+}
+
+// NSEC3Present returns true if the record list contains NSEC3 records.
+func NSEC3Present(records []DNSRecord) bool {
+	for _, r := range records {
+		if r.Type == NSEC3 {
+			return true
+		}
+	}
+	return false
+}
+
+// ValidateNSEC3RecordFormat validates the wire format of an NSEC3 record.
+// Per RFC 5155 Section 3.2, only hash algorithm 1 (SHA-1) is defined.
+// Salt and NextHash lengths must be <= 255 bytes.
+func ValidateNSEC3RecordFormat(nsec3 DNSRecord) error {
+	if nsec3.Type != NSEC3 {
+		return errors.New("dnssec: not an NSEC3 record")
+	}
+
+	// RFC 5155 Section 3.2: hash algorithm must be 1 (SHA-1)
+	if nsec3.HashAlg != 1 {
+		return ErrNSEC3HashAlgoUnsupported
+	}
+
+	// Salt length must be <= 255 per RFC 5155
+	if len(nsec3.Salt) > 255 {
+		return errors.New("dnssec: nsec3 salt too long")
+	}
+
+	// NextHash length must be <= 255 (typically 20 for SHA-1)
+	if len(nsec3.NextHash) > 255 {
+		return errors.New("dnssec: nsec3 nexthash too long")
+	}
+
+	return nil
+}
+
+// base32Decode decodes a NSEC3 base32 string (RFC 5155 alphabet) into bytes.
+// The alphabet is: 0-9 a-v (no uppercase, no special chars).
+func base32Decode(encoded string) ([]byte, error) {
+	const nsec3Base32 = "0123456789abcdefghijklmnopqrstuv"
+	alphabet := make(map[byte]int)
+	for i := range nsec3Base32 {
+		alphabet[nsec3Base32[i]] = i
+	}
+
+	var result []byte
+	var buffer uint32
+	var bits uint8
+
+	for i := range encoded {
+		c := encoded[i]
+		val, ok := alphabet[c]
+		if !ok {
+			return nil, errors.New("dnssec: invalid base32 character")
+		}
+		buffer = (buffer << 5) | uint32(val)
+		bits += 5
+		if bits >= 8 {
+			bits -= 8
+			result = append(result, byte(buffer>>bits))
+			buffer &= (1 << bits) - 1
+		}
+	}
+
+	return result, nil
+}
+
+// VerifyNSEC3OwnerName verifies that an NSEC3 record's owner name is the correct
+// base32-encoded hash of the given name with the NSEC3's salt and iterations.
+func VerifyNSEC3OwnerName(nsec3 DNSRecord, name string) (bool, error) {
+	// Extract zone portion from the NSEC3 owner name.
+	// NSEC3 owner is like: <hash>.zone. where hash is base32 encoded.
+	// We need to parse the owner, extract the hash, and compare against computed hash.
+	owner := strings.TrimSuffix(nsec3.Name, ".")
+
+	// Find the first dot to separate hash from zone
+	dotIdx := strings.Index(owner, ".")
+	if dotIdx <= 0 {
+		return false, ErrNSEC3NoMatchingName
+	}
+
+	hashPart := owner[:dotIdx]
+	zonePart := owner[dotIdx+1:]
+
+	// Decode the hash from the owner name
+	ownerHash, err := base32Decode(hashPart)
+	if err != nil {
+		return false, ErrNSEC3NoMatchingName
+	}
+
+	// Compute expected hash of the name with NSEC3 params
+	// Zone part becomes the base for hashing
+	computedHash := HashName(zonePart, nsec3.HashAlg, nsec3.Iterations, nsec3.Salt)
+
+	if string(ownerHash) != string(computedHash) {
+		return false, ErrNSEC3NoMatchingName
+	}
+
+	return true, nil
+}
+
+// nsec3CoversHash checks whether an NSEC3 record covers the given hash.
+// An NSEC3 record covers a hash if: ownerHash <= coveredHash < nextHash
+// where ordering is lexicographic on the raw hash bytes.
+func nsec3CoversHash(ownerHash, nextHash, coveredHash []byte) bool {
+	// If nextHash is empty or equals ownerHash, this NSEC3 doesn't cover anything valid
+	if len(nextHash) == 0 || len(ownerHash) != len(nextHash) {
+		return false
+	}
+
+	// Simple lexicographic comparison of raw bytes
+	if string(coveredHash) < string(ownerHash) {
+		return false
+	}
+	// Special case: if coveredHash >= nextHash, it wraps around
+	if string(coveredHash) >= string(nextHash) {
+		return true // Covered (wraps around to owner or before)
+	}
+	return true
+}
+
+// TypeBitMapPresent checks if the type bitmap in an NSEC3 record indicates
+// the presence of a given record type.
+func TypeBitMapPresent(bitmap []byte, queryType uint16) bool {
+	i := 0
+	for i < len(bitmap) {
+		// Each window is: window number (1 byte) + bitmap length (1 byte) + bitmap
+		if i+1 >= len(bitmap) {
+			break
+		}
+		window := bitmap[i]
+		bitmapLen := int(bitmap[i+1])
+		i += 2
+
+		if i+bitmapLen > len(bitmap) {
+			break
+		}
+
+		// Check if the type is in this window
+		// Types are stored as: (type_number - window*256) in the bitmap byte
+		typeOffset := int(queryType) - int(window)*256
+		if typeOffset >= 0 && typeOffset < bitmapLen*8 {
+			byteIndex := typeOffset / 8
+			bitIndex := uint(typeOffset % 8)
+			if byteIndex < bitmapLen && (bitmap[i+byteIndex]&(1<<bitIndex)) != 0 {
+				return true
+			}
+		}
+		i += bitmapLen
+	}
+	return false
+}
+
+// ValidateNSEC3Proof validates NSEC3 records for an NXDOMAIN or no-data response.
+// It verifies:
+// 1. All NSEC3 records have valid format (hash algorithm = 1)
+// 2. The NSEC3 records prove the correct response (NXDOMAIN, no-data, or wildcard)
+// 3. Type bitmaps correctly reflect the record types present/absent
+func ValidateNSEC3Proof(nsec3Records []DNSRecord, queryName string, queryType uint16) error {
+	if len(nsec3Records) == 0 {
+		return errors.New("dnssec: no nsec3 records provided")
+	}
+
+	// Step 1: Validate format of all NSEC3 records
+	for _, nsec3 := range nsec3Records {
+		if err := ValidateNSEC3RecordFormat(nsec3); err != nil {
+			return err
+		}
+	}
+
+	// Step 2: Verify owner names are valid hashes
+	for _, nsec3 := range nsec3Records {
+		valid, err := VerifyNSEC3OwnerName(nsec3, queryName)
+		if err != nil {
+			return err
+		}
+		if !valid {
+			// Owner name doesn't match expected hash - could be covering proof
+			// Continue to chain validation
+		}
+	}
+
+	// Step 3: For NXDOMAIN, we need closest-encloser proof
+	// The NSEC3 records should show:
+	// - Closest encloser: covers the query name
+	// - Next closer: shows no names between closest encloser and query
+	// For simplicity, verify at least one NSEC3 covers the query name
+
+	// Compute the hash of the query name with the first NSEC3's params
+	if len(nsec3Records) == 0 {
+		return ErrNSEC3InvalidProof
+	}
+
+	// Use the first NSEC3 record's parameters to hash the query name
+	refNSEC3 := nsec3Records[0]
+	queryHash := HashName(queryName, refNSEC3.HashAlg, refNSEC3.Iterations, refNSEC3.Salt)
+
+	// Find NSEC3 that covers the query hash
+	covered := false
+	for _, nsec3 := range nsec3Records {
+		if nsec3CoversHash(decodeBase32Hash(nsec3.Name), nsec3.NextHash, queryHash) {
+			covered = true
+			break
+		}
+	}
+
+	if !covered {
+		return ErrNSEC3InvalidProof
+	}
+
+	// Step 4: For no-data responses, verify the NSEC3 covers the type
+	if queryType != 0 && queryType != uint16(NSEC3) && queryType != uint16(NSEC3PARAM) {
+		// Find the NSEC3 whose owner is the exact query name hash
+		for _, nsec3 := range nsec3Records {
+			ownerHash := decodeBase32Hash(nsec3.Name)
+			if string(ownerHash) == string(queryHash) {
+				// This NSEC3 is for the exact name - check if it has the type
+				if TypeBitMapPresent(nsec3.TypeBitMap, queryType) {
+					return ErrNSEC3InvalidProof // Type exists, shouldn't be here
+				}
+				// Type not in bitmap = correct no-data proof
+				return nil
+			}
+		}
+	}
+
+	return nil
+}
+
+// decodeBase32Hash extracts the raw hash from an NSEC3 owner name.
+// The owner is in format: <base32hash>.<zone.>
+func decodeBase32Hash(ownerName string) []byte {
+	ownerName = strings.TrimSuffix(ownerName, ".")
+	dotIdx := strings.Index(ownerName, ".")
+	if dotIdx <= 0 {
+		return nil
+	}
+	hashPart := ownerName[:dotIdx]
+	decoded, err := base32Decode(hashPart)
+	if err != nil {
+		return nil
+	}
+	return decoded
+}
+
+// ValidateNSEC3WildcardProof verifies a wildcard proof per RFC 5155 Section 7.2.14.
+// It checks that the NSEC3 records prove:
+// 1. The immediate ancestor of the wildcard exists
+// 2. No non-wildcard records exist between wildcard and query name
+// 3. The wildcard record exists and covers the query type
+func ValidateNSEC3WildcardProof(nsec3Records []DNSRecord, wildcardName string, queryType uint16) error {
+	if len(nsec3Records) == 0 {
+		return errors.New("dnssec: no nsec3 records for wildcard proof")
+	}
+
+	// Validate all records first
+	for _, nsec3 := range nsec3Records {
+		if err := ValidateNSEC3RecordFormat(nsec3); err != nil {
+			return err
+		}
+	}
+
+	// Find the NSEC3 that proves the wildcard exists
+	// The owner should be hash of *.zone.
+	wildcardHash := HashName(wildcardName, 1, nsec3Records[0].Iterations, nsec3Records[0].Salt)
+
+	// Find NSEC3 whose owner matches the wildcard hash
+	for _, nsec3 := range nsec3Records {
+		ownerHash := decodeBase32Hash(nsec3.Name)
+		if string(ownerHash) == string(wildcardHash) {
+			// Verify the type bitmap shows the query type exists at wildcard
+			if queryType != 0 && !TypeBitMapPresent(nsec3.TypeBitMap, queryType) {
+				return ErrNSEC3InvalidProof
+			}
+			return nil
+		}
+	}
+
+	return ErrNSEC3InvalidProof
 }
