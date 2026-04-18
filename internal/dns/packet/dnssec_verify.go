@@ -595,29 +595,29 @@ func ValidateNSEC3RecordFormat(nsec3 DNSRecord) error {
 	return nil
 }
 
-// nsec3Base32Alphabet is the RFC 5155 Base32 alphabet for NSEC3 (lowercase only).
-const nsec3Base32Alphabet = "0123456789abcdefghijklmnopqrstuv"
+// nsec3Base32Alphabet is a case-insensitive RFC 5155 Base32 alphabet map,
+// built once from nsec3Base32Map in nsec3.go to avoid duplication.
+var nsec3Base32Alphabet = (func() map[byte]int {
+	m := make(map[byte]int, len(nsec3Base32Map)*2)
+	for i := range nsec3Base32Map {
+		c := nsec3Base32Map[i]
+		m[c] = i
+		m[c-'a'+'A'] = i // accept uppercase
+	}
+	return m
+})()
 
 // base32Decode decodes a NSEC3 base32 string (RFC 5155 alphabet) into bytes.
 // The alphabet is: 0-9 a-v (case-insensitive, accepts lowercase and uppercase).
 // Returns an error for invalid characters outside the alphabet.
 func base32Decode(encoded string) ([]byte, error) {
-	// Build alphabet map once for case-insensitive lookup
-	alphabet := make(map[byte]int, len(nsec3Base32Alphabet)*2)
-	for i := range nsec3Base32Alphabet {
-		c := nsec3Base32Alphabet[i]
-		alphabet[c] = i
-		// Also accept uppercase
-		alphabet[c-'a'+'A'] = i
-	}
-
 	var result []byte
 	var buffer uint32
 	var bits uint8
 
 	for i := range encoded {
 		c := encoded[i]
-		val, ok := alphabet[c]
+		val, ok := nsec3Base32Alphabet[c]
 		if !ok {
 			return nil, errors.New("dnssec: invalid base32 character")
 		}
@@ -648,7 +648,6 @@ func VerifyNSEC3OwnerName(nsec3 DNSRecord, name string) (bool, error) {
 	}
 
 	hashPart := owner[:dotIdx]
-	zonePart := owner[dotIdx+1:]
 
 	// Decode the hash from the owner name
 	ownerHash, err := base32Decode(hashPart)
@@ -657,10 +656,9 @@ func VerifyNSEC3OwnerName(nsec3 DNSRecord, name string) (bool, error) {
 	}
 
 	// Compute expected hash of the name with NSEC3 params
-	// Zone part becomes the base for hashing
-	computedHash := HashName(zonePart, nsec3.HashAlg, nsec3.Iterations, nsec3.Salt)
+	computedHash := HashName(name, nsec3.HashAlg, nsec3.Iterations, nsec3.Salt)
 
-	if string(ownerHash) != string(computedHash) {
+	if !bytes.Equal(ownerHash, computedHash) {
 		return false, ErrNSEC3NoMatchingName
 	}
 
@@ -806,10 +804,16 @@ func decodeBase32Hash(ownerName string) []byte {
 }
 
 // ValidateNSEC3WildcardProof verifies a wildcard proof per RFC 5155 Section 7.2.14.
-// It checks that the NSEC3 records prove:
-// 1. The immediate ancestor of the wildcard exists
-// 2. No non-wildcard records exist between wildcard and query name
-// 3. The wildcard record exists and covers the query type
+//
+// This implementation is a partial check: it validates that an NSEC3 record
+// exists whose owner name is the base32-encoded hash of wildcardName, and
+// (optionally) that the type bitmap indicates the query type is present.
+//
+// Full RFC 5155 Section 7.2.14 wildcard proof validation additionally requires:
+// - That the immediate ancestor of the wildcard exists
+// - That no non-wildcard records exist between wildcard and query name
+// Implementing the complete closest-encloser / next-closer chain for wildcard
+// proofs requires zone-level NSEC3PARAM and sorted hash chain context.
 func ValidateNSEC3WildcardProof(nsec3Records []DNSRecord, wildcardName string, queryType uint16) error {
 	if len(nsec3Records) == 0 {
 		return errors.New("dnssec: no nsec3 records for wildcard proof")

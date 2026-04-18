@@ -1547,21 +1547,42 @@ func TestTypeBitMapPresent(t *testing.T) {
 
 // TestVerifyNSEC3OwnerName tests NSEC3 owner name hash verification.
 func TestVerifyNSEC3OwnerName(t *testing.T) {
-	// Create an NSEC3 with known hash
-	// Hash of "example.com." with alg=1, iterations=0, salt="abcd"
-	// is deterministic so we can precompute
+	// Construct a deterministic NSEC3 owner name for "test.example.com."
+	name := "test.example.com."
+	salt := []byte("abcd")
+	iterations := uint16(0)
+	alg := uint8(1)
+
+	// Hash and encode to get the owner prefix
+	hash := HashName(name, alg, iterations, salt)
+	encoded := Base32Encode(hash)
+	zone := "example.com."
+	ownerName := encoded + "." + zone + "."
+
 	nsec3 := DNSRecord{
-		Name:      "vbsue6bhqe5h5h1a6b1pfmrp.example.com.", // precomputed hash for test
-		Type:      NSEC3,
-		HashAlg:   1,
-		Iterations: 0,
-		Salt:       []byte("abcd"),
+		Name:       ownerName,
+		Type:       NSEC3,
+		HashAlg:    alg,
+		Iterations: iterations,
+		Salt:       salt,
 		NextHash:   []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20},
 	}
 
-	// This may or may not match depending on precomputed value
-	_, err := VerifyNSEC3OwnerName(nsec3, "test.example.com.")
-	if err != nil && err != ErrNSEC3NoMatchingName {
-		t.Errorf("Unexpected error: %v", err)
+	// Positive case: matching name should return true, nil
+	ok, err := VerifyNSEC3OwnerName(nsec3, name)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+	if !ok {
+		t.Error("Expected VerifyNSEC3OwnerName to return true for correct owner name")
+	}
+
+	// Negative case: wrong name should return false, ErrNSEC3NoMatchingName
+	ok2, err2 := VerifyNSEC3OwnerName(nsec3, "wrong.example.com.")
+	if err2 != ErrNSEC3NoMatchingName {
+		t.Errorf("Expected ErrNSEC3NoMatchingName, got %v", err2)
+	}
+	if ok2 {
+		t.Error("Expected VerifyNSEC3OwnerName to return false for wrong name")
 	}
 }
