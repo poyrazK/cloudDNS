@@ -730,10 +730,9 @@ func ValidateNSEC3Proof(nsec3Records []DNSRecord, queryName string, queryType ui
 
 	// Step 2: Verify owner names are valid hashes
 	for _, nsec3 := range nsec3Records {
-		if _, err := VerifyNSEC3OwnerName(nsec3, queryName); err != nil {
-			// Owner name doesn't match expected hash - could be covering proof
-			// Continue to chain validation
-		}
+		_, _ = VerifyNSEC3OwnerName(nsec3, queryName)
+		// Errors here are non-fatal - we continue to chain validation
+		// which is the definitive check for NXDOMAIN/no-data proofs
 	}
 
 	// Step 3: For NXDOMAIN, we need closest-encloser proof
