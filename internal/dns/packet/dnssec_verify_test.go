@@ -1488,7 +1488,7 @@ func TestBase32Decode(t *testing.T) {
 	}{
 		{"00", false},                                    // minimal
 		{"abcdefghijklmnopqrstuv", false},               // valid lowercase alphabet
-		{"ABCDEFGHIJKLMNOPQRSTUV", true},                 // uppercase is invalid
+		{"ABCDEFGHIJKLMNOPQRSTUV", false},                // uppercase is now valid (DNS names are case-insensitive)
 		{"1xyz!", true},                                 // invalid char should error
 	}
 
@@ -1524,11 +1524,12 @@ func TestNSEC3Present(t *testing.T) {
 func TestTypeBitMapPresent(t *testing.T) {
 	// Build a bitmap that claims type 0 (null) and type 8 (A) exist
 	// Window 0, bitmap length 4 bytes (covers types 0-31)
-	// Byte 0 (0x01): bit 0 set → type 0 present
-	// Byte 1 (0x01): bit 0 set → type 8 (A) present
-	// Byte 2 (0x00): no bits set
-	// Byte 3 (0x00): no bits set
-	bitmap := []byte{0x00, 0x04, 0x01, 0x01, 0x00, 0x00}
+	// Wire format: window(1) + length(1) + bitmap(4)
+	// RFC 4034 Section 4.1.2: type bitmaps use MSB-first bit ordering within each octet
+	// Type 0: byte 0, bit 7 set → 0x80
+	// Type 8: byte 1, bit 7 set → 0x80
+	// Bytes 2-3: no bits set
+	bitmap := []byte{0x00, 0x04, 0x80, 0x80, 0x00, 0x00}
 
 	if !TypeBitMapPresent(bitmap, 0) {
 		t.Error("Expected type 0 to be present")

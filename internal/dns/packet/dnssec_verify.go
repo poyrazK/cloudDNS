@@ -1,6 +1,7 @@
 package packet
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/ed25519"
@@ -594,13 +595,20 @@ func ValidateNSEC3RecordFormat(nsec3 DNSRecord) error {
 	return nil
 }
 
+// nsec3Base32Alphabet is the RFC 5155 Base32 alphabet for NSEC3 (lowercase only).
+const nsec3Base32Alphabet = "0123456789abcdefghijklmnopqrstuv"
+
 // base32Decode decodes a NSEC3 base32 string (RFC 5155 alphabet) into bytes.
-// The alphabet is: 0-9 a-v (no uppercase, no special chars).
+// The alphabet is: 0-9 a-v (case-insensitive, accepts lowercase and uppercase).
+// Returns an error for invalid characters outside the alphabet.
 func base32Decode(encoded string) ([]byte, error) {
-	const nsec3Base32 = "0123456789abcdefghijklmnopqrstuv"
-	alphabet := make(map[byte]int)
-	for i := range nsec3Base32 {
-		alphabet[nsec3Base32[i]] = i
+	// Build alphabet map once for case-insensitive lookup
+	alphabet := make(map[byte]int, len(nsec3Base32Alphabet)*2)
+	for i := range nsec3Base32Alphabet {
+		c := nsec3Base32Alphabet[i]
+		alphabet[c] = i
+		// Also accept uppercase
+		alphabet[c-'a'+'A'] = i
 	}
 
 	var result []byte
@@ -659,24 +667,22 @@ func VerifyNSEC3OwnerName(nsec3 DNSRecord, name string) (bool, error) {
 	return true, nil
 }
 
-// nsec3CoversHash checks whether an NSEC3 record covers the given hash.
-// An NSEC3 record covers a hash if: ownerHash <= coveredHash < nextHash
-// where ordering is lexicographic on the raw hash bytes.
+// nsec3CoversHash checks whether an NSEC3 record covers the given hash per RFC 5155 Section 3.3.5.
+// An NSEC3 record covers a hash if: ownerHash <= h < nextHash (lexicographic ordering).
+// If nextHash <= ownerHash (zone wrapped), the range is: h >= ownerHash OR h < nextHash.
 func nsec3CoversHash(ownerHash, nextHash, coveredHash []byte) bool {
-	// If nextHash is empty or equals ownerHash, this NSEC3 doesn't cover anything valid
 	if len(nextHash) == 0 || len(ownerHash) != len(nextHash) {
 		return false
 	}
 
-	// Simple lexicographic comparison of raw bytes
-	if string(coveredHash) < string(ownerHash) {
-		return false
+	if bytes.Compare(nextHash, ownerHash) > 0 {
+		// Normal case: ownerHash < nextHash
+		// Covered if ownerHash <= h < nextHash
+		return bytes.Compare(ownerHash, coveredHash) <= 0 && bytes.Compare(coveredHash, nextHash) < 0
 	}
-	// Special case: if coveredHash >= nextHash, it wraps around
-	if string(coveredHash) >= string(nextHash) {
-		return true // Covered (wraps around to owner or before)
-	}
-	return true
+	// Wrap-around case: nextHash <= ownerHash
+	// Covered if h >= ownerHash OR h < nextHash
+	return bytes.Compare(coveredHash, ownerHash) >= 0 || bytes.Compare(coveredHash, nextHash) < 0
 }
 
 // TypeBitMapPresent checks if the type bitmap in an NSEC3 record indicates
@@ -702,7 +708,8 @@ func TypeBitMapPresent(bitmap []byte, queryType uint16) bool {
 		if typeOffset >= 0 && typeOffset < bitmapLen*8 {
 			byteIndex := typeOffset / 8
 			bitIndex := uint(typeOffset % 8)
-			if byteIndex < bitmapLen && (bitmap[i+byteIndex]&(1<<bitIndex)) != 0 {
+			// RFC 4034 Section 4.1.2: bits are numbered from left (MSB) within each octet
+			if byteIndex < bitmapLen && (bitmap[i+byteIndex]&(1<<(7-bitIndex))) != 0 {
 				return true
 			}
 		}
@@ -716,6 +723,11 @@ func TypeBitMapPresent(bitmap []byte, queryType uint16) bool {
 // 1. All NSEC3 records have valid format (hash algorithm = 1)
 // 2. The NSEC3 records prove the correct response (NXDOMAIN, no-data, or wildcard)
 // 3. Type bitmaps correctly reflect the record types present/absent
+//
+// NOTE: Full NXDOMAIN validation per RFC 5155 Section 7.2.1 requires a closest-encloser
+// proof + next-closer proof chain. This implementation only validates that at least one
+// NSEC3 covers the query hash, which is a necessary but not sufficient condition.
+// A complete NXDOMAIN proof requires zone-level NSEC3PARAM and sorted hash chain context.
 func ValidateNSEC3Proof(nsec3Records []DNSRecord, queryName string, queryType uint16) error {
 	if len(nsec3Records) == 0 {
 		return errors.New("dnssec: no nsec3 records provided")
@@ -740,11 +752,6 @@ func ValidateNSEC3Proof(nsec3Records []DNSRecord, queryName string, queryType ui
 	// - Closest encloser: covers the query name
 	// - Next closer: shows no names between closest encloser and query
 	// For simplicity, verify at least one NSEC3 covers the query name
-
-	// Compute the hash of the query name with the first NSEC3's params
-	if len(nsec3Records) == 0 {
-		return ErrNSEC3InvalidProof
-	}
 
 	// Use the first NSEC3 record's parameters to hash the query name
 	refNSEC3 := nsec3Records[0]
