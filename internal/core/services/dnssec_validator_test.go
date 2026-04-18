@@ -207,7 +207,7 @@ func TestValidateRRSet_ExpiredSignature(t *testing.T) {
 		{Name: "www.example.com.", Type: packet.A, IP: net.ParseIP("1.2.3.4"), TTL: 300, Class: 1},
 	}
 
-	rrsig, err := packet.SignRRSet(rrset, privKey, "example.com.", dnskey.ComputeKeyTag(), inception, expiration)
+	rrsig, err := packet.SignRRSet(rrset, privKey, packet.AlgorithmECDSAP256, "example.com.", dnskey.ComputeKeyTag(), inception, expiration)
 	if err != nil {
 		t.Fatalf("Failed to sign: %v", err)
 	}
@@ -235,7 +235,7 @@ func TestValidateRRSet_NotYetValidSignature(t *testing.T) {
 		{Name: "www.example.com.", Type: packet.A, IP: net.ParseIP("1.2.3.4"), TTL: 300, Class: 1},
 	}
 
-	rrsig, err := packet.SignRRSet(rrset, privKey, "example.com.", dnskey.ComputeKeyTag(), inception, expiration)
+	rrsig, err := packet.SignRRSet(rrset, privKey, packet.AlgorithmECDSAP256, "example.com.", dnskey.ComputeKeyTag(), inception, expiration)
 	if err != nil {
 		t.Fatalf("Failed to sign: %v", err)
 	}
@@ -295,7 +295,7 @@ func TestValidateRRSet_ValidSignature(t *testing.T) {
 		{Name: "www.example.com.", Type: packet.A, IP: net.ParseIP("1.2.3.4"), TTL: 300, Class: 1},
 	}
 
-	rrsig, err := packet.SignRRSet(rrset, privKey, "example.com.", dnskey.ComputeKeyTag(), now-60, now+3600)
+	rrsig, err := packet.SignRRSet(rrset, privKey, packet.AlgorithmECDSAP256, "example.com.", dnskey.ComputeKeyTag(), now-60, now+3600)
 	if err != nil {
 		t.Fatalf("Failed to sign: %v", err)
 	}
@@ -363,7 +363,7 @@ func TestValidateWithTrustAnchor_NoAnchor(t *testing.T) {
 		{Name: "www.example.com.", Type: packet.A, IP: net.ParseIP("1.2.3.4"), TTL: 300, Class: 1},
 	}
 
-	rrsig, err := packet.SignRRSet(rrset, privKey, "example.com.", dnskey.ComputeKeyTag(), now-60, now+3600)
+	rrsig, err := packet.SignRRSet(rrset, privKey, packet.AlgorithmECDSAP256, "example.com.", dnskey.ComputeKeyTag(), now-60, now+3600)
 	if err != nil {
 		t.Fatalf("Failed to sign: %v", err)
 	}
@@ -423,7 +423,7 @@ func TestValidateWithTrustAnchor_ValidWithAnchor(t *testing.T) {
 		{Name: "www.example.com.", Type: packet.A, IP: net.ParseIP("1.2.3.4"), TTL: 300, Class: 1},
 	}
 
-	rrsig, err := packet.SignRRSet(rrset, privKey, "example.com.", dnskey.ComputeKeyTag(), now-60, now+3600)
+	rrsig, err := packet.SignRRSet(rrset, privKey, packet.AlgorithmECDSAP256, "example.com.", dnskey.ComputeKeyTag(), now-60, now+3600)
 	if err != nil {
 		t.Fatalf("Failed to sign: %v", err)
 	}
@@ -448,7 +448,7 @@ func TestValidateRRSet_KeyTagMismatch(t *testing.T) {
 	}
 
 	// Sign with correct key
-	rrsig, err := packet.SignRRSet(rrset, privKey, "example.com.", dnskey.ComputeKeyTag(), now-60, now+3600)
+	rrsig, err := packet.SignRRSet(rrset, privKey, packet.AlgorithmECDSAP256, "example.com.", dnskey.ComputeKeyTag(), now-60, now+3600)
 	if err != nil {
 		t.Fatalf("Failed to sign: %v", err)
 	}

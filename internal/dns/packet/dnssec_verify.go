@@ -1,8 +1,11 @@
 package packet
 
 import (
+	"crypto"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
+	"crypto/rsa"
 	"crypto/sha256"
 	"errors"
 	"math/big"
@@ -196,7 +199,7 @@ func stringsToChunks(s string) []string {
 }
 
 // VerifyRRSet verifies an RRSIG signature over an RRSet.
-// It supports ECDSA P-256 (Algorithm 13) signatures.
+// It supports ECDSA P-256 (Algorithm 13), RSA SHA-256 (Algorithm 8), and Ed25519 (Algorithm 15) signatures.
 func VerifyRRSet(rrset []DNSRecord, rrsig DNSRecord, dnskey DNSRecord, now uint32) (bool, error) {
 	if len(rrset) == 0 {
 		return false, errors.New("dnssec: empty rrset")
@@ -227,13 +230,7 @@ func VerifyRRSet(rrset []DNSRecord, rrsig DNSRecord, dnskey DNSRecord, now uint3
 		return false, ErrInvalidDNSKEY
 	}
 
-	// 6. Extract ECDSA public key from DNSKEY
-	publicKey, err := extractECDSAPublicKey(dnskey)
-	if err != nil {
-		return false, err
-	}
-
-	// 7. Reconstruct canonical wire format of RRSIG/RRset per RFC 4034 Section 8.1
+	// 6. Reconstruct canonical wire format of RRSIG/RRset per RFC 4034 Section 8.1
 	buf := NewBytePacketBuffer()
 
 	// Prepend RRSIG RDATA fields (excluding Signature)
@@ -283,19 +280,45 @@ func VerifyRRSet(rrset []DNSRecord, rrsig DNSRecord, dnskey DNSRecord, now uint3
 		}
 	}
 
-	// 8. Compute hash
+	// 7. Compute hash
 	hashed := sha256.Sum256(buf.Buf[:buf.Position()])
 
-	// 9. Extract R and S from signature
-	if len(rrsig.Signature) < 64 {
-		return false, ErrInvalidSignature
-	}
-	r := new(big.Int).SetBytes(rrsig.Signature[0:32])
-	s := new(big.Int).SetBytes(rrsig.Signature[32:64])
+	// 8. Verify signature based on algorithm
+	switch rrsig.Algorithm {
+	case AlgorithmECDSAP256:
+		publicKey, err := extractECDSAPublicKey(dnskey)
+		if err != nil {
+			return false, err
+		}
+		if len(rrsig.Signature) < 64 {
+			return false, ErrInvalidSignature
+		}
+		r := new(big.Int).SetBytes(rrsig.Signature[0:32])
+		s := new(big.Int).SetBytes(rrsig.Signature[32:64])
+		if !ecdsa.Verify(publicKey, hashed[:], r, s) {
+			return false, ErrInvalidSignature
+		}
 
-	// 10. Verify ECDSA signature
-	if !ecdsa.Verify(publicKey, hashed[:], r, s) {
-		return false, ErrInvalidSignature
+	case AlgorithmRSASHA256:
+		publicKey, err := extractRSAPublicKey(dnskey)
+		if err != nil {
+			return false, err
+		}
+		if err := rsa.VerifyPKCS1v15(publicKey, crypto.SHA256, hashed[:], rrsig.Signature); err != nil {
+			return false, ErrInvalidSignature
+		}
+
+	case AlgorithmED25519:
+		publicKey, err := extractED25519PublicKey(dnskey)
+		if err != nil {
+			return false, err
+		}
+		if !ed25519.Verify(publicKey, buf.Buf[:buf.Position()], rrsig.Signature) {
+			return false, ErrInvalidSignature
+		}
+
+	default:
+		return false, ErrUnsupportedAlgorithm
 	}
 
 	return true, nil
@@ -328,6 +351,37 @@ func extractECDSAPublicKey(dnskey DNSRecord) (*ecdsa.PublicKey, error) {
 		X:     x,
 		Y:     y,
 	}, nil
+}
+
+// extractRSAPublicKey extracts an RSA public key from a DNSKEY record.
+// RFC 5702 defines RSA/SHA-256 for DNSSEC.
+func extractRSAPublicKey(dnskey DNSRecord) (*rsa.PublicKey, error) {
+	if len(dnskey.PublicKey) < 64 {
+		return nil, ErrNoPublicKey
+	}
+
+	// RSA public key in DNSKEY is stored as a big-endian integer
+	keySize := len(dnskey.PublicKey)
+	if keySize < 128 || keySize > 512 {
+		return nil, ErrUnsupportedAlgorithm
+	}
+
+	n := new(big.Int).SetBytes(dnskey.PublicKey)
+	e := 65537 // Standard exponent for DNSSEC
+
+	return &rsa.PublicKey{
+		N: n,
+		E: e,
+	}, nil
+}
+
+// extractED25519PublicKey extracts an Ed25519 public key from a DNSKEY record.
+// RFC 8080 defines Ed25519 for DNSSEC.
+func extractED25519PublicKey(dnskey DNSRecord) (ed25519.PublicKey, error) {
+	if len(dnskey.PublicKey) != ed25519.PublicKeySize {
+		return nil, ErrNoPublicKey
+	}
+	return ed25519.PublicKey(dnskey.PublicKey), nil
 }
 
 // writeCanonicalRData writes the RDATA portion of a record in canonical form.

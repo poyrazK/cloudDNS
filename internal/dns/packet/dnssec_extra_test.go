@@ -46,7 +46,7 @@ func TestSignRRSet_SignError(t *testing.T) {
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	rrset := []DNSRecord{{Name: "test.", Type: A, TTL: 60}}
 
-	sig, err := SignRRSet(rrset, key, "signer.", 1, 200, 100) // inception > expiration
+	sig, err := SignRRSet(rrset, key, AlgorithmECDSAP256, "signer.", 1, 200, 100) // inception > expiration
 	if err != nil {
 		t.Fatalf("SignRRSet failed: %v", err)
 	}

@@ -181,12 +181,12 @@ Client Query (DO=1)
 - No NSEC3 support (only NSEC for authenticated denial)
 - No automatic trust anchor bootstrap (manual configuration required)
 - No validation of responses from third-party resolvers
-- No ECDSA P-384 / Ed25519 support (future enhancement)
+- No ECDSA P-384 support (future enhancement)
 
 ## Future Enhancements
 
 1. **NSEC3 Support** - For zones using NSEC3 instead of NSEC
 2. **Automatic Trust Bootstrap** - Fetch and validate root DNSKEY automatically
-3. **Algorithm Expansion** - Add support for ECDSA P-384 and Ed25519
+3. **Algorithm Expansion** - Add support for ECDSA P-384
 4. **DS Validation** - Full chain validation from trust anchor to leaf
 5. **DNSSEC Key Rollover Support** - Handle key changes gracefully

@@ -105,20 +105,37 @@ When DNSSEC validation fails, cloudDNS returns RFC 8914 Extended DNS Error codes
 
 ## Supported Algorithms
 
-cloudDNS DNSSEC implementation supports:
+cloudDNS DNSSEC implementation supports three algorithms per RFC 8624:
 
-| Algorithm | Name | Status |
-|-----------|------|--------|
-| 13 | ECDSAP256SHA256 | ✅ Fully supported (MVP) |
-| 8 | RSASHA256 | Signing only |
-| 15 | ECDSAP384SHA384 | Future |
-| 14 | ED25519 | Future |
+| Algorithm | Name | Signing | Verification |
+|-----------|------|---------|--------------|
+| 8 | RSASHA256 | ✅ Full | ✅ Full |
+| 13 | ECDSAP256SHA256 | ✅ Full | ✅ Full |
+| 15 | ED25519 | ✅ Full | ✅ Full |
+
+All three algorithms support both zone signing (via `SignRRSet`) and response validation (via `VerifyRRSet`).
+
+### Algorithm Details
+
+**RSA SHA-256 (Algorithm 8)**
+- Key size: 2048-bit recommended (128-512 byte modulus supported)
+- Uses PKCS#1 v1.5 signature scheme per RFC 5702
+- Most widely supported algorithm in DNS resolvers
+
+**ECDSA P-256 SHA-256 (Algorithm 13)**
+- 64-byte public key in RFC 6605 X||Y format
+- Fast verification, small signature size (64 bytes)
+- Default algorithm for new zones
+
+**Ed25519 (Algorithm 15)**
+- 32-byte public key per RFC 8080
+- Fast signing and verification
+- Small signature and key sizes
 
 ## Limitations (v1.0 MVP)
 
 - **NSEC only**: No NSEC3 support (NSEC is used for authenticated denial)
 - **Manual trust anchors**: No automatic trust anchor bootstrap from root
-- **Single algorithm**: ECDSA P-256 for validation (signing supports more)
 - **No chain validation**: Validates against trust anchor but doesn't verify full chain to root
 
 ## DNSSEC in the Resolution Flow

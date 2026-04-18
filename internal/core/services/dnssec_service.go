@@ -178,7 +178,7 @@ func (s *DNSSECService) SignRRSet(ctx context.Context, zoneName string, zoneID s
 		}
 		expiration := now + (30 * 24 * 60 * 60)
 
-		sig, err := packet.SignRRSet(records, priv, zoneName, keyTag, now, expiration)
+		sig, err := packet.SignRRSet(records, priv, packet.AlgorithmECDSAP256, zoneName, keyTag, now, expiration)
 		if err != nil {
 			return nil, err
 		}

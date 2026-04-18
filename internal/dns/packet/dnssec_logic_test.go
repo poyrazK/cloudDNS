@@ -110,7 +110,7 @@ func TestSignRRSet_Simple(t *testing.T) {
 		t.Fatalf("ecdsa.GenerateKey failed: %v", err)
 	}
 
-	sig, err := SignRRSet(rrset, priv, "test.com.", 1234, 1600000000, 1700000000)
+	sig, err := SignRRSet(rrset, priv, AlgorithmECDSAP256, "test.com.", 1234, 1600000000, 1700000000)
 	if err != nil {
 		t.Fatalf("SignRRSet failed: %v", err)
 	}
