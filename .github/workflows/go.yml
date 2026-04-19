@@ -21,8 +21,9 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
-          version: v1.64.8
+          version: v2.11.4
           install-mode: goinstall
+          args: --disable=gosec --enable=gosec,errorlint,misspell,nolintlint,canonicalheader,contextcheck,revive,errname --gosec.excludes=G101 --gosec.excludes=G204
 
   test-matrix:
     name: Test Matrix
