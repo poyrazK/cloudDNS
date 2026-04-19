@@ -613,7 +613,7 @@ var nsec3Base32Alphabet = (func() map[byte]int {
 func base32Decode(encoded string) ([]byte, error) {
 	var result []byte
 	var buffer uint32
-	var bits uint8
+	var validBits uint8
 
 	for i := range encoded {
 		c := encoded[i]
@@ -621,12 +621,14 @@ func base32Decode(encoded string) ([]byte, error) {
 		if !ok {
 			return nil, errors.New("dnssec: invalid base32 character")
 		}
+		// Add 5 bits from this character to the buffer
 		buffer = (buffer << 5) | uint32(val)
-		bits += 5
-		if bits >= 8 {
-			bits -= 8
-			result = append(result, byte(buffer>>bits))
-			buffer &= (1 << bits) - 1
+		validBits += 5
+		// Emit as many complete bytes as we have
+		for validBits >= 8 {
+			validBits -= 8
+			// Extract the top byte: buffer has validBits bits, we want the highest 8
+			result = append(result, byte(buffer>>validBits))
 		}
 	}
 

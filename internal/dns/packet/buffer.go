@@ -272,8 +272,8 @@ func (b *BytePacketBuffer) Writeu32(val uint32) error {
 		return errors.New("end of buffer")
 	}
 	b.Buf[b.Pos] = byte(val >> 24)
-	b.Buf[b.Pos+1] = byte(val >> 16)
-	b.Buf[b.Pos+2] = byte(val >> 8)
+	b.Buf[b.Pos+1] = byte((val >> 16) & 0xFF)
+	b.Buf[b.Pos+2] = byte((val >> 8) & 0xFF)
 	b.Buf[b.Pos+3] = byte(val & 0xFF)
 	b.Pos += 4
 	if b.Pos > b.Len {

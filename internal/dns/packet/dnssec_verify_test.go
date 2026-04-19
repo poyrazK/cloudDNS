@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
+	"errors"
 	"math/big"
 	"strings"
 	"testing"
@@ -185,7 +186,7 @@ func TestVerifyRRSet_ExpiredSignature(t *testing.T) {
 	}
 
 	_, err = VerifyRRSet(rrset, sig, dnskey, now)
-	if err != ErrSignatureExpired {
+	if !errors.Is(err, ErrSignatureExpired) {
 		t.Errorf("Expected ErrSignatureExpired, got %v", err)
 	}
 }
@@ -225,7 +226,7 @@ func TestVerifyRRSet_NotYetValid(t *testing.T) {
 	}
 
 	_, err = VerifyRRSet(rrset, sig, dnskey, now)
-	if err != ErrSignatureNotYetValid {
+	if !errors.Is(err, ErrSignatureNotYetValid) {
 		t.Errorf("Expected ErrSignatureNotYetValid, got %v", err)
 	}
 }
@@ -261,7 +262,7 @@ func TestVerifyRRSet_KeyTagMismatch(t *testing.T) {
 	sig.KeyTag = sig.KeyTag + 1
 
 	_, err := VerifyRRSet(rrset, sig, dnskey, now)
-	if err != ErrKeyTagMismatch {
+	if !errors.Is(err, ErrKeyTagMismatch) {
 		t.Errorf("Expected ErrKeyTagMismatch, got %v", err)
 	}
 }
@@ -297,7 +298,7 @@ func TestVerifyRRSet_AlgorithmMismatch(t *testing.T) {
 	sig.Algorithm = 14 // Different algorithm
 
 	_, err := VerifyRRSet(rrset, sig, dnskey, now)
-	if err != ErrAlgorithmMismatch {
+	if !errors.Is(err, ErrAlgorithmMismatch) {
 		t.Errorf("Expected ErrAlgorithmMismatch, got %v", err)
 	}
 }
@@ -333,7 +334,7 @@ func TestVerifyRRSet_InvalidSignature(t *testing.T) {
 	sig.Signature[0] ^= 0xFF
 
 	_, err := VerifyRRSet(rrset, sig, dnskey, now)
-	if err != ErrInvalidSignature {
+	if !errors.Is(err, ErrInvalidSignature) {
 		t.Errorf("Expected ErrInvalidSignature, got %v", err)
 	}
 }
@@ -432,7 +433,7 @@ func TestValidateDNSKEYFormat_WrongType(t *testing.T) {
 	}
 
 	_, err := ValidateDNSKEYFormat(record)
-	if err != ErrInvalidDNSKEY {
+	if !errors.Is(err, ErrInvalidDNSKEY) {
 		t.Errorf("Expected ErrInvalidDNSKEY, got %v", err)
 	}
 }
@@ -941,7 +942,7 @@ func TestVerifyDNSKEYMatchesDS_KeyTagMismatch(t *testing.T) {
 
 	// Verify with dnskey2 (different key tag) should fail
 	_, err := VerifyDNSKEYMatchesDS(dnskey2, ds)
-	if err != ErrKeyTagMismatch {
+	if !errors.Is(err, ErrKeyTagMismatch) {
 		t.Errorf("Expected ErrKeyTagMismatch, got %v", err)
 	}
 }
@@ -958,7 +959,7 @@ func TestValidateDNSKEYFormat_NoPublicKey(t *testing.T) {
 	}
 
 	_, err := ValidateDNSKEYFormat(dnskey)
-	if err != ErrNoPublicKey {
+	if !errors.Is(err, ErrNoPublicKey) {
 		t.Errorf("Expected ErrNoPublicKey, got %v", err)
 	}
 }
@@ -975,7 +976,7 @@ func TestValidateDNSKEYFormat_UnsupportedAlgorithm(t *testing.T) {
 	}
 
 	_, err := ValidateDNSKEYFormat(dnskey)
-	if err != ErrUnsupportedAlgorithm {
+	if !errors.Is(err, ErrUnsupportedAlgorithm) {
 		t.Errorf("Expected ErrUnsupportedAlgorithm, got %v", err)
 	}
 }
@@ -1413,7 +1414,7 @@ func TestVerifyRRSet_UnsupportedAlgorithm(t *testing.T) {
 	}
 
 	_, err := VerifyRRSet(rrset, rrsig, dnskey, now)
-	if err != ErrUnsupportedAlgorithm {
+	if !errors.Is(err, ErrUnsupportedAlgorithm) {
 		t.Errorf("Expected ErrUnsupportedAlgorithm, got %v", err)
 	}
 }
@@ -1444,7 +1445,7 @@ func TestValidateNSEC3RecordFormat_UnsupportedHashAlgo(t *testing.T) {
 		NextHash:   make([]byte, 20),
 	}
 	err := ValidateNSEC3RecordFormat(nsec3)
-	if err != ErrNSEC3HashAlgoUnsupported {
+	if !errors.Is(err, ErrNSEC3HashAlgoUnsupported) {
 		t.Errorf("Expected ErrNSEC3HashAlgoUnsupported, got: %v", err)
 	}
 }
