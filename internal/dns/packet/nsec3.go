@@ -19,7 +19,7 @@ func HashName(name string, _ uint8, iterations uint16, salt []byte) []byte {
 	labels := strings.Split(strings.TrimSuffix(name, "."), ".")
 	wire := make([]byte, 0, 1024)
 	for _, l := range labels {
-		wire = append(wire, byte(len(l)))
+		wire = append(wire, byte(len(l)&0xFF))
 		wire = append(wire, []byte(l)...)
 	}
 	wire = append(wire, 0) // Null terminator
