@@ -1,3 +1,4 @@
+// apikey manages API key generation and hashing for cloudDNS.
 package main
 
 import (

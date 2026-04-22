@@ -1,3 +1,5 @@
+// iana-bench benchmarks DNS zone file parsing performance using
+// IANA's root zone file as a test fixture.
 package main
 
 import (

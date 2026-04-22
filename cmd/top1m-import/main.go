@@ -1,3 +1,4 @@
+// top1m-import imports the Cisco Umbrella Top 1M DNS dataset into cloudDNS.
 package main
 
 import (

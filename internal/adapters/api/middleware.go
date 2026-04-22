@@ -14,11 +14,12 @@ import (
 
 type contextKey string
 
-const (
-	CtxTenantID contextKey = "tenant_id"
-	CtxRole     contextKey = "role"
-)
+// CtxTenantID is the context key for the tenant ID extracted from the API key.
+const CtxTenantID contextKey = "tenant_id"
+// CtxRole is the context key for the role extracted from the API key.
+const CtxRole contextKey = "role"
 
+// AuthMiddleware validates API keys and injects tenant context into requests.
 func AuthMiddleware(repo ports.DNSRepository) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -60,6 +61,7 @@ func AuthMiddleware(repo ports.DNSRepository) func(http.Handler) http.Handler {
 	}
 }
 
+// RequireRole returns middleware that restricts access to users with one of the given roles.
 func RequireRole(roles ...domain.Role) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
