@@ -24,7 +24,7 @@ func startMasterListener(t *testing.T, srv *Server) (string, func()) {
 			if err != nil {
 				return
 			}
-			go srv.handleTCPConnection(conn)
+			go srv.handleTCPConnection(context.Background(), conn)
 		}
 	}()
 
@@ -85,7 +85,7 @@ func TestIXFR_Success(t *testing.T) {
 
 	slaveSrv := NewServer("127.0.0.1:0", slaveRepo, nil)
 	// Trigger Refresh on Slave
-	err := slaveSrv.performIXFR(&slaveRepo.zones[0], masterAddr, 1)
+	err := slaveSrv.performIXFR(context.Background(), &slaveRepo.zones[0], masterAddr, 1)
 	assert.NoError(t, err)
 
 	// Verify Slave State
@@ -143,7 +143,7 @@ func TestIXFR_FallbackToAXFR(t *testing.T) {
 	slaveSrv := NewServer("127.0.0.1:0", slaveRepo, nil)
 
 	// Trigger IXFR from Serial 1 -> Master only has history from 5. Should fallback.
-	err := slaveSrv.performIXFR(&domain.Zone{ID: zoneID, Name: zoneName, TenantID: "t1"}, masterAddr, 1)
+	err := slaveSrv.performIXFR(context.Background(), &domain.Zone{ID: zoneID, Name: zoneName, TenantID: "t1"}, masterAddr, 1)
 	assert.NoError(t, err)
 
 	// Verify Slave State matches Master's Full State

@@ -13,7 +13,7 @@ import (
 	"github.com/poyrazK/cloudDNS/internal/dns/packet"
 )
 
-func (s *Server) refreshZone(zone *domain.Zone) {
+func (s *Server) refreshZone(ctx context.Context, zone *domain.Zone) {
 	if zone.MasterServer == "" {
 		s.Logger.Warn("slave zone has no master server configured", "zone", zone.Name)
 		return
@@ -41,7 +41,7 @@ func (s *Server) refreshZone(zone *domain.Zone) {
 	masterSOA := masterPacket.Answers[0]
 
 	// 2. Get local SOA
-	records, err := s.Repo.GetRecords(context.Background(), zone.Name, domain.TypeSOA, "")
+	records, err := s.Repo.GetRecords(ctx, zone.Name, domain.TypeSOA, "")
 	if err != nil {
 		s.Logger.Error("failed to get local records for refresh", "zone", zone.Name, "error", err)
 		return
@@ -68,20 +68,19 @@ func (s *Server) refreshZone(zone *domain.Zone) {
 	// 3. Initiate transfer: Try IXFR first, then fall back to AXFR
 	if localSerial != 0 {
 		s.Logger.Info("attempting IXFR", "zone", zone.Name, "from", localSerial)
-		if err := s.performIXFR(zone, masterAddr, localSerial); err == nil {
+		if err := s.performIXFR(ctx, zone, masterAddr, localSerial); err == nil {
 			s.Logger.Info("IXFR successful", "zone", zone.Name)
 			return
-		} else {
-			s.Logger.Warn("IXFR failed, falling back to AXFR", "zone", zone.Name, "error", err)
 		}
+		s.Logger.Warn("IXFR failed, falling back to AXFR", "zone", zone.Name, "error", err)
 	}
 
-	if err := s.performAXFR(zone, masterAddr); err != nil {
+	if err := s.performAXFR(ctx, zone, masterAddr); err != nil {
 		s.Logger.Error("AXFR failed", "zone", zone.Name, "error", err)
 	}
 }
 
-func (s *Server) performIXFR(zone *domain.Zone, masterAddr string, localSerial uint32) error {
+func (s *Server) performIXFR(ctx context.Context, zone *domain.Zone, masterAddr string, localSerial uint32) error {
 	conn, err := net.DialTimeout("tcp", masterAddr, 10*time.Second)
 	if err != nil {
 		return err
@@ -98,7 +97,7 @@ func (s *Server) performIXFR(zone *domain.Zone, masterAddr string, localSerial u
 	})
 
 	// Add client's current SOA to Authority section
-	localSOARecords, err := s.Repo.GetRecords(context.Background(), zone.Name, domain.TypeSOA, "")
+	localSOARecords, err := s.Repo.GetRecords(ctx, zone.Name, domain.TypeSOA, "")
 	if err != nil {
 		return fmt.Errorf("failed to fetch local SOA for IXFR: %w", err)
 	}
@@ -117,7 +116,7 @@ func (s *Server) performIXFR(zone *domain.Zone, masterAddr string, localSerial u
 		return err
 	}
 	data := buffer.Buf[:buffer.Position()]
-	prefix := []byte{byte(len(data) >> 8), byte(len(data) & 0xFF)}
+	prefix := []byte{byte((len(data) >> 8) & 0xFF), byte(len(data) & 0xFF)}
 	if _, err := conn.Write(append(prefix, data...)); err != nil {
 		return err
 	}
@@ -197,7 +196,6 @@ func (s *Server) performIXFR(zone *domain.Zone, masterAddr string, localSerial u
 		}
 	}
 
-	ctx := context.Background()
 	if !isIncremental {
 		// AXFR Fallback
 		var newRecords []domain.Record
@@ -259,7 +257,7 @@ func (s *Server) performIXFR(zone *domain.Zone, masterAddr string, localSerial u
 	return nil
 }
 
-func (s *Server) performAXFR(zone *domain.Zone, masterAddr string) error {
+func (s *Server) performAXFR(ctx context.Context, zone *domain.Zone, masterAddr string) error {
 	s.Logger.Info("starting AXFR", "zone", zone.Name, "master", masterAddr)
 
 	conn, err := net.DialTimeout("tcp", masterAddr, 10*time.Second)
@@ -289,7 +287,7 @@ func (s *Server) performAXFR(zone *domain.Zone, masterAddr string) error {
 
 	// Write length-prefixed query
 	data := buffer.Buf[:buffer.Position()]
-	prefix := []byte{byte(len(data) >> 8), byte(len(data) & 0xFF)}
+	prefix := []byte{byte((len(data) >> 8) & 0xFF), byte(len(data) & 0xFF)}
 	if _, err := conn.Write(append(prefix, data...)); err != nil {
 		return err
 	}
@@ -346,7 +344,6 @@ func (s *Server) performAXFR(zone *domain.Zone, masterAddr string) error {
 	s.Logger.Info("AXFR received all records, updating repository", "zone", zone.Name, "count", len(newRecords))
 
 	// Atomic-ish update: delete all and batch create
-	ctx := context.Background()
 	if err := s.Repo.DeleteRecordsForZone(ctx, zone.ID); err != nil {
 		return fmt.Errorf("failed to clear old records: %w", err)
 	}

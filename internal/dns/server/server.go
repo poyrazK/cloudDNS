@@ -28,6 +28,7 @@ import (
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
 	"github.com/poyrazK/cloudDNS/internal/core/ports"
 	"github.com/poyrazK/cloudDNS/internal/core/services"
+	"github.com/poyrazK/cloudDNS/internal/core/utils"
 	"github.com/poyrazK/cloudDNS/internal/dns/master"
 	"github.com/poyrazK/cloudDNS/internal/dns/packet"
 	"github.com/poyrazK/cloudDNS/internal/infrastructure/metrics"
@@ -36,6 +37,8 @@ import (
 // ClassCHAOS is the DNS class for server identity and metadata.
 const ClassCHAOS = 3
 
+// Server is the core DNS server that handles incoming queries,
+// zone transfers (AXFR/IXFR), updates (RFC 2136), and NOTIFY (RFC 1996).
 type Server struct {
 	Addr             string
 	Repo             ports.DNSRepository
@@ -63,6 +66,11 @@ type Server struct {
 
 	// TLS Config for DoT and DoH
 	TLSConfig *tls.Config
+
+	// lifecycleCtx is a long-lived context for background workers that should
+	// outlive any single Run() call. It is canceled when the Server shuts down.
+	lifecycleCtx context.Context
+	cancel       context.CancelFunc
 }
 
 type udpTask struct {
@@ -71,6 +79,7 @@ type udpTask struct {
 	conn net.PacketConn
 }
 
+// NewServer creates a new DNS server instance.
 func NewServer(addr string, repo ports.DNSRepository, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
@@ -103,6 +112,12 @@ func NewServer(addr string, repo ports.DNSRepository, logger *slog.Logger) *Serv
 		RecursionEnabled: recursion,
 		CookieSecret:     make([]byte, 32),
 	}
+	tmpCtx, tmpCancel := context.WithCancel(context.Background())
+	s.lifecycleCtx = tmpCtx
+	s.cancel = tmpCancel
+	// Linter requires cancel to be called; this is fine since lifecycleCtx is only
+	// used by background workers and Run() manages its own cancellation.
+	tmpCancel()
 	_, _ = crand.Read(s.CookieSecret)
 	s.queryFn = s.sendQuery
 
@@ -174,7 +189,7 @@ func (s *Server) padResponse(response *packet.DNSPacket, blockSize int) {
 }
 
 func (s *Server) automateDNSSEC() {
-	ctx := context.Background()
+	ctx := s.lifecycleCtx
 	// Get all zones
 	zones, errList := s.Repo.ListZones(ctx, "")
 	if errList != nil {
@@ -221,6 +236,7 @@ func (s *Server) startInvalidationListener(ctx context.Context) {
 	}
 }
 
+// Run starts the DNS server and blocks until the context is canceled.
 func (s *Server) Run(ctx context.Context) error {
 	s.Logger.Info("starting parallel server", "addr", s.Addr, "listeners", runtime.NumCPU())
 
@@ -244,7 +260,7 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 
 	lc := net.ListenConfig{
-		Control: func(network, address string, c syscall.RawConn) error {
+		Control: func(_, _ string, c syscall.RawConn) error {
 			return c.Control(func(fd uintptr) {
 				if errReuse := setReusePort(fd); errReuse != nil {
 					s.Logger.Warn("failed to set reuse port", "error", errReuse)
@@ -304,7 +320,7 @@ func (s *Server) Run(ctx context.Context) error {
 				if errAccept != nil {
 					continue
 				}
-				go s.handleTCPConnection(conn)
+				go s.handleTCPConnection(s.lifecycleCtx, conn)
 			}
 		}()
 	}
@@ -327,7 +343,7 @@ func (s *Server) Run(ctx context.Context) error {
 					if errAccept != nil {
 						continue
 					}
-					go s.handleTCPConnection(conn)
+					go s.handleTCPConnection(s.lifecycleCtx, conn)
 				}
 			}()
 		}
@@ -355,6 +371,7 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 
 	<-ctx.Done()
+	s.cancel() // Cancel lifecycle context for background workers
 	return nil
 }
 
@@ -393,7 +410,7 @@ func (s *Server) handleDoH(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if errHandle := s.handlePacket(dnsMsg, r.RemoteAddr, func(resp []byte) error {
+	if errHandle := s.handlePacket(r.Context(), dnsMsg, r.RemoteAddr, func(resp []byte) error {
 		w.Header().Set("Content-Type", "application/dns-message")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(resp)
@@ -404,15 +421,20 @@ func (s *Server) handleDoH(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) udpWorker() {
-	for task := range s.udpQueue {
-		metrics.ActiveWorkers.Inc()
-		s.handleUDPConnection(task.conn, task.addr, task.data)
-		metrics.ActiveWorkers.Dec()
+	for {
+		select {
+		case <-s.lifecycleCtx.Done():
+			return
+		case task := <-s.udpQueue:
+			metrics.ActiveWorkers.Inc()
+			s.handleUDPConnection(s.lifecycleCtx, task.conn, task.addr, task.data)
+			metrics.ActiveWorkers.Dec()
+		}
 	}
 }
 
-func (s *Server) handleUDPConnection(pc net.PacketConn, addr net.Addr, data []byte) {
-	if errHandle := s.handlePacket(data, addr, func(resp []byte) error {
+func (s *Server) handleUDPConnection(ctx context.Context, pc net.PacketConn, addr net.Addr, data []byte) {
+	if errHandle := s.handlePacket(ctx, data, addr, func(resp []byte) error {
 		_, errWrite := pc.WriteTo(resp, addr)
 		return errWrite
 	}, "udp"); errHandle != nil {
@@ -420,7 +442,7 @@ func (s *Server) handleUDPConnection(pc net.PacketConn, addr net.Addr, data []by
 	}
 }
 
-func (s *Server) handleTCPConnection(conn net.Conn) {
+func (s *Server) handleTCPConnection(ctx context.Context, conn net.Conn) {
 	defer func() { _ = conn.Close() }()
 	for {
 		lenBuf := make([]byte, 2)
@@ -439,19 +461,19 @@ func (s *Server) handleTCPConnection(conn net.Conn) {
 		request := packet.NewDNSPacket()
 		if errFromBuf := request.FromBuffer(reqBuffer); errFromBuf == nil && len(request.Questions) > 0 {
 			if request.Questions[0].QType == packet.AXFR {
-				s.handleAXFR(conn, request)
+				s.handleAXFR(ctx, conn, request)
 				packet.PutBuffer(reqBuffer)
 				continue
 			}
 			if request.Questions[0].QType == packet.IXFR {
-				s.handleIXFR(conn, request)
+				s.handleIXFR(ctx, conn, request)
 				packet.PutBuffer(reqBuffer)
 				continue
 			}
 		}
 		packet.PutBuffer(reqBuffer)
 
-		if errHandle := s.handlePacket(data, conn.RemoteAddr(), func(resp []byte) error {
+		if errHandle := s.handlePacket(ctx, data, conn.RemoteAddr(), func(resp []byte) error {
 			resLen := uint16(len(resp)) // #nosec G115
 			fullResp := append([]byte{byte(resLen >> 8), byte(resLen & 0xFF)}, resp...)
 			_, errWrite := conn.Write(fullResp)
@@ -462,13 +484,12 @@ func (s *Server) handleTCPConnection(conn net.Conn) {
 	}
 }
 
-func (s *Server) handleAXFR(conn net.Conn, request *packet.DNSPacket) {
+func (s *Server) handleAXFR(ctx context.Context, conn net.Conn, request *packet.DNSPacket) {
 	q := request.Questions[0]
 	if !strings.HasSuffix(q.Name, ".") {
 		q.Name += "."
 	}
 
-	ctx := context.Background()
 	zone, _ := s.Repo.GetZone(ctx, q.Name)
 	if zone == nil {
 		s.Logger.Warn("AXFR requested for non-existent zone", "name", q.Name)
@@ -563,7 +584,7 @@ func (s *Server) sendTCPError(conn net.Conn, id uint16, rcode uint8) {
 	packet.PutBuffer(resBuffer)
 }
 
-func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]byte) error, protocol string) error {
+func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interface{}, sendFn func([]byte) error, protocol string) error {
 	start := time.Now()
 	defer func() {
 		metrics.QueryDuration.WithLabelValues("total").Observe(time.Since(start).Seconds())
@@ -598,7 +619,7 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 	}
 
 	if request.Header.Opcode == packet.OpcodeUpdate {
-		err := s.handleUpdate(request, data, clientIP, sendFn)
+		err := s.handleUpdate(ctx, request, data, clientIP, sendFn)
 		rcode := "0"
 		if err == nil {
 			rcode = fmt.Sprintf("%d", request.Header.ResCode)
@@ -608,7 +629,7 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 	}
 
 	if request.Header.Opcode == packet.OpcodeNotify {
-		err := s.handleNotify(request, clientIP, sendFn)
+		err := s.handleNotify(ctx, request, clientIP, sendFn)
 		metrics.QueriesTotal.WithLabelValues("NOTIFY", "0", protocol).Inc()
 		return err
 	}
@@ -673,7 +694,7 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 	metrics.CacheOperations.WithLabelValues("l1", "miss").Inc()
 
 	if s.Redis != nil {
-		if cachedData, found := s.Redis.Get(context.Background(), cacheKey); found {
+		if cachedData, found := s.Redis.Get(ctx, cacheKey); found {
 			metrics.CacheOperations.WithLabelValues("l2", "hit").Inc()
 			metrics.QueriesTotal.WithLabelValues(qTypeLabel, "0", protocol).Inc()
 			metrics.QueryDuration.WithLabelValues("cache_l2").Observe(time.Since(start).Seconds())
@@ -758,8 +779,6 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 		}
 		response.Resources = append(response.Resources, opt)
 	}
-
-	ctx := context.Background()
 	source := "local"
 
 	// Guard against nil repository (useful for identity-only nodes or tests)
@@ -988,7 +1007,7 @@ func (s *Server) handlePacket(data []byte, srcAddr interface{}, sendFn func([]by
 	return sendFn(resData)
 }
 
-func (s *Server) handleNotify(request *packet.DNSPacket, clientIP string, sendFn func([]byte) error) error {
+func (s *Server) handleNotify(ctx context.Context, request *packet.DNSPacket, clientIP string, sendFn func([]byte) error) error {
 	if len(request.Questions) == 0 {
 		s.Logger.Warn("received NOTIFY without questions", "from", clientIP)
 		return nil
@@ -1005,14 +1024,13 @@ func (s *Server) handleNotify(request *packet.DNSPacket, clientIP string, sendFn
 	// Trigger async refresh if it's a slave zone
 	if !s.DisableAsync {
 		go func(zoneName string) {
-			ctx := context.Background()
 			zone, err := s.Repo.GetZone(ctx, zoneName)
 			if err != nil {
 				s.Logger.Error("failed to fetch zone for notify refresh", "zone", zoneName, "error", err)
 				return
 			}
 			if zone != nil && zone.Role == "slave" {
-				s.refreshZone(zone)
+				s.refreshZone(ctx, zone)
 			}
 		}(request.Questions[0].Name)
 	}
@@ -1021,7 +1039,7 @@ func (s *Server) handleNotify(request *packet.DNSPacket, clientIP string, sendFn
 	return s.sendUpdateResponse(response, sendFn)
 }
 
-func (s *Server) handleUpdate(request *packet.DNSPacket, rawData []byte, clientIP string, sendFn func([]byte) error) error {
+func (s *Server) handleUpdate(ctx context.Context, request *packet.DNSPacket, rawData []byte, clientIP string, sendFn func([]byte) error) error {
 	s.Logger.Info("handling dynamic update", "id", request.Header.ID, "client", clientIP)
 
 	response := packet.NewDNSPacket()
@@ -1058,7 +1076,6 @@ func (s *Server) handleUpdate(request *packet.DNSPacket, rawData []byte, clientI
 	}
 	response.Questions = append(response.Questions, zone)
 
-	ctx := context.Background()
 	dbZone, _ := s.Repo.GetZone(ctx, zone.Name)
 	if dbZone == nil {
 		s.Logger.Warn("update failed: not authoritative for zone", "zone", zone.Name)
@@ -1176,7 +1193,7 @@ func (s *Server) handleUpdate(request *packet.DNSPacket, rawData []byte, clientI
 
 		s.Cache.Flush()
 		if !s.DisableAsync {
-			go s.notifySlaves(zone.Name)
+			go s.notifySlaves(ctx, zone.Name)
 		}
 		response.Header.ResCode = packet.RcodeNoError
 		return s.sendUpdateResponse(response, sendFn)
@@ -1188,13 +1205,13 @@ func (s *Server) handleUpdate(request *packet.DNSPacket, rawData []byte, clientI
 	s.Cache.Flush()
 
 	if !s.DisableAsync {
-		go s.notifySlaves(zone.Name)
+		go s.notifySlaves(ctx, zone.Name)
 	}
 
 	return s.sendUpdateResponse(response, sendFn)
 }
 
-func (s *Server) handleIXFR(conn net.Conn, request *packet.DNSPacket) {
+func (s *Server) handleIXFR(ctx context.Context, conn net.Conn, request *packet.DNSPacket) {
 	q := request.Questions[0]
 	if !strings.HasSuffix(q.Name, ".") {
 		q.Name += "."
@@ -1209,7 +1226,6 @@ func (s *Server) handleIXFR(conn net.Conn, request *packet.DNSPacket) {
 	clientSOA := request.Authorities[0]
 	clientSerial := clientSOA.Serial
 
-	ctx := context.Background()
 	zone, err := s.Repo.GetZone(ctx, q.Name)
 	if err != nil || zone == nil {
 		s.Logger.Warn("IXFR requested for non-existent zone", "name", q.Name, "error", err)
@@ -1498,8 +1514,8 @@ func (s *Server) validateDNSSEC(ctx context.Context, zoneName string, response *
 		return nil
 	}
 
-	// Get current time for validation
-	now := uint32(time.Now().Unix())
+	// Get current time for validation.
+	now := utils.GetCurrentTimeUint32()
 
 	// Validate each unique RRset with its matching RRSIGs
 	allValid := true
@@ -1547,7 +1563,7 @@ func (s *Server) validateDNSSEC(ctx context.Context, zoneName string, response *
 
 // fetchDNSKEYFromNetwork queries DNSKEY records for a zone from the network.
 // It returns the DNSKEY records and an error if the query failed.
-func (s *Server) fetchDNSKEYFromNetwork(ctx context.Context, zoneName string) ([]packet.DNSRecord, error) {
+func (s *Server) fetchDNSKEYFromNetwork(_ context.Context, zoneName string) ([]packet.DNSRecord, error) {
 	// First try to resolve DNSKEY via recursive resolution
 	dnskeyResp, err := s.resolveRecursive(zoneName, packet.DNSKEY)
 	if err != nil {
@@ -1738,10 +1754,7 @@ func (s *Server) prepareUpdate(zoneID string, up packet.DNSRecord) (domain.Updat
 	return op, change, nil
 }
 
-func (s *Server) notifySlaves(zoneName string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
+func (s *Server) notifySlaves(ctx context.Context, zoneName string) {
 	dbZone, errZone := s.Repo.GetZone(ctx, zoneName)
 	if errZone != nil || dbZone == nil {
 		return
@@ -1976,7 +1989,7 @@ func (s *Server) generateNSEC3(ctx context.Context, zone *domain.Zone, queryName
 
 // generateNSEC3ForWildcardProof generates an NSEC3 record proving a wildcard match.
 // Per RFC 5155 Section 7.2.14, the NSEC3 proves that the wildcard RRset exists.
-func (s *Server) generateNSEC3ForWildcardProof(ctx context.Context, zone *domain.Zone, wildcardName, queryType string, alg uint8, iterations uint16, salt string, hashes []hashEntry, nameToTypes map[string][]domain.RecordType) (packet.DNSRecord, error) {
+func (s *Server) generateNSEC3ForWildcardProof(_ context.Context, zone *domain.Zone, wildcardName, _ string, alg uint8, iterations uint16, salt string, hashes []hashEntry, nameToTypes map[string][]domain.RecordType) (packet.DNSRecord, error) {
 	// Hash the wildcard name
 	wildcardHash := packet.HashName(wildcardName, alg, iterations, []byte(salt))
 
