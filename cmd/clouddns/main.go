@@ -1,3 +1,4 @@
+// clouddns is the main DNS server daemon for cloudDNS.
 package main
 
 import (
@@ -247,7 +248,7 @@ func run(ctx context.Context) error {
 	if apiAddr == "" {
 		apiAddr = ":8080"
 	}
-	apiHandler := api.NewAPIHandler(dnsSvc, repo)
+	apiHandler := api.New(dnsSvc, repo)
 	mux := http.NewServeMux()
 	apiHandler.RegisterRoutes(mux)
 
@@ -302,7 +303,7 @@ func run(ctx context.Context) error {
 		logger.Info("shutting down services...")
 	}
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond) // Fast timeout for tests
+	shutdownCtx, cancel := context.WithTimeout(runCtx, 100*time.Millisecond)
 	defer cancel()
 
 	if err := s.Shutdown(shutdownCtx); err != nil {
