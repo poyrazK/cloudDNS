@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net"
 	"testing"
 	"time"
@@ -24,7 +25,7 @@ func TestHandleNotify(t *testing.T) {
 	_ = req.Write(reqBuf)
 	
 	var capturedResp []byte
-	err := srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], "127.0.0.1:12345", func(resp []byte) error {
+	err := srv.handlePacket(context.Background(),reqBuf.Buf[:reqBuf.Position()], "127.0.0.1:12345", func(resp []byte) error {
 		capturedResp = resp
 		return nil
 	}, "udp")
@@ -59,7 +60,7 @@ func TestHandleNotify_NoQuestions(t *testing.T) {
 	reqBuf := packet.NewBytePacketBuffer()
 	_ = req.Write(reqBuf)
 	
-	err := srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], "127.0.0.1:12345", func(resp []byte) error {
+	err := srv.handlePacket(context.Background(),reqBuf.Buf[:reqBuf.Position()], "127.0.0.1:12345", func(resp []byte) error {
 		return nil
 	}, "udp")
 
@@ -94,7 +95,7 @@ func TestNotifySlaves(t *testing.T) {
 	srv := NewServer("127.0.0.1:5353", repo, nil)
 	
 	// Trigger notification
-	go srv.notifySlaves("example.test.")
+	go srv.notifySlaves(context.Background(), "example.test.")
 
 	// Attempt to read the NOTIFY packet from the mock slave port
 	_ = pc.SetReadDeadline(time.Now().Add(100 * time.Millisecond))

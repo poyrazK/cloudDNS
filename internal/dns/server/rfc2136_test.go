@@ -43,7 +43,7 @@ func TestHandleUpdateAddRecord(t *testing.T) {
 	data := buffer.Buf[:buffer.Position()]
 
 	var capturedResp []byte
-	err := srv.handlePacket(data, "127.0.0.1:12345", func(resp []byte) error {
+	err := srv.handlePacket(context.Background(),data, "127.0.0.1:12345", func(resp []byte) error {
 		capturedResp = resp
 		return nil
 	}, "udp")
@@ -104,7 +104,7 @@ func TestHandleUpdateDeleteRRSet(t *testing.T) {
 	_ = req.Write(buffer)
 	data := buffer.Buf[:buffer.Position()]
 
-	if err := srv.handlePacket(data, "127.0.0.1:12345", func(_ []byte) error { return nil }, "udp"); err != nil {
+	if err := srv.handlePacket(context.Background(),data, "127.0.0.1:12345", func(_ []byte) error { return nil }, "udp"); err != nil {
 		t.Errorf("handlePacket failed: %v", err)
 	}
 
@@ -151,7 +151,7 @@ func TestHandleUpdatePrerequisiteFail(t *testing.T) {
 	data := buffer.Buf[:buffer.Position()]
 
 	var capturedResp []byte
-	err := srv.handlePacket(data, "127.0.0.1:12345", func(resp []byte) error {
+	err := srv.handlePacket(context.Background(),data, "127.0.0.1:12345", func(resp []byte) error {
 		capturedResp = resp
 		return nil
 	}, "udp")
@@ -190,7 +190,7 @@ func TestHandleUpdateMorePrereqs(t *testing.T) {
 
 	buf := packet.NewBytePacketBuffer()
 	_ = req.Write(buf)
-	if err := srv.handlePacket(buf.Buf[:buf.Position()], "127.0.0.1:1", func(_ []byte) error {
+	if err := srv.handlePacket(context.Background(),buf.Buf[:buf.Position()], "127.0.0.1:1", func(_ []byte) error {
 		return nil
 	}, "udp"); err != nil {
 		t.Errorf("handlePacket failed: %v", err)
@@ -205,7 +205,7 @@ func TestHandleUpdateMorePrereqs(t *testing.T) {
 	})
 	buf2 := packet.NewBytePacketBuffer()
 	_ = req2.Write(buf2)
-	if err := srv.handlePacket(buf2.Buf[:buf2.Position()], "127.0.0.1:1", func(resp []byte) error {
+	if err := srv.handlePacket(context.Background(),buf2.Buf[:buf2.Position()], "127.0.0.1:1", func(resp []byte) error {
 		p := packet.NewDNSPacket()
 		pb := packet.NewBytePacketBuffer()
 		pb.Load(resp)
@@ -241,7 +241,7 @@ func TestHandleUpdateDeleteSpecific(t *testing.T) {
 
 	buf := packet.NewBytePacketBuffer()
 	_ = req.Write(buf)
-	if err := srv.handlePacket(buf.Buf[:buf.Position()], "127.0.0.1:1", func(_ []byte) error { return nil }, "udp"); err != nil {
+	if err := srv.handlePacket(context.Background(),buf.Buf[:buf.Position()], "127.0.0.1:1", func(_ []byte) error { return nil }, "udp"); err != nil {
 		t.Errorf("handlePacket failed: %v", err)
 	}
 
@@ -295,7 +295,7 @@ func TestHandleUpdateTSIG(t *testing.T) {
 	pBuf.Load(data)
 	_ = parsedReq.FromBuffer(pBuf)
 
-	if err := srv.handlePacket(data, "127.0.0.1:12345", func(resp []byte) error {
+	if err := srv.handlePacket(context.Background(),data, "127.0.0.1:12345", func(resp []byte) error {
 		resPacket := packet.NewDNSPacket()
 		resBuf := packet.NewBytePacketBuffer()
 		resBuf.Load(resp)
@@ -333,7 +333,7 @@ func TestHandleUpdate_ErrorCases(t *testing.T) {
 	// 0 questions
 	buf := packet.NewBytePacketBuffer()
 	_ = req.Write(buf)
-	if err := srv.handlePacket(buf.Buf[:buf.Position()], "127.0.0.1:1", func(resp []byte) error {
+	if err := srv.handlePacket(context.Background(),buf.Buf[:buf.Position()], "127.0.0.1:1", func(resp []byte) error {
 		p := packet.NewDNSPacket()
 		pb := packet.NewBytePacketBuffer()
 		pb.Load(resp)
@@ -353,7 +353,7 @@ func TestHandleUpdate_ErrorCases(t *testing.T) {
 	buf2 := packet.NewBytePacketBuffer()
 	_ = req2.Write(buf2)
 	_ = req2.SignTSIG(buf2, "unknown.", []byte("any"))
-	if err := srv.handlePacket(buf2.Buf[:buf2.Position()], "127.0.0.1:1", func(resp []byte) error {
+	if err := srv.handlePacket(context.Background(),buf2.Buf[:buf2.Position()], "127.0.0.1:1", func(resp []byte) error {
 		p := packet.NewDNSPacket()
 		pb := packet.NewBytePacketBuffer()
 		pb.Load(resp)
@@ -372,7 +372,7 @@ func TestHandleUpdate_ErrorCases(t *testing.T) {
 	req3.Questions = append(req3.Questions, packet.DNSQuestion{Name: "notauth.test.", QType: packet.SOA})
 	buf3 := packet.NewBytePacketBuffer()
 	_ = req3.Write(buf3)
-	if err := srv.handlePacket(buf3.Buf[:buf3.Position()], "127.0.0.1:1", func(resp []byte) error {
+	if err := srv.handlePacket(context.Background(),buf3.Buf[:buf3.Position()], "127.0.0.1:1", func(resp []byte) error {
 		p := packet.NewDNSPacket()
 		pb := packet.NewBytePacketBuffer()
 		pb.Load(resp)
@@ -401,7 +401,7 @@ func TestCheckPrerequisite_GetRecordsError(t *testing.T) {
 		Name: "any.update.test.", Type: packet.A, Class: 255,
 	})
 
-	_ = srv.handleUpdate(req, nil, "127.0.0.1", func(resp []byte) error {
+	_ = srv.handleUpdate(context.Background(),req, nil, "127.0.0.1", func(resp []byte) error {
 		res := packet.NewDNSPacket()
 		pb := packet.NewBytePacketBuffer()
 		pb.Load(resp)
@@ -487,7 +487,7 @@ func TestApplyUpdate_TransactionRollback(t *testing.T) {
 	// Inject deterministic failure for the second record
 	repo.failOnRecordName = "fail.rollback.test."
 
-	_ = srv.handleUpdate(req, nil, "127.0.0.1", func(resp []byte) error {
+	_ = srv.handleUpdate(context.Background(),req, nil, "127.0.0.1", func(resp []byte) error {
 		res := packet.NewDNSPacket()
 		pb := packet.NewBytePacketBuffer()
 		pb.Load(resp)
@@ -542,7 +542,7 @@ func TestHandleUpdateDeleteRRSetSpecific(t *testing.T) {
 		Name: "www.spec.test.", Type: packet.A, Class: 255,
 	})
 
-	err := srv.handleUpdate(req, nil, "127.0.0.1", func(resp []byte) error {
+	err := srv.handleUpdate(context.Background(),req, nil, "127.0.0.1", func(resp []byte) error {
 		res := packet.NewDNSPacket()
 		pb := packet.NewBytePacketBuffer()
 		pb.Load(resp)
@@ -578,7 +578,7 @@ func TestHandleUpdate_SOAFetchError(t *testing.T) {
 		Name: "new.soaerr.test.", Type: packet.A, Class: 1, TTL: 60, IP: net.ParseIP("1.1.1.1"),
 	})
 
-	_ = srv.handleUpdate(req, nil, "127.0.0.1", func(resp []byte) error {
+	_ = srv.handleUpdate(context.Background(),req, nil, "127.0.0.1", func(resp []byte) error {
 		p := packet.NewDNSPacket()
 		pb := packet.NewBytePacketBuffer()
 		pb.Load(resp)
@@ -608,7 +608,7 @@ func TestHandleUpdate_SOADeleteError(t *testing.T) {
 		Name: "new.soadel.test.", Type: packet.A, Class: 1, TTL: 60, IP: net.ParseIP("1.1.1.1"),
 	})
 
-	_ = srv.handleUpdate(req, nil, "127.0.0.1", func(resp []byte) error {
+	_ = srv.handleUpdate(context.Background(),req, nil, "127.0.0.1", func(resp []byte) error {
 		p := packet.NewDNSPacket()
 		pb := packet.NewBytePacketBuffer()
 		pb.Load(resp)
@@ -638,7 +638,7 @@ func TestHandleUpdate_SOACreateError(t *testing.T) {
 		Name: "new.soacrt.test.", Type: packet.A, Class: 1, TTL: 60, IP: net.ParseIP("1.1.1.1"),
 	})
 
-	_ = srv.handleUpdate(req, nil, "127.0.0.1", func(resp []byte) error {
+	_ = srv.handleUpdate(context.Background(),req, nil, "127.0.0.1", func(resp []byte) error {
 		p := packet.NewDNSPacket()
 		pb := packet.NewBytePacketBuffer()
 		pb.Load(resp)
@@ -658,7 +658,7 @@ func TestHandleUpdate_ZoneNotFound(t *testing.T) {
 	req.Header.Opcode = packet.OpcodeUpdate
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "nonexistent.test.", QType: packet.SOA})
 
-	_ = srv.handleUpdate(req, nil, "127.0.0.1", func(resp []byte) error {
+	_ = srv.handleUpdate(context.Background(),req, nil, "127.0.0.1", func(resp []byte) error {
 		res := packet.NewDNSPacket()
 		pb := packet.NewBytePacketBuffer()
 		pb.Load(resp)
