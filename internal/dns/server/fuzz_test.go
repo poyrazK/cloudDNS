@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net"
 	"testing"
 
@@ -39,7 +40,7 @@ func FuzzServerHandlePacket(f *testing.F) {
 		srv.NotifyPortOverride = 10053 // dummy port
 
 		// handlePacket shouldn't panic, regardless of the input data
-		err := srv.handlePacket(data, &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
+		err := srv.handlePacket(context.Background(),data, &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
 			// Dummy sendFn
 			return nil
 		}, "udp")

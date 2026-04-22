@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net"
 	"testing"
 
@@ -42,7 +43,7 @@ func TestHandleUpdate_FormErr(t *testing.T) {
 	req.Header.Opcode = packet.OpcodeUpdate
 	// No questions (ZOCOUNT = 0)
 	
-	err := srv.handleUpdate(req, nil, "127.0.0.1", func(resp []byte) error {
+	err := srv.handleUpdate(context.Background(), req, nil, "127.0.0.1", func(resp []byte) error {
 		p := packet.NewDNSPacket()
 		pb := packet.NewBytePacketBuffer()
 		pb.Load(resp)
@@ -65,7 +66,7 @@ func TestHandleIXFR_NoAuthority(t *testing.T) {
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "test.", QType: packet.IXFR})
 	
 	// No Authority section
-	srv.handleIXFR(&mockConn{}, req)
+	srv.handleIXFR(context.Background(), &mockConn{}, req)
 }
 
 type mockConn struct {
@@ -85,7 +86,7 @@ func TestHandlePacket_NoQuestions(t *testing.T) {
 	buf := packet.NewBytePacketBuffer()
 	_ = req.Write(buf)
 	
-	err := srv.handlePacket(buf.Buf[:buf.Position()], "127.0.0.1:1", func(resp []byte) error {
+	err := srv.handlePacket(context.Background(),buf.Buf[:buf.Position()], "127.0.0.1:1", func(resp []byte) error {
 		p := packet.NewDNSPacket()
 		pb := packet.NewBytePacketBuffer()
 		pb.Load(resp)
