@@ -1,3 +1,5 @@
+// iana-import fetches the root zone file from IANA and imports
+// DNS records into the cloudDNS database.
 package main
 
 import (
@@ -26,7 +28,7 @@ func main() {
 	}
 }
 
-func Run(_args []string) error {
+func Run([]string) error {
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		dbURL = "postgres://postgres:postgres@localhost:5432/clouddns?sslmode=disable"
@@ -67,7 +69,7 @@ func RunImport(ctx context.Context, repo ports.DNSRepository, url string) error 
 		return fmt.Errorf("bad status: %s", resp.Status)
 	}
 
-	parser := master.NewMasterParser()
+	parser := master.New()
 	parser.Origin = "."
 
 	fmt.Println("Parsing root zone file...")

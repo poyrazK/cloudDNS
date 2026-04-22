@@ -28,7 +28,7 @@ www IN A 1.2.3.4
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		reader := bytes.NewReader(data)
-		parser := NewMasterParser()
+		parser := New()
 		
 		// Parsing should not panic. It will likely return errors, which is fine.
 		_, _ = parser.Parse(reader)
