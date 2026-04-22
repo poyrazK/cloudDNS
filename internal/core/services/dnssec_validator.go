@@ -260,7 +260,7 @@ type ChainLink struct {
 // ValidateChain validates the full DNSSEC trust chain from a leaf zone to a trust anchor.
 // It verifies that each zone's DNSKEY is valid according to its DS record,
 // and that DS records are properly signed up the chain to the trust anchor.
-func (v *DNSSECValidator) ValidateChain(chain []ChainLink, now uint32) error {
+func (v *DNSSECValidator) ValidateChain(chain []ChainLink, _ uint32) error {
 	if len(chain) == 0 {
 		return fmt.Errorf("dnssec: empty chain")
 	}

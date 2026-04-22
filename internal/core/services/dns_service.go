@@ -20,6 +20,7 @@ type dnsService struct {
 	logger *slog.Logger
 }
 
+// NewDNSService creates a new DNS service with the given repository and cache.
 func NewDNSService(repo ports.DNSRepository, cache ports.CacheInvalidator) ports.DNSService {
 	return &dnsService{
 		repo:   repo,
@@ -204,7 +205,7 @@ func (s *dnsService) DeleteRecord(ctx context.Context, recordID string, zoneID s
 }
 
 func (s *dnsService) ImportZone(ctx context.Context, tenantID string, r io.Reader) (*domain.Zone, error) {
-	parser := master.NewMasterParser()
+	parser := master.New()
 	data, err := parser.Parse(r)
 	if err != nil {
 		return nil, err
