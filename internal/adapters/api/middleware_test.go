@@ -20,7 +20,7 @@ func TestAuthMiddleware(t *testing.T) {
 
 	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		tenantID, _ := r.Context().Value(CtxTenantID).(string)
-		w.Header().Set("X-Tenant-ID", tenantID)
+		w.Header().Set("X-Tenant-Id", tenantID)
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -71,8 +71,8 @@ func TestAuthMiddleware(t *testing.T) {
 		if rr.Code != http.StatusOK {
 			t.Errorf("expected 200, got %d", rr.Code)
 		}
-		if rr.Header().Get("X-Tenant-ID") != "my-tenant" {
-			t.Errorf("expected tenant ID 'my-tenant', got %s", rr.Header().Get("X-Tenant-ID"))
+		if rr.Header().Get("X-Tenant-Id") != "my-tenant" {
+			t.Errorf("expected tenant ID 'my-tenant', got %s", rr.Header().Get("X-Tenant-Id"))
 		}
 	})
 
