@@ -23,7 +23,7 @@ jobs:
         with:
           version: v2.11.4
           install-mode: binary
-          args: --disable=gosec --enable=gosec,errorlint,misspell,nolintlint,canonicalheader,contextcheck,revive,errname --gosec.excludes=G101 --gosec.excludes=G204
+          args: --disable=gosec --enable=gosec,errorlint,misspell,nolintlint,canonicalheader,contextcheck,revive,errname
 
   test-matrix:
     name: Test Matrix
