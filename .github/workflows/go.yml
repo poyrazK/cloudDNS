@@ -22,7 +22,7 @@ jobs:
         uses: golangci/golangci-lint-action@v6
         with:
           version: v2.11.4
-          install-mode: goinstall
+          install-mode: binary
           args: --disable=gosec --enable=gosec,errorlint,misspell,nolintlint,canonicalheader,contextcheck,revive,errname --gosec.excludes=G101 --gosec.excludes=G204
 
   test-matrix:
