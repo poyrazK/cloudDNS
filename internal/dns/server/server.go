@@ -262,8 +262,18 @@ func (s *Server) Run(ctx context.Context) error {
 	defer s.shutdownOnce.Do(func() {
 		s.cancel()   // Cancel lifecycle context (stops NOTIFY goroutines)
 		close(s.done) // Signal all workers to exit (goroutines check s.done and exit via wg.Done)
-		// NOTE: Not calling s.wg.Wait() here - Run() returns immediately so callers aren't blocked
-		// Goroutines exit asynchronously in the background
+		// Close listeners to unblock Accept/ReadFrom calls
+		if s.tcpListener != nil {
+			s.tcpListener.Close()
+		}
+		if s.dotListener != nil {
+			s.dotListener.Close()
+		}
+		if s.dohServer != nil {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			s.dohServer.Shutdown(shutdownCtx)
+		}
 	})
 
 	// Initialize DNSSECValidator from config if provided
