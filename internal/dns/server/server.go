@@ -67,10 +67,10 @@ type Server struct {
 	// TLS Config for DoT and DoH
 	TLSConfig *tls.Config
 
-	// lifecycleCtx is a long-lived context for background workers that should
-	// outlive any single Run() call. It is canceled when the Server shuts down.
+	// lifecycleCtx is a long-lived context for background workers.
+	// done is closed when the Server shuts down to signal workers to exit.
 	lifecycleCtx context.Context
-	cancel       context.CancelFunc
+	done         chan struct{}
 }
 
 type udpTask struct {
@@ -112,12 +112,8 @@ func NewServer(addr string, repo ports.DNSRepository, logger *slog.Logger) *Serv
 		RecursionEnabled: recursion,
 		CookieSecret:     make([]byte, 32),
 	}
-	tmpCtx, tmpCancel := context.WithCancel(context.Background())
-	s.lifecycleCtx = tmpCtx
-	s.cancel = tmpCancel
-	// Linter requires cancel to be called; this is fine since lifecycleCtx is only
-	// used by background workers and Run() manages its own cancellation.
-	tmpCancel()
+	s.lifecycleCtx = context.Background()
+	s.done = make(chan struct{})
 	_, _ = crand.Read(s.CookieSecret)
 	s.queryFn = s.sendQuery
 
@@ -371,7 +367,7 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 
 	<-ctx.Done()
-	s.cancel() // Cancel lifecycle context for background workers
+	close(s.done) // Signal background workers to exit
 	return nil
 }
 
@@ -423,7 +419,7 @@ func (s *Server) handleDoH(w http.ResponseWriter, r *http.Request) {
 func (s *Server) udpWorker() {
 	for {
 		select {
-		case <-s.lifecycleCtx.Done():
+		case <-s.done:
 			return
 		case task := <-s.udpQueue:
 			metrics.ActiveWorkers.Inc()
