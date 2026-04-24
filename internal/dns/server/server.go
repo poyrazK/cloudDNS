@@ -20,6 +20,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -68,9 +69,12 @@ type Server struct {
 	TLSConfig *tls.Config
 
 	// lifecycleCtx is a long-lived context for background workers.
+	// cancel cancels the lifecycleCtx.
 	// done is closed when the Server shuts down to signal workers to exit.
 	lifecycleCtx context.Context
+	cancel       context.CancelFunc
 	done         chan struct{}
+	wg           sync.WaitGroup
 }
 
 type udpTask struct {
@@ -100,9 +104,6 @@ func NewServer(addr string, repo ports.DNSRepository, logger *slog.Logger) *Serv
 	s := &Server{
 		Addr:             addr,
 		Repo:             repo,
-		Cache:            NewDNSCache(),
-		dnskeyCache:      NewDNSCache(),
-		DNSSEC:           services.NewDNSSECService(repo),
 		WorkerCount:      runtime.NumCPU() * 32, // High concurrency tuning
 		udpQueue:         make(chan udpTask, 50000),
 		Logger:           logger,
@@ -112,24 +113,34 @@ func NewServer(addr string, repo ports.DNSRepository, logger *slog.Logger) *Serv
 		RecursionEnabled: recursion,
 		CookieSecret:     make([]byte, 32),
 	}
-	s.lifecycleCtx = context.Background()
+	s.lifecycleCtx, s.cancel = context.WithCancel(context.Background())
 	s.done = make(chan struct{})
 	_, _ = crand.Read(s.CookieSecret)
 	s.queryFn = s.sendQuery
 
+	// Initialize caches with done channel for graceful shutdown
+	s.Cache = NewDNSCache(s.done)
+	s.dnskeyCache = NewDNSCache(s.done)
+	s.DNSSEC = services.NewDNSSECService(repo)
+
 	// Periodic cleanup of rate limiter buckets
+	s.wg.Add(1)
 	go func() {
-		for {
-			time.Sleep(5 * time.Minute)
-			s.limiter.Cleanup()
-		}
+		defer s.wg.Done()
+		s.limiter.CleanupLoop(s.done)
 	}()
 
 	// Background DNSSEC automation: Run every hour
+	s.wg.Add(1)
 	go func() {
+		defer s.wg.Done()
 		for {
-			time.Sleep(1 * time.Hour)
-			s.automateDNSSEC()
+			select {
+			case <-s.done:
+				return
+			case <-time.After(1 * time.Hour):
+				s.automateDNSSEC()
+			}
 		}
 	}()
 
@@ -367,7 +378,9 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 
 	<-ctx.Done()
-	close(s.done) // Signal background workers to exit
+	s.cancel()             // Cancel lifecycle context (stops NOTIFY goroutines)
+	close(s.done)          // Signal all workers to exit
+	s.wg.Wait()            // Wait for background goroutines to finish
 	return nil
 }
 

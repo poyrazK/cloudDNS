@@ -58,7 +58,7 @@ func (rl *rateLimiter) Allow(ip string) bool {
 	return false
 }
 
-// Cleanup removes old buckets to prevent memory leaks
+// Cleanup removes old buckets to prevent memory leaks.
 func (rl *rateLimiter) Cleanup() {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
@@ -67,6 +67,21 @@ func (rl *rateLimiter) Cleanup() {
 	for ip, b := range rl.buckets {
 		if now.Sub(b.last) > 10*time.Minute {
 			delete(rl.buckets, ip)
+		}
+	}
+}
+
+// CleanupLoop periodically removes old buckets to prevent memory leaks.
+// It exits when done is closed.
+func (rl *rateLimiter) CleanupLoop(done <-chan struct{}) {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			rl.Cleanup()
 		}
 	}
 }
