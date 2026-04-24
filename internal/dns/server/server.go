@@ -259,20 +259,21 @@ func (s *Server) Run(ctx context.Context) error {
 
 	// Deferred shutdown signals all goroutines to exit when Run returns
 	// Uses sync.Once to ensure it runs exactly once, even on early return (started==0)
+	//nolint:contextcheck // defer cannot receive ctx parameter, shutdown is fire-and-forget
 	defer s.shutdownOnce.Do(func() {
 		s.cancel()   // Cancel lifecycle context (stops NOTIFY goroutines)
 		close(s.done) // Signal all workers to exit (goroutines check s.done and exit via wg.Done)
 		// Close listeners to unblock Accept/ReadFrom calls
 		if s.tcpListener != nil {
-			s.tcpListener.Close()
+			_ = s.tcpListener.Close()
 		}
 		if s.dotListener != nil {
-			s.dotListener.Close()
+			_ = s.dotListener.Close()
 		}
 		if s.dohServer != nil {
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			s.dohServer.Shutdown(shutdownCtx)
+			_ = s.dohServer.Shutdown(shutdownCtx)
 		}
 	})
 
@@ -320,8 +321,10 @@ func (s *Server) Run(ctx context.Context) error {
 		started++
 		s.wg.Add(1)
 		go func(c net.PacketConn) {
+			defer func() {
+				_ = c.Close()
+			}()
 			defer s.wg.Done()
-			defer c.Close()
 			for {
 				buf := make([]byte, 512)
 				select {
@@ -359,8 +362,10 @@ func (s *Server) Run(ctx context.Context) error {
 		s.tcpListener = tcpListener
 		s.wg.Add(1)
 		go func() {
+			defer func() {
+				_ = s.tcpListener.Close()
+			}()
 			defer s.wg.Done()
-			defer s.tcpListener.Close()
 			for {
 				conn, errAccept := tcpListener.Accept()
 				if errAccept != nil {
@@ -384,8 +389,10 @@ func (s *Server) Run(ctx context.Context) error {
 			s.Logger.Info("DNS over TLS (DoT) starting", "addr", dotAddr)
 			s.wg.Add(1)
 			go func() {
+				defer func() {
+					_ = s.dotListener.Close()
+				}()
 				defer s.wg.Done()
-				defer s.dotListener.Close()
 				for {
 					conn, errAccept := s.dotListener.Accept()
 					if errAccept != nil {
