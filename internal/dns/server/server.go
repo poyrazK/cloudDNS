@@ -68,6 +68,11 @@ type Server struct {
 	// TLS Config for DoT and DoH
 	TLSConfig *tls.Config
 
+	// Listener handles for graceful shutdown
+	tcpListener net.Listener
+	dotListener  net.Listener
+	dohServer    *http.Server
+
 	// lifecycleCtx is a long-lived context for background workers.
 	// cancel cancels the lifecycleCtx.
 	// done is closed when the Server shuts down to signal workers to exit.
@@ -75,6 +80,7 @@ type Server struct {
 	cancel       context.CancelFunc
 	done         chan struct{}
 	wg           sync.WaitGroup
+	shutdownOnce sync.Once
 }
 
 type udpTask struct {
@@ -119,8 +125,8 @@ func NewServer(addr string, repo ports.DNSRepository, logger *slog.Logger) *Serv
 	s.queryFn = s.sendQuery
 
 	// Initialize caches with done channel for graceful shutdown
-	s.Cache = NewDNSCache(s.done)
-	s.dnskeyCache = NewDNSCache(s.done)
+	s.Cache = NewDNSCache(s.done, &s.wg)
+	s.dnskeyCache = NewDNSCache(s.done, &s.wg)
 	s.DNSSEC = services.NewDNSSECService(repo)
 
 	// Periodic cleanup of rate limiter buckets
@@ -134,12 +140,16 @@ func NewServer(addr string, repo ports.DNSRepository, logger *slog.Logger) *Serv
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-s.done:
 				return
-			case <-time.After(1 * time.Hour):
-				s.automateDNSSEC()
+			case <-ticker.C:
+				if s.Repo != nil && s.DNSSEC != nil {
+					s.automateDNSSEC()
+				}
 			}
 		}
 	}()
@@ -247,6 +257,15 @@ func (s *Server) startInvalidationListener(ctx context.Context) {
 func (s *Server) Run(ctx context.Context) error {
 	s.Logger.Info("starting parallel server", "addr", s.Addr, "listeners", runtime.NumCPU())
 
+	// Deferred shutdown signals all goroutines to exit when Run returns
+	// Uses sync.Once to ensure it runs exactly once, even on early return (started==0)
+	defer s.shutdownOnce.Do(func() {
+		s.cancel()   // Cancel lifecycle context (stops NOTIFY goroutines)
+		close(s.done) // Signal all workers to exit (goroutines check s.done and exit via wg.Done)
+		// NOTE: Not calling s.wg.Wait() here - Run() returns immediately so callers aren't blocked
+		// Goroutines exit asynchronously in the background
+	})
+
 	// Initialize DNSSECValidator from config if provided
 	if s.DNSSECConfig != nil {
 		anchors, err := s.DNSSECConfig.ToMap()
@@ -263,7 +282,11 @@ func (s *Server) Run(ctx context.Context) error {
 
 	// Start cache invalidation listener if Redis is enabled
 	if s.Redis != nil {
-		go s.startInvalidationListener(ctx)
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			s.startInvalidationListener(ctx)
+		}()
 	}
 
 	lc := net.ListenConfig{
@@ -285,21 +308,27 @@ func (s *Server) Run(ctx context.Context) error {
 			continue
 		}
 		started++
+		s.wg.Add(1)
 		go func(c net.PacketConn) {
-			defer func() {
-				if errClose := c.Close(); errClose != nil {
-					s.Logger.Error("failed to close UDP connection", "error", errClose)
-				}
-			}()
+			defer s.wg.Done()
+			defer c.Close()
 			for {
 				buf := make([]byte, 512)
-				n, addr, errRead := c.ReadFrom(buf)
-				if errRead != nil {
-					continue
+				select {
+				case <-s.done:
+					return
+				default:
+					n, addr, errRead := c.ReadFrom(buf)
+					if errRead != nil {
+						if errors.Is(errRead, net.ErrClosed) {
+							return
+						}
+						continue
+					}
+					data := make([]byte, n)
+					copy(data, buf[:n])
+					s.udpQueue <- udpTask{addr: addr, data: data, conn: c}
 				}
-				data := make([]byte, n)
-				copy(data, buf[:n])
-				s.udpQueue <- udpTask{addr: addr, data: data, conn: c}
 			}
 		}(conn)
 	}
@@ -310,21 +339,24 @@ func (s *Server) Run(ctx context.Context) error {
 
 	// 2. UDP Workers
 	for i := 0; i < s.WorkerCount; i++ {
+		s.wg.Add(1)
 		go s.udpWorker()
 	}
 
 	// 3. TCP Listener
 	tcpListener, errTCP := lc.Listen(ctx, "tcp", s.Addr)
 	if errTCP == nil {
+		s.tcpListener = tcpListener
+		s.wg.Add(1)
 		go func() {
-			defer func() {
-				if errClose := tcpListener.Close(); errClose != nil {
-					s.Logger.Error("failed to close TCP listener", "error", errClose)
-				}
-			}()
+			defer s.wg.Done()
+			defer s.tcpListener.Close()
 			for {
 				conn, errAccept := tcpListener.Accept()
 				if errAccept != nil {
+					if errors.Is(errAccept, net.ErrClosed) {
+						return
+					}
 					continue
 				}
 				go s.handleTCPConnection(s.lifecycleCtx, conn)
@@ -338,16 +370,18 @@ func (s *Server) Run(ctx context.Context) error {
 		dotAddr := net.JoinHostPort(host, "853")
 		dotListener, errDoT := tls.Listen("tcp", dotAddr, s.TLSConfig)
 		if errDoT == nil {
+			s.dotListener = dotListener
 			s.Logger.Info("DNS over TLS (DoT) starting", "addr", dotAddr)
+			s.wg.Add(1)
 			go func() {
-				defer func() {
-					if errClose := dotListener.Close(); errClose != nil {
-						s.Logger.Error("failed to close DoT listener", "error", errClose)
-					}
-				}()
+				defer s.wg.Done()
+				defer s.dotListener.Close()
 				for {
-					conn, errAccept := dotListener.Accept()
+					conn, errAccept := s.dotListener.Accept()
 					if errAccept != nil {
+						if errors.Is(errAccept, net.ErrClosed) {
+							return
+						}
 						continue
 					}
 					go s.handleTCPConnection(s.lifecycleCtx, conn)
@@ -369,19 +403,19 @@ func (s *Server) Run(ctx context.Context) error {
 			TLSConfig:         s.TLSConfig,
 			ReadHeaderTimeout: 5 * time.Second,
 		}
+		s.dohServer = dohServer
 		s.Logger.Info("DNS over HTTPS (DoH) starting", "addr", dohAddr)
+		s.wg.Add(1)
 		go func() {
-			if errDoH := dohServer.ListenAndServeTLS("", ""); errDoH != nil {
+			defer s.wg.Done()
+			if errDoH := dohServer.ListenAndServeTLS("", ""); errDoH != nil && !errors.Is(errDoH, http.ErrServerClosed) {
 				s.Logger.Error("DoH server failed", "error", errDoH)
 			}
 		}()
 	}
 
 	<-ctx.Done()
-	s.cancel()             // Cancel lifecycle context (stops NOTIFY goroutines)
-	close(s.done)          // Signal all workers to exit
-	s.wg.Wait()            // Wait for background goroutines to finish
-	return nil
+	return nil // async shutdown handles cleanup in background
 }
 
 func (s *Server) handleDoH(w http.ResponseWriter, r *http.Request) {
@@ -430,6 +464,7 @@ func (s *Server) handleDoH(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) udpWorker() {
+	defer s.wg.Done()
 	for {
 		select {
 		case <-s.done:

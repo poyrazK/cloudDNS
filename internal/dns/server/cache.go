@@ -30,16 +30,19 @@ type DNSCache struct {
 
 // NewDNSCache initializes a new DNSCache with pre-allocated shards and starts
 // the background expiration cleanup loop. The done channel controls when the
-// cleanup goroutine exits.
-func NewDNSCache(done <-chan struct{}) *DNSCache {
+// cleanup goroutine exits. If wg is provided, wg.Add(1) is called and wg.Done()
+// is called when the cleanup goroutine exits.
+func NewDNSCache(done <-chan struct{}, wg *sync.WaitGroup) *DNSCache {
 	c := &DNSCache{}
 	for i := 0; i < shardCount; i++ {
 		c.shards[i] = &cacheShard{
 			items: make(map[string]cacheEntry),
 		}
 	}
-	// Background goroutine to periodically clean up expired items from all shards.
-	go c.cleanupLoop(done)
+	if wg != nil {
+		wg.Add(1)
+	}
+	go c.cleanupLoop(done, wg)
 	return c
 }
 
@@ -107,9 +110,12 @@ func (c *DNSCache) Flush() {
 
 // cleanupLoop periodically triggers the cache-wide cleanup process.
 // It exits when done is closed.
-func (c *DNSCache) cleanupLoop(done <-chan struct{}) {
+func (c *DNSCache) cleanupLoop(done <-chan struct{}, wg *sync.WaitGroup) {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
+	if wg != nil {
+		defer wg.Done()
+	}
 	for {
 		select {
 		case <-done:
