@@ -8,7 +8,9 @@ import (
 )
 
 func TestCacheSetGet(t *testing.T) {
-	cache := NewDNSCache()
+	done := make(chan struct{})
+	t.Cleanup(func() { close(done) })
+	cache := NewDNSCache(done, nil)
 	key := "test.com:1"
 	data := []byte{1, 2, 3, 4}
 
@@ -24,7 +26,9 @@ func TestCacheSetGet(t *testing.T) {
 }
 
 func TestCacheExpiration(t *testing.T) {
-	cache := NewDNSCache()
+	done := make(chan struct{})
+	t.Cleanup(func() { close(done) })
+	cache := NewDNSCache(done, nil)
 	key := "expire.com:1"
 	data := []byte{0}
 
@@ -41,7 +45,9 @@ func TestCacheExpiration(t *testing.T) {
 }
 
 func TestCacheConcurrency(_ *testing.T) {
-	cache := NewDNSCache()
+	done := make(chan struct{})
+	// No cleanup needed - test runs briefly
+	cache := NewDNSCache(done, nil)
 
 	// Simple smoke test for concurrent access
 	for i := 0; i < 100; i++ {
@@ -53,7 +59,9 @@ func TestCacheConcurrency(_ *testing.T) {
 }
 
 func TestCacheCleanup(t *testing.T) {
-	cache := NewDNSCache()
+	done := make(chan struct{})
+	t.Cleanup(func() { close(done) })
+	cache := NewDNSCache(done, nil)
 	cache.Set("keep", []byte{1}, 1*time.Hour)
 	cache.Set("drop", []byte{2}, -1*time.Hour) // Already expired
 
@@ -66,7 +74,9 @@ func TestCacheCleanup(t *testing.T) {
 }
 
 func TestCacheFlush(t *testing.T) {
-	cache := NewDNSCache()
+	done := make(chan struct{})
+	t.Cleanup(func() { close(done) })
+	cache := NewDNSCache(done, nil)
 	cache.Set("a", []byte{1}, 1*time.Hour)
 	cache.Flush()
 
@@ -77,7 +87,9 @@ func TestCacheFlush(t *testing.T) {
 }
 
 func TestCacheInvalidate(t *testing.T) {
-	cache := NewDNSCache()
+	done := make(chan struct{})
+	t.Cleanup(func() { close(done) })
+	cache := NewDNSCache(done, nil)
 	cache.Set("key1", []byte{1}, 1*time.Hour)
 	cache.Invalidate("key1")
 	
@@ -88,7 +100,9 @@ func TestCacheInvalidate(t *testing.T) {
 }
 
 func TestCachePing(t *testing.T) {
-	cache := NewDNSCache()
+	done := make(chan struct{})
+	t.Cleanup(func() { close(done) })
+	cache := NewDNSCache(done, nil)
 	
 	// 1. Success case
 	if err := cache.Ping(context.Background()); err != nil {

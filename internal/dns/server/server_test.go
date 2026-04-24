@@ -858,6 +858,32 @@ func TestServer_Run_ContextCancel(t *testing.T) {
 	}
 }
 
+func TestServer_GracefulShutdown(t *testing.T) {
+	srv := NewServer("127.0.0.1:0", nil, nil)
+
+	// Create a cancellable context to simulate shutdown
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	errChan := make(chan error, 1)
+	go func() {
+		errChan <- srv.Run(ctx)
+	}()
+
+	// Wait for Run to return - this confirms all tracked goroutines have exited
+	select {
+	case err := <-errChan:
+		if err != nil {
+			t.Errorf("Expected nil error from Run on cancel, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("srv.Run did not return within 2 seconds - shutdown may be blocked")
+	}
+
+	// Run returned successfully within timeout - graceful shutdown is working
+	// (tracked background goroutines: cache cleanup, rate limiter cleanup, DNSSEC automation)
+}
+
 type errorPacketConn struct {
 	net.PacketConn
 	WriteAttempts int
