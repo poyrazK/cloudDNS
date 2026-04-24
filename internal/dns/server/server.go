@@ -325,8 +325,10 @@ func (s *Server) Run(ctx context.Context) error {
 				_ = c.Close()
 			}()
 			defer s.wg.Done()
+			// Set a 500ms read deadline so select can re-check s.done periodically
+			_ = c.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+			buf := make([]byte, 512)
 			for {
-				buf := make([]byte, 512)
 				select {
 				case <-s.done:
 					return
@@ -336,6 +338,8 @@ func (s *Server) Run(ctx context.Context) error {
 						if errors.Is(errRead, net.ErrClosed) {
 							return
 						}
+						// Refresh deadline to allow re-check of s.done
+						_ = c.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
 						continue
 					}
 					data := make([]byte, n)
