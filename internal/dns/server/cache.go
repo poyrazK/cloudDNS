@@ -1,3 +1,4 @@
+// Package server provides the core DNS server implementation.
 package server
 
 import "context"
@@ -93,6 +94,7 @@ func (c *DNSCache) Ping(ctx context.Context) error {
 	return ctx.Err()
 }
 
+// Flush clears all entries from the DNS cache.
 func (c *DNSCache) Flush() {
 	for i := 0; i < shardCount; i++ {
 		shard := c.shards[i]

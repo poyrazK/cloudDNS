@@ -148,9 +148,10 @@ func ValidateCAAContent(content string) error {
 
 	tag := parts[1]
 	for _, r := range tag {
-		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')) {
-			return fmt.Errorf("invalid tag: %s (must be alphanumeric)", tag)
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
+			continue
 		}
+		return fmt.Errorf("invalid tag: %s (must be alphanumeric)", tag)
 	}
 
 	// Value might be multiple fields if not quoted properly, but we expect it to be quoted

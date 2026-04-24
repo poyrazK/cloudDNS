@@ -33,7 +33,7 @@ func NewHealthMonitor(repo ports.DNSRepository, logger *slog.Logger) *HealthMoni
 
 const maxProbeWorkers = 10
 
-// Start runs the health monitoring loop at the specified interval until the context is cancelled.
+// Start runs the health monitoring loop at the specified interval until the context is canceled.
 func (m *HealthMonitor) Start(ctx context.Context, interval time.Duration) {
 	if interval <= 0 {
 		interval = 30 * time.Second

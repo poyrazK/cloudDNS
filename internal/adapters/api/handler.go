@@ -1,3 +1,4 @@
+// Package api provides HTTP handlers for the cloudDNS REST API.
 package api
 
 import (
@@ -10,19 +11,19 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// APIHandler handles HTTP requests for zone and record management.
-type APIHandler struct {
+// Handler handles HTTP requests for zone and record management.
+type Handler struct {
 	svc  ports.DNSService
 	repo ports.DNSRepository
 }
 
-// NewAPIHandler creates and returns a new APIHandler instance.
-func NewAPIHandler(svc ports.DNSService, repo ports.DNSRepository) *APIHandler {
-	return &APIHandler{svc: svc, repo: repo}
+// New creates and returns a new Handler instance.
+func New(svc ports.DNSService, repo ports.DNSRepository) *Handler {
+	return &Handler{svc: svc, repo: repo}
 }
 
 // RegisterRoutes registers the API routes with the provided ServeMux.
-func (h *APIHandler) RegisterRoutes(mux *http.ServeMux) {
+func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	// Public Routes
 	mux.HandleFunc("GET /health", h.HealthCheck)
 	mux.HandleFunc("GET /metrics", h.Metrics)
@@ -42,12 +43,12 @@ func (h *APIHandler) RegisterRoutes(mux *http.ServeMux) {
 }
 
 // Metrics handles Prometheus metrics scraping requests.
-func (h *APIHandler) Metrics(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) Metrics(w http.ResponseWriter, r *http.Request) {
 	promhttp.Handler().ServeHTTP(w, r)
 }
 
 // HealthCheck handles health check requests.
-func (h *APIHandler) HealthCheck(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 	status := "UP"
 	details := make(map[string]string)
 	checks := h.svc.HealthCheck(r.Context())
@@ -80,7 +81,7 @@ func (h *APIHandler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 }
 
 // ListAuditLogs retrieves audit entries for a specific tenant via the management API.
-func (h *APIHandler) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := r.Context().Value(CtxTenantID).(string)
 	if !ok || tenantID == "" {
 		log.Printf("ListAuditLogs: missing or invalid tenant ID in context")
@@ -100,7 +101,8 @@ func (h *APIHandler) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *APIHandler) CreateZone(w http.ResponseWriter, r *http.Request) {
+// CreateZone handles POST /zones requests.
+func (h *Handler) CreateZone(w http.ResponseWriter, r *http.Request) {
 	var zone domain.Zone
 	if err := json.NewDecoder(r.Body).Decode(&zone); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -141,7 +143,8 @@ func (h *APIHandler) CreateZone(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *APIHandler) ListZones(w http.ResponseWriter, r *http.Request) {
+// ListZones handles GET /zones requests.
+func (h *Handler) ListZones(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := r.Context().Value(CtxTenantID).(string)
 	if !ok || tenantID == "" {
 		log.Printf("ListZones: missing or invalid tenant ID in context")
@@ -161,7 +164,8 @@ func (h *APIHandler) ListZones(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *APIHandler) ListRecordsForZone(w http.ResponseWriter, r *http.Request) {
+// ListRecordsForZone handles GET /zones/{id}/records requests.
+func (h *Handler) ListRecordsForZone(w http.ResponseWriter, r *http.Request) {
 	zoneID := r.PathValue("id")
 
 	tenantID, ok := r.Context().Value(CtxTenantID).(string)
@@ -183,7 +187,8 @@ func (h *APIHandler) ListRecordsForZone(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-func (h *APIHandler) CreateRecord(w http.ResponseWriter, r *http.Request) {
+// CreateRecord handles POST /zones/{id}/records requests.
+func (h *Handler) CreateRecord(w http.ResponseWriter, r *http.Request) {
 	zoneID := r.PathValue("id")
 	var record domain.Record
 	if err := json.NewDecoder(r.Body).Decode(&record); err != nil {
@@ -218,7 +223,8 @@ func (h *APIHandler) CreateRecord(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *APIHandler) DeleteZone(w http.ResponseWriter, r *http.Request) {
+// DeleteZone handles DELETE /zones/{id} requests.
+func (h *Handler) DeleteZone(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	tenantID, ok := r.Context().Value(CtxTenantID).(string)
 	if !ok || tenantID == "" {
@@ -235,7 +241,8 @@ func (h *APIHandler) DeleteZone(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *APIHandler) DeleteRecord(w http.ResponseWriter, r *http.Request) {
+// DeleteRecord handles DELETE /zones/{zone_id}/records/{id} requests.
+func (h *Handler) DeleteRecord(w http.ResponseWriter, r *http.Request) {
 	zoneID := r.PathValue("zone_id")
 	id := r.PathValue("id")
 

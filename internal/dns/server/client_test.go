@@ -19,7 +19,7 @@ func TestRefreshZone(t *testing.T) {
 	zone := &domain.Zone{ID: "z1", Name: "slave.test.", MasterServer: "1.2.3.4"}
 
 	// Case 1: No master configured
-	srv.refreshZone(&domain.Zone{Name: "nomaster.test."})
+	srv.refreshZone(context.Background(), &domain.Zone{Name: "nomaster.test."})
 
 	// Case 2: Up to date
 	_ = repo.CreateRecord(context.Background(), &domain.Record{
@@ -31,7 +31,7 @@ func TestRefreshZone(t *testing.T) {
 		resp.Answers = append(resp.Answers, packet.DNSRecord{Type: packet.SOA, Serial: 100})
 		return resp, nil
 	}
-	srv.refreshZone(zone)
+	srv.refreshZone(context.Background(), zone)
 
 	// Case 3: Master has newer serial (AXFR Trigger)
 	srv.queryFn = func(server string, name string, qType packet.QueryType) (*packet.DNSPacket, error) {
@@ -96,7 +96,7 @@ func TestRefreshZone(t *testing.T) {
 
 	// Since we can't easily change the hardcoded :53 in refreshZone, 
 	// we use performAXFR directly which takes the address.
-	err = srv.performAXFR(zone, zone.MasterServer)
+	err = srv.performAXFR(context.Background(), zone, zone.MasterServer)
 	if err != nil {
 		t.Fatalf("performAXFR failed: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestPerformAXFR_Error(t *testing.T) {
 	zone := &domain.Zone{ID: "z1", Name: "fail.test."}
 
 	// Case 1: Dial error
-	err := srv.performAXFR(zone, "127.0.0.1:1") // Closed port
+	err := srv.performAXFR(context.Background(), zone, "127.0.0.1:1") // Closed port
 	if err == nil {
 		t.Errorf("Expected dial error")
 	}
@@ -144,7 +144,7 @@ func TestPerformAXFR_Error(t *testing.T) {
 		_, _ = conn.Write(d)
 	}()
 
-	err = srv.performAXFR(zone, l.Addr().String())
+	err = srv.performAXFR(context.Background(), zone, l.Addr().String())
 	if err == nil || !strings.Contains(err.Error(), "master returned error") {
 		t.Errorf("Expected master error, got %v", err)
 	}
@@ -156,5 +156,5 @@ func TestRefreshZone_MasterError(t *testing.T) {
 	srv.queryFn = func(server string, name string, qType packet.QueryType) (*packet.DNSPacket, error) {
 		return nil, fmt.Errorf("network error")
 	}
-	srv.refreshZone(&domain.Zone{Name: "err.test.", MasterServer: "1.1.1.1"})
+	srv.refreshZone(context.Background(), &domain.Zone{Name: "err.test.", MasterServer: "1.1.1.1"})
 }

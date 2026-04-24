@@ -11,15 +11,15 @@ import (
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
 )
 
-// MasterParser implements a parser for DNS master zone files.
-type MasterParser struct {
+// Parser implements a parser for DNS master zone files.
+type Parser struct {
 	Origin  string
 	DefaultTTL int
 }
 
-// NewMasterParser creates and returns a new MasterParser instance.
-func NewMasterParser() *MasterParser {
-	return &MasterParser{
+// New creates and returns a new Parser instance.
+func New() *Parser {
+	return &Parser{
 		DefaultTTL: 3600,
 	}
 }
@@ -31,7 +31,7 @@ type ZoneData struct {
 }
 
 // Parse reads a master zone file from the provided reader and returns the parsed data.
-func (p *MasterParser) Parse(r io.Reader) (*ZoneData, error) {
+func (p *Parser) Parse(r io.Reader) (*ZoneData, error) {
 	scanner := bufio.NewScanner(r)
 	// Use 1MB buffer for long records like DNSKEY/RRSIG
 	buf := make([]byte, 1024*1024)
@@ -147,7 +147,7 @@ func (p *MasterParser) Parse(r io.Reader) (*ZoneData, error) {
 	return data, scanner.Err()
 }
 
-// RFC 4034 Section 6.1: Canonical DNS Name Order
+// CompareNamesCanonically compares two domain names in canonical order per RFC 4034 Section 6.1.
 func CompareNamesCanonically(a, b string) int {
 	a = strings.TrimSuffix(strings.ToLower(a), ".")
 	b = strings.TrimSuffix(strings.ToLower(b), ".")
@@ -174,6 +174,7 @@ func CompareNamesCanonically(a, b string) int {
 	return 0
 }
 
+// SortRecordsCanonically sorts DNS records by canonical name order per RFC 4034.
 func SortRecordsCanonically(records []domain.Record) {
 	sort.Slice(records, func(i, j int) bool {
 		cmp := CompareNamesCanonically(records[i].Name, records[j].Name)
@@ -184,6 +185,7 @@ func SortRecordsCanonically(records []domain.Record) {
 	})
 }
 
+// RecordTypeToQueryType converts a domain RecordType to its DNS wire format query type number.
 func RecordTypeToQueryType(t domain.RecordType) uint16 {
 	switch t {
 	case domain.TypeA: return 1

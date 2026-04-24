@@ -243,7 +243,7 @@ func (s *Server) sendTCPQuery(server string, name string, qType packet.QueryType
 	}
 
 	data := buffer.Buf[:buffer.Position()]
-	fullData := append([]byte{byte(len(data) >> 8), byte(len(data) & 0xFF)}, data...)
+	fullData := append([]byte{byte((len(data) >> 8) & 0xFF), byte(len(data) & 0xFF)}, data...)
 	
 	if _, err := conn.Write(fullData); err != nil {
 		return nil, err

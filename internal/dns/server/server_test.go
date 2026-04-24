@@ -562,7 +562,7 @@ func TestHandlePacketLocalHit(t *testing.T) {
 	data := buffer.Buf[:buffer.Position()]
 
 	var capturedResp []byte
-	if err := srv.handlePacket(data, &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
+	if err := srv.handlePacket(context.Background(),data, &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
 		capturedResp = resp
 		return nil
 	}, "udp"); err != nil {
@@ -606,7 +606,7 @@ func TestHandlePacketCacheHit(t *testing.T) {
 	_ = req.Write(reqBuf)
 
 	var capturedResp []byte
-	if err := srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
+	if err := srv.handlePacket(context.Background(),reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
 		capturedResp = resp
 		return nil
 	}, "udp"); err != nil {
@@ -679,7 +679,7 @@ func TestHandlePacketNXDOMAIN(t *testing.T) {
 	_ = req.Write(reqBuf)
 
 	var capturedResp []byte
-	if err := srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
+	if err := srv.handlePacket(context.Background(),reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
 		capturedResp = resp
 		return nil
 	}, "udp"); err != nil {
@@ -705,7 +705,7 @@ func TestHandlePacketNoQuestions(t *testing.T) {
 	_ = req.Write(reqBuf)
 
 	var capturedResp []byte
-	if err := srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
+	if err := srv.handlePacket(context.Background(),reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
 		capturedResp = resp
 		return nil
 	}, "udp"); err != nil {
@@ -737,7 +737,7 @@ func TestHandlePacketEDNS(t *testing.T) {
 	reqBuf := packet.NewBytePacketBuffer()
 	_ = req.Write(reqBuf)
 
-	if err := srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
+	if err := srv.handlePacket(context.Background(),reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
 		return nil
 	}, "udp"); err != nil {
 		t.Errorf("HandlePacket failed with EDNS: %v", err)
@@ -764,7 +764,7 @@ func TestHandlePacketTruncation(t *testing.T) {
 	reqBuf := packet.NewBytePacketBuffer()
 	_ = req.Write(reqBuf)
 
-	if err := srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
+	if err := srv.handlePacket(context.Background(),reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
 		resPacket := packet.NewDNSPacket()
 		resBuffer := packet.NewBytePacketBuffer()
 		resBuffer.Load(resp)
@@ -879,7 +879,7 @@ func TestHandleUDPConnection_Error(t *testing.T) {
 	addr := &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}
 	
 	// 1. Invalid payload - should not even attempt WriteTo
-	srv.handleUDPConnection(pc, addr, []byte("invalid"))
+	srv.handleUDPConnection(context.Background(), pc, addr, []byte("invalid"))
 	if pc.WriteAttempts > 0 {
 		t.Errorf("Expected 0 WriteAttempts for invalid payload, got %d", pc.WriteAttempts)
 	}
@@ -890,7 +890,7 @@ func TestHandleUDPConnection_Error(t *testing.T) {
 	buf := packet.NewBytePacketBuffer()
 	_ = q.Write(buf)
 	
-	srv.handleUDPConnection(pc, addr, buf.Buf[:buf.Position()])
+	srv.handleUDPConnection(context.Background(), pc, addr, buf.Buf[:buf.Position()])
 	if pc.WriteAttempts == 0 {
 		t.Error("Expected at least 1 WriteAttempt for valid query payload")
 	}
@@ -953,7 +953,7 @@ func TestHandleAXFR_ConvertError(t *testing.T) {
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "axfr-fail.test.", QType: packet.AXFR})
 
 	conn := &mockTCPConn{}
-	srv.handleAXFR(conn, req)
+	srv.handleAXFR(context.Background(), conn, req)
 
 	if len(conn.captured) < 2 {
 		t.Errorf("Expected at least 2 records (Start SOA and End SOA)")
@@ -973,7 +973,7 @@ func TestHandleUpdate_ApplyUpdateError(t *testing.T) {
 	// Use an unknown type to trigger conversion error in applyUpdate
 	req.Authorities = append(req.Authorities, packet.DNSRecord{Name: "bad.update-fail.test.", Type: 999, Class: 1})
 
-	_ = srv.handleUpdate(req, nil, "127.0.0.1", func(resp []byte) error {
+	_ = srv.handleUpdate(context.Background(),req, nil, "127.0.0.1", func(resp []byte) error {
 		res := packet.NewDNSPacket()
 		pb := packet.NewBytePacketBuffer()
 		pb.Load(resp)
@@ -997,7 +997,7 @@ func TestHandleUpdate_IncrementSerialError(t *testing.T) {
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "serial-fail.test.", QType: packet.SOA})
 	req.Authorities = append(req.Authorities, packet.DNSRecord{Name: "new.serial-fail.test.", Type: packet.TXT, Txt: "test", Class: 1})
 
-	_ = srv.handleUpdate(req, nil, "127.0.0.1", func(resp []byte) error {
+	_ = srv.handleUpdate(context.Background(),req, nil, "127.0.0.1", func(resp []byte) error {
 		res := packet.NewDNSPacket()
 		pb := packet.NewBytePacketBuffer()
 		pb.Load(resp)
@@ -1020,7 +1020,7 @@ func TestHandleAXFR_NoSOA(t *testing.T) {
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "nosoa.test.", QType: packet.AXFR})
 
 	conn := &mockTCPConn{}
-	srv.handleAXFR(conn, req)
+	srv.handleAXFR(context.Background(), conn, req)
 
 	if len(conn.captured) != 1 {
 		t.Fatalf("Expected 1 error packet, got %d", len(conn.captured))

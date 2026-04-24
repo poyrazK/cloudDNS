@@ -32,7 +32,7 @@ func TestEndToEndDNSAdvanced(t *testing.T) {
 		_ = dnsSrv.Run(ctx)
 	}()
 
-	apiHandler := api.NewAPIHandler(svc, repo)
+	apiHandler := api.New(svc, repo)
 	mux := http.NewServeMux()
 	apiHandler.RegisterRoutes(mux)
 	apiSrv := &http.Server{Addr: apiAddr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}

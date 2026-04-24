@@ -14,7 +14,7 @@ import (
 func TestListAuditLogs(t *testing.T) {
 	svc := &mockDNSService{}
 	repo := &testutil.MockRepo{}
-	handler := NewAPIHandler(svc, repo)
+	handler := New(svc, repo)
 
 	req := httptest.NewRequest("GET", "/audit-logs", nil)
 	ctx := context.WithValue(req.Context(), CtxTenantID, "t1")

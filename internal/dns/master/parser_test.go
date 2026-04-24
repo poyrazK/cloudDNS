@@ -24,7 +24,7 @@ www IN  A   1.2.3.4
 mail 1800 IN MX 10 mail.example.com.
 `
 
-	parser := NewMasterParser()
+	parser := New()
 	data, err := parser.Parse(strings.NewReader(zoneFile))
 	if err != nil {
 		t.Fatalf("Failed to parse zone: %v", err)
@@ -136,7 +136,7 @@ $ORIGIN multi.
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p := NewMasterParser()
+			p := New()
 			got, err := p.Parse(strings.NewReader(tt.zoneFile))
 			if err != nil {
 				t.Fatalf("Parse failed: %v", err)
@@ -217,7 +217,7 @@ func TestRecordTypeToQueryType(t *testing.T) {
 func TestMasterParser_LargeRecord(t *testing.T) {
 	largeContent := strings.Repeat("a", 100000)
 	zoneFile := "root. 3600 IN TXT " + largeContent
-	parser := NewMasterParser()
+	parser := New()
 	data, err := parser.Parse(strings.NewReader(zoneFile))
 	if err != nil {
 		t.Fatalf("Failed to parse large record: %v", err)

@@ -1,3 +1,4 @@
+// Package repository provides PostgreSQL implementations of DNS repository interfaces.
 package repository
 
 import (
@@ -30,6 +31,7 @@ func NewPostgresRepository(db *sql.DB) *PostgresRepository {
 	return &PostgresRepository{db: db}
 }
 
+// GetRecords implements ports.DNSRepository.
 func (r *PostgresRepository) GetRecords(ctx context.Context, name string, qType domain.RecordType, clientIP string) ([]domain.Record, error) {
 	// For Split-Horizon, we query records where:
 	// 1. The name and type match.
@@ -100,6 +102,7 @@ func (r *PostgresRepository) GetRecords(ctx context.Context, name string, qType 
 	return records, nil
 }
 
+// GetIPsForName implements ports.DNSRepository.
 func (r *PostgresRepository) GetIPsForName(ctx context.Context, name string, clientIP string) ([]string, error) {
 	// Optimized query returning only content for Type A
 	query := `SELECT content FROM dns_records 
@@ -131,6 +134,7 @@ func (r *PostgresRepository) GetIPsForName(ctx context.Context, name string, cli
 	return ips, nil
 }
 
+// GetZone implements ports.DNSRepository.
 func (r *PostgresRepository) GetZone(ctx context.Context, name string) (*domain.Zone, error) {
 	query := `SELECT id, tenant_id, name, vpc_id, description, role, master_server, created_at, updated_at FROM dns_zones WHERE LOWER(name) = LOWER($1)`
 	var z domain.Zone
@@ -151,6 +155,7 @@ func (r *PostgresRepository) GetZone(ctx context.Context, name string) (*domain.
 	return &z, nil
 }
 
+// GetDNSKEYs implements ports.DNSRepository.
 func (r *PostgresRepository) GetDNSKEYs(ctx context.Context, zoneName string) ([]domain.Record, error) {
 	// First get the zone to find zone ID
 	zone, err := r.GetZone(ctx, zoneName)
@@ -206,6 +211,7 @@ func (r *PostgresRepository) GetDNSKEYs(ctx context.Context, zoneName string) ([
 	return records, rows.Err()
 }
 
+// GetRecord implements ports.DNSRepository.
 func (r *PostgresRepository) GetRecord(ctx context.Context, id string, zoneID string, tenantID string) (*domain.Record, error) {
 	query := `
 		SELECT r.id, r.zone_id, r.name, r.type, r.content, r.ttl, r.priority, r.weight, r.port, r.network,
@@ -252,6 +258,7 @@ func (r *PostgresRepository) GetRecord(ctx context.Context, id string, zoneID st
 	return &rec, nil
 }
 
+// ListRecordsForZone implements ports.DNSRepository.
 func (r *PostgresRepository) ListRecordsForZone(ctx context.Context, zoneID string, tenantID string) ([]domain.Record, error) {
 	query := `
 		SELECT r.id, r.zone_id, r.name, r.type, r.content, r.ttl, r.priority, r.weight, r.port, r.network,
@@ -312,6 +319,7 @@ func (r *PostgresRepository) ListRecordsForZone(ctx context.Context, zoneID stri
 	return records, nil
 }
 
+// CreateZone implements ports.DNSRepository.
 func (r *PostgresRepository) CreateZone(ctx context.Context, zone *domain.Zone) error {
 	query := `INSERT INTO dns_zones (id, tenant_id, name, vpc_id, description, role, master_server, created_at, updated_at) 
 			  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
@@ -319,6 +327,7 @@ func (r *PostgresRepository) CreateZone(ctx context.Context, zone *domain.Zone) 
 	return err
 }
 
+// CreateZoneWithRecords implements ports.DNSRepository.
 func (r *PostgresRepository) CreateZoneWithRecords(ctx context.Context, zone *domain.Zone, records []domain.Record) error {
 	tx, errTx := r.db.BeginTx(ctx, nil)
 	if errTx != nil {
@@ -351,6 +360,7 @@ func (r *PostgresRepository) CreateZoneWithRecords(ctx context.Context, zone *do
 	return tx.Commit()
 }
 
+// CreateRecord implements ports.DNSRepository.
 func (r *PostgresRepository) CreateRecord(ctx context.Context, record *domain.Record) error {
 	healthType := record.HealthCheckType
 	if healthType == "" {
@@ -362,6 +372,7 @@ func (r *PostgresRepository) CreateRecord(ctx context.Context, record *domain.Re
 	return err
 }
 
+// UpdateRecordHealth implements ports.DNSRepository.
 func (r *PostgresRepository) UpdateRecordHealth(ctx context.Context, recordID string, status domain.HealthStatus, errMsg string) error {
 	query := `
 		INSERT INTO record_health (record_id, status, last_check, error_message)
@@ -372,6 +383,7 @@ func (r *PostgresRepository) UpdateRecordHealth(ctx context.Context, recordID st
 	return err
 }
 
+// GetRecordsToProbe implements ports.DNSRepository.
 func (r *PostgresRepository) GetRecordsToProbe(ctx context.Context) ([]domain.Record, error) {
 	query := `SELECT id, zone_id, name, type, content, ttl, priority, weight, port, network, health_check_type, health_check_target 
 	          FROM dns_records 
@@ -416,6 +428,7 @@ func (r *PostgresRepository) GetRecordsToProbe(ctx context.Context) ([]domain.Re
 	return records, nil
 }
 
+// BatchCreateRecords implements ports.DNSRepository.
 func (r *PostgresRepository) BatchCreateRecords(ctx context.Context, records []domain.Record) error {
 	if len(records) == 0 {
 		return nil
@@ -464,6 +477,7 @@ func (r *PostgresRepository) BatchCreateRecords(ctx context.Context, records []d
 	return tx.Commit()
 }
 
+// ListZones implements ports.DNSRepository.
 func (r *PostgresRepository) ListZones(ctx context.Context, tenantID string) ([]domain.Zone, error) {
 	query := `SELECT id, tenant_id, name, vpc_id, description, role, master_server, created_at, updated_at FROM dns_zones`
 	var rows *sql.Rows
@@ -508,12 +522,14 @@ func (r *PostgresRepository) ListZones(ctx context.Context, tenantID string) ([]
 	return zones, nil
 }
 
+// DeleteZone implements ports.DNSRepository.
 func (r *PostgresRepository) DeleteZone(ctx context.Context, zoneID string, tenantID string) error {
 	query := `DELETE FROM dns_zones WHERE id = $1 AND tenant_id = $2`
 	_, err := r.db.ExecContext(ctx, query, zoneID, tenantID)
 	return err
 }
 
+// DeleteRecord implements ports.DNSRepository.
 func (r *PostgresRepository) DeleteRecord(ctx context.Context, recordID string, zoneID string, tenantID string) error {
 	query := `
 		DELETE FROM dns_records 
@@ -524,30 +540,35 @@ func (r *PostgresRepository) DeleteRecord(ctx context.Context, recordID string, 
 	return err
 }
 
+// DeleteRecordsByNameAndType implements ports.DNSRepository.
 func (r *PostgresRepository) DeleteRecordsByNameAndType(ctx context.Context, zoneID string, name string, qType domain.RecordType) error {
 	query := `DELETE FROM dns_records WHERE zone_id = $1 AND LOWER(name) = LOWER($2) AND type = $3`
 	_, err := r.db.ExecContext(ctx, query, zoneID, name, string(qType))
 	return err
 }
 
+// DeleteRecordsByName implements ports.DNSRepository.
 func (r *PostgresRepository) DeleteRecordsByName(ctx context.Context, zoneID string, name string) error {
 	query := `DELETE FROM dns_records WHERE zone_id = $1 AND LOWER(name) = LOWER($2)`
 	_, err := r.db.ExecContext(ctx, query, zoneID, name)
 	return err
 }
 
+// DeleteRecordsForZone implements ports.DNSRepository.
 func (r *PostgresRepository) DeleteRecordsForZone(ctx context.Context, zoneID string) error {
 	query := `DELETE FROM dns_records WHERE zone_id = $1`
 	_, err := r.db.ExecContext(ctx, query, zoneID)
 	return err
 }
 
+// DeleteRecordSpecific implements ports.DNSRepository.
 func (r *PostgresRepository) DeleteRecordSpecific(ctx context.Context, zoneID string, name string, qType domain.RecordType, content string) error {
 	query := `DELETE FROM dns_records WHERE zone_id = $1 AND LOWER(name) = LOWER($2) AND type = $3 AND content = $4`
 	_, err := r.db.ExecContext(ctx, query, zoneID, name, string(qType), content)
 	return err
 }
 
+// RecordZoneChange implements ports.DNSRepository.
 func (r *PostgresRepository) RecordZoneChange(ctx context.Context, change *domain.ZoneChange) error {
 	query := `INSERT INTO dns_zone_changes (id, zone_id, serial, action, name, type, content, ttl, priority, weight, port, created_at) 
 			  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
@@ -555,6 +576,7 @@ func (r *PostgresRepository) RecordZoneChange(ctx context.Context, change *domai
 	return err
 }
 
+// ListZoneChanges implements ports.DNSRepository.
 func (r *PostgresRepository) ListZoneChanges(ctx context.Context, zoneID string, fromSerial uint32) ([]domain.ZoneChange, error) {
 	query := `SELECT id, zone_id, serial, action, name, type, content, ttl, priority, weight, port, created_at 
 	          FROM dns_zone_changes WHERE zone_id = $1 AND serial > $2 ORDER BY serial ASC, created_at ASC`
@@ -597,6 +619,7 @@ func (r *PostgresRepository) ListZoneChanges(ctx context.Context, zoneID string,
 	return changes, nil
 }
 
+// GetIXFRChain implements ports.DNSRepository.
 func (r *PostgresRepository) GetIXFRChain(ctx context.Context, zoneID string, fromSerial uint32, toSerial uint32) ([]domain.IXFRChunk, error) {
 	if fromSerial >= toSerial {
 		return nil, nil // No changes needed
@@ -652,6 +675,7 @@ func (r *PostgresRepository) GetIXFRChain(ctx context.Context, zoneID string, fr
 	return result, nil
 }
 
+// SaveAuditLog implements ports.DNSRepository.
 func (r *PostgresRepository) SaveAuditLog(ctx context.Context, log *domain.AuditLog) error {
 	query := `INSERT INTO audit_logs (id, tenant_id, action, resource_type, resource_id, details, created_at) 
 			  VALUES ($1, $2, $3, $4, $5, $6, $7)`
@@ -659,6 +683,7 @@ func (r *PostgresRepository) SaveAuditLog(ctx context.Context, log *domain.Audit
 	return err
 }
 
+// GetAuditLogs implements ports.DNSRepository.
 func (r *PostgresRepository) GetAuditLogs(ctx context.Context, tenantID string) ([]domain.AuditLog, error) {
 	query := `SELECT id, tenant_id, action, resource_type, resource_id, details, created_at FROM audit_logs WHERE tenant_id = $1 ORDER BY created_at DESC`
 	rows, errQuery := r.db.QueryContext(ctx, query, tenantID)
@@ -687,6 +712,7 @@ func (r *PostgresRepository) GetAuditLogs(ctx context.Context, tenantID string) 
 	return logs, nil
 }
 
+// ApplyZoneUpdate implements ports.DNSRepository.
 func (r *PostgresRepository) ApplyZoneUpdate(ctx context.Context, zoneID string, operations []domain.UpdateOperation, newSerial uint32, changes []domain.ZoneChange) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -740,10 +766,12 @@ func (r *PostgresRepository) ApplyZoneUpdate(ctx context.Context, zoneID string,
 	return tx.Commit()
 }
 
+// Ping implements ports.DNSRepository.
 func (r *PostgresRepository) Ping(ctx context.Context) error {
 	return r.db.PingContext(ctx)
 }
 
+// CreateKey implements ports.DNSRepository.
 func (r *PostgresRepository) CreateKey(ctx context.Context, key *domain.DNSSECKey) error {
 	query := `INSERT INTO dnssec_keys (id, zone_id, key_type, algorithm, private_key, public_key, active, created_at, updated_at) 
 			  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
@@ -751,6 +779,7 @@ func (r *PostgresRepository) CreateKey(ctx context.Context, key *domain.DNSSECKe
 	return err
 }
 
+// ListKeysForZone implements ports.DNSRepository.
 func (r *PostgresRepository) ListKeysForZone(ctx context.Context, zoneID string) ([]domain.DNSSECKey, error) {
 	query := `SELECT id, zone_id, key_type, algorithm, private_key, public_key, active, created_at, updated_at FROM dnssec_keys WHERE zone_id = $1`
 	rows, errQuery := r.db.QueryContext(ctx, query, zoneID)
@@ -779,12 +808,14 @@ func (r *PostgresRepository) ListKeysForZone(ctx context.Context, zoneID string)
 	return keys, nil
 }
 
+// UpdateKey implements ports.DNSRepository.
 func (r *PostgresRepository) UpdateKey(ctx context.Context, key *domain.DNSSECKey) error {
 	query := `UPDATE dnssec_keys SET active = $1, updated_at = $2 WHERE id = $3`
 	_, err := r.db.ExecContext(ctx, query, key.Active, key.UpdatedAt, key.ID)
 	return err
 }
 
+// GetAPIKeyByHash implements ports.DNSRepository.
 func (r *PostgresRepository) GetAPIKeyByHash(ctx context.Context, keyHash string) (*domain.APIKey, error) {
 	query := `SELECT id, tenant_id, name, key_hash, key_prefix, role, active, created_at, expires_at 
 	          FROM api_keys WHERE key_hash = $1`
@@ -798,6 +829,7 @@ func (r *PostgresRepository) GetAPIKeyByHash(ctx context.Context, keyHash string
 	return &k, err
 }
 
+// CreateAPIKey implements ports.DNSRepository.
 func (r *PostgresRepository) CreateAPIKey(ctx context.Context, key *domain.APIKey) error {
 	query := `INSERT INTO api_keys (id, tenant_id, name, key_hash, key_prefix, role, active, created_at, expires_at) 
 	          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
@@ -807,6 +839,7 @@ func (r *PostgresRepository) CreateAPIKey(ctx context.Context, key *domain.APIKe
 	return err
 }
 
+// ListAPIKeys implements ports.DNSRepository.
 func (r *PostgresRepository) ListAPIKeys(ctx context.Context, tenantID string) ([]domain.APIKey, error) {
 	query := `SELECT id, tenant_id, name, key_hash, key_prefix, role, active, created_at, expires_at 
 	          FROM api_keys WHERE tenant_id = $1`
@@ -834,6 +867,7 @@ func (r *PostgresRepository) ListAPIKeys(ctx context.Context, tenantID string) (
 	return keys, nil
 }
 
+// DeleteAPIKey implements ports.DNSRepository.
 func (r *PostgresRepository) DeleteAPIKey(ctx context.Context, tenantID string, id string) error {
 	query := `DELETE FROM api_keys WHERE tenant_id = $1 AND id = $2`
 	_, err := r.db.ExecContext(ctx, query, tenantID, id)

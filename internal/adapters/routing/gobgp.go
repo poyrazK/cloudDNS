@@ -1,3 +1,5 @@
+// Package routing provides BGP routing integration for anycast
+// DNS deployments using GoBGP.
 package routing
 
 import (

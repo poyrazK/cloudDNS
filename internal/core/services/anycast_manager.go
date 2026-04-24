@@ -10,6 +10,7 @@ import (
 	"github.com/poyrazK/cloudDNS/internal/infrastructure/metrics"
 )
 
+// AnycastManager manages anycast VIP assignment and BGP routing.
 type AnycastManager struct {
 	dnsSvc      ports.DNSService
 	routing     ports.RoutingEngine
@@ -21,6 +22,7 @@ type AnycastManager struct {
 	vipBound    atomic.Bool
 }
 
+// NewAnycastManager creates a new AnycastManager for the given VIP and routing engine.
 func NewAnycastManager(
 	dnsSvc ports.DNSService,
 	routing ports.RoutingEngine,
@@ -42,6 +44,7 @@ func NewAnycastManager(
 	}
 }
 
+// Start begins the anycast manager background worker.
 func (m *AnycastManager) Start(ctx context.Context) {
 	m.logger.Info("starting anycast manager", "vip", m.vip, "iface", m.iface)
 	
@@ -55,7 +58,7 @@ func (m *AnycastManager) Start(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			m.logger.Info("shutting down anycast manager, withdrawing route")
-			if err := m.routing.Withdraw(context.Background(), m.vip); err != nil {
+			if err := m.routing.Withdraw(ctx, m.vip); err != nil {
 				m.logger.Error("failed to withdraw BGP on shutdown", "error", err, "vip", m.vip)
 			}
 			metrics.BGPAnnounced.Set(0)

@@ -1,3 +1,5 @@
+// clouddns-bench is a benchmarking tool for DNS server performance.
+// It measures query throughput, latency, and error rates.
 package main
 
 import (
@@ -385,7 +387,7 @@ func (g *goCommand) Run() error {
 	return g.cmd.Run()
 }
 
-var runCommand func(string, ...string) commandRunner = func(name string, args ...string) commandRunner {
+var runCommand = func(name string, args ...string) commandRunner {
 	return &goCommand{cmd: exec.Command(name, args...)}
 }
 

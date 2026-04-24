@@ -1,3 +1,5 @@
+// Package metrics provides Prometheus metrics collection and
+// exposition for DNS server monitoring.
 package metrics
 
 import (

@@ -136,7 +136,7 @@ func CanonicalWireMarshal(r *DNSRecord, buf *BytePacketBuffer) error {
 	case TXT:
 		// TXT: length prefix followed by ASCII bytes
 		for _, chunk := range stringsToChunks(r.Txt) {
-			if err := buf.Write(byte(len(chunk))); err != nil {
+			if err := buf.WriteUint8(len(chunk)); err != nil {
 				return err
 			}
 			if err := writeBytes(buf, []byte(chunk)); err != nil {
@@ -419,7 +419,7 @@ func writeCanonicalRData(r *DNSRecord, buf *BytePacketBuffer) error {
 		return buf.WriteName(strings.ToLower(r.Host))
 	case TXT:
 		for _, chunk := range stringsToChunks(r.Txt) {
-			if err := buf.Write(byte(len(chunk))); err != nil {
+			if err := buf.WriteUint8(len(chunk)); err != nil {
 				return err
 			}
 			if err := writeBytes(buf, []byte(chunk)); err != nil {
@@ -597,12 +597,12 @@ func ValidateNSEC3RecordFormat(nsec3 DNSRecord) error {
 
 // nsec3Base32Alphabet is a case-insensitive RFC 5155 Base32 alphabet map,
 // built once from nsec3Base32Map in nsec3.go to avoid duplication.
-var nsec3Base32Alphabet = (func() map[byte]int {
-	m := make(map[byte]int, len(nsec3Base32Map)*2)
+var nsec3Base32Alphabet = (func() map[byte]uint8 {
+	m := make(map[byte]uint8, len(nsec3Base32Map)*2)
 	for i := range nsec3Base32Map {
 		c := nsec3Base32Map[i]
-		m[c] = i
-		m[c-'a'+'A'] = i // accept uppercase
+		m[c] = uint8(i)
+		m[c-'a'+'A'] = uint8(i) // accept uppercase
 	}
 	return m
 })()
@@ -613,7 +613,7 @@ var nsec3Base32Alphabet = (func() map[byte]int {
 func base32Decode(encoded string) ([]byte, error) {
 	var result []byte
 	var buffer uint32
-	var bits uint8
+	var validBits uint8
 
 	for i := range encoded {
 		c := encoded[i]
@@ -621,12 +621,15 @@ func base32Decode(encoded string) ([]byte, error) {
 		if !ok {
 			return nil, errors.New("dnssec: invalid base32 character")
 		}
+		// Add 5 bits from this character to the buffer
 		buffer = (buffer << 5) | uint32(val)
-		bits += 5
-		if bits >= 8 {
-			bits -= 8
-			result = append(result, byte(buffer>>bits))
-			buffer &= (1 << bits) - 1
+		validBits += 5
+		// Emit as many complete bytes as we have
+		for validBits >= 8 {
+			validBits -= 8
+			shift := validBits
+			// Mask with 0xFF to explicitly constrain to [0,255] for gosec G115
+			result = append(result, byte((buffer>>shift)&0xFF))
 		}
 	}
 

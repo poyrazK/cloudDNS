@@ -267,7 +267,7 @@ func writeSignCanonicalRData(r *DNSRecord, buf *BytePacketBuffer) error {
 		return buf.WriteName(strings.ToLower(r.Host))
 	case TXT:
 		for _, chunk := range stringsToChunks(r.Txt) {
-			if err := buf.Write(byte(len(chunk))); err != nil {
+			if err := buf.WriteUint8(len(chunk)); err != nil {
 				return err
 			}
 			if err := writeBytes(buf, []byte(chunk)); err != nil {

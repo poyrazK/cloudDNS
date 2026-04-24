@@ -2,6 +2,7 @@
 package services
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/poyrazK/cloudDNS/internal/dns/packet"
@@ -168,28 +169,28 @@ func (v *DNSSECValidator) ValidateRRSet(rrset, rrsigs, dnskeys []packet.DNSRecor
 	// Verify the signature
 	valid, err := packet.VerifyRRSet(rrset, *rrsig, *dnskey, now)
 	if err != nil {
-		switch err {
-		case packet.ErrSignatureExpired:
+		switch {
+		case errors.Is(err, packet.ErrSignatureExpired):
 			return ValidationResult{
 				Valid: false,
 				EDE:   &EDE{Code: EDECodeSignatureExpired, Info: "signature-expired"},
 			}
-		case packet.ErrSignatureNotYetValid:
+		case errors.Is(err, packet.ErrSignatureNotYetValid):
 			return ValidationResult{
 				Valid: false,
 				EDE:   &EDE{Code: EDECodeSignatureNotYetValid, Info: "signature-not-yet-valid"},
 			}
-		case packet.ErrKeyTagMismatch:
+		case errors.Is(err, packet.ErrKeyTagMismatch):
 			return ValidationResult{
 				Valid: false,
 				EDE:   &EDE{Code: EDECodeBogus, Info: "key-tag-mismatch"},
 			}
-		case packet.ErrAlgorithmMismatch:
+		case errors.Is(err, packet.ErrAlgorithmMismatch):
 			return ValidationResult{
 				Valid: false,
 				EDE:   &EDE{Code: EDECodeUnsupportedDNSKEYAlgo, Info: "algorithm-mismatch"},
 			}
-		case packet.ErrInvalidSignature:
+		case errors.Is(err, packet.ErrInvalidSignature):
 			return ValidationResult{
 				Valid: false,
 				EDE:   &EDE{Code: EDECodeBogus, Info: "invalid-signature"},
@@ -259,7 +260,7 @@ type ChainLink struct {
 // ValidateChain validates the full DNSSEC trust chain from a leaf zone to a trust anchor.
 // It verifies that each zone's DNSKEY is valid according to its DS record,
 // and that DS records are properly signed up the chain to the trust anchor.
-func (v *DNSSECValidator) ValidateChain(chain []ChainLink, now uint32) error {
+func (v *DNSSECValidator) ValidateChain(chain []ChainLink, _ uint32) error {
 	if len(chain) == 0 {
 		return fmt.Errorf("dnssec: empty chain")
 	}
@@ -361,28 +362,28 @@ func (v *DNSSECValidator) ValidateWithTrustAnchor(zone string, rrset, rrsigs, dn
 	// Verify using trust anchor DNSKEY
 	valid, err := packet.VerifyRRSet(rrset, *rrsig, *trustDNSKEY, now)
 	if err != nil {
-		switch err {
-		case packet.ErrSignatureExpired:
+		switch {
+		case errors.Is(err, packet.ErrSignatureExpired):
 			return ValidationResult{
 				Valid: false,
 				EDE:   &EDE{Code: EDECodeSignatureExpired, Info: "signature-expired"},
 			}
-		case packet.ErrSignatureNotYetValid:
+		case errors.Is(err, packet.ErrSignatureNotYetValid):
 			return ValidationResult{
 				Valid: false,
 				EDE:   &EDE{Code: EDECodeSignatureNotYetValid, Info: "signature-not-yet-valid"},
 			}
-		case packet.ErrKeyTagMismatch:
+		case errors.Is(err, packet.ErrKeyTagMismatch):
 			return ValidationResult{
 				Valid: false,
 				EDE:   &EDE{Code: EDECodeBogus, Info: "key-tag-mismatch"},
 			}
-		case packet.ErrAlgorithmMismatch:
+		case errors.Is(err, packet.ErrAlgorithmMismatch):
 			return ValidationResult{
 				Valid: false,
 				EDE:   &EDE{Code: EDECodeUnsupportedDNSKEYAlgo, Info: "algorithm-mismatch"},
 			}
-		case packet.ErrInvalidSignature:
+		case errors.Is(err, packet.ErrInvalidSignature):
 			return ValidationResult{
 				Valid: false,
 				EDE:   &EDE{Code: EDECodeBogus, Info: "invalid-signature"},

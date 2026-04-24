@@ -35,7 +35,7 @@ func TestHandleIXFR_UpToDate(t *testing.T) {
 
 	// IXFR requires TCP
 	conn := &mockTCPConn{}
-	srv.handleIXFR(conn, req)
+	srv.handleIXFR(context.Background(), conn, req)
 
 	// Verify response: should just be the SOA
 	if len(conn.captured) != 1 {
@@ -81,7 +81,7 @@ func TestHandleIXFR_WithChanges(t *testing.T) {
 	})
 
 	conn := &mockTCPConn{}
-	srv.handleIXFR(conn, req)
+	srv.handleIXFR(context.Background(), conn, req)
 
 	// Sequence: [Current SOA] -> [Old SOA, Deletions] -> [New SOA, Additions] -> [Current SOA]
 	// Our stub implementation sends multiple responses
@@ -113,7 +113,7 @@ func TestHandleIXFR_MissingSOA(t *testing.T) {
 	})
 
 	conn := &mockTCPConn{}
-	srv.handleIXFR(conn, req)
+	srv.handleIXFR(context.Background(), conn, req)
 
 	if len(conn.captured) != 1 {
 		t.Fatalf("expected exactly 1 TCP response for missing SOA IXFR, got %d", len(conn.captured))
@@ -139,7 +139,7 @@ func TestHandleIXFR_NoAuthoritySOA(t *testing.T) {
 	// Missing SOA in Authority Section
 
 	conn := &mockTCPConn{}
-	srv.handleIXFR(conn, req)
+	srv.handleIXFR(context.Background(), conn, req)
 
 	if len(conn.captured) != 1 {
 		t.Fatalf("expected exactly 1 TCP response for malformed IXFR (no authority SOA), got %d", len(conn.captured))
@@ -165,7 +165,7 @@ func TestHandleIXFR_ZoneNotFound(t *testing.T) {
 	})
 
 	conn := &mockTCPConn{}
-	srv.handleIXFR(conn, req)
+	srv.handleIXFR(context.Background(), conn, req)
 
 	if len(conn.captured) != 1 {
 		t.Fatalf("expected exactly 1 TCP response for unknown zone IXFR, got %d", len(conn.captured))
@@ -206,7 +206,7 @@ func TestHandleIXFR_InvalidSOA(t *testing.T) {
 			})
 
 			conn := &mockTCPConn{}
-			srv.handleIXFR(conn, req)
+			srv.handleIXFR(context.Background(), conn, req)
 
 			if len(conn.captured) != 1 {
 				t.Fatalf("Expected exactly 1 SERVFAIL response for invalid SOA, got %d", len(conn.captured))
@@ -246,7 +246,7 @@ func TestHandleIXFR_GapInHistoryFallback(t *testing.T) {
 	})
 
 	conn := &mockTCPConn{}
-	srv.handleIXFR(conn, req)
+	srv.handleIXFR(context.Background(), conn, req)
 
 	// Should fallback to AXFR. AXFR sequence: SOA, then all records, then SOA.
 	// records: SOA, www.gap.test., new.gap.test.
@@ -324,7 +324,7 @@ func TestHandleIXFR_ListRecordsErrors(t *testing.T) {
 			})
 
 			conn := &mockTCPConn{}
-			srv.handleIXFR(conn, req)
+			srv.handleIXFR(context.Background(), conn, req)
 
 			if len(conn.captured) != 1 {
 				t.Fatalf("Expected exactly 1 SERVFAIL response for list records failure, got %d", len(conn.captured))

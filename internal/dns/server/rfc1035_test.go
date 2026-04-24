@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net"
 	"testing"
 
@@ -25,7 +26,7 @@ func TestRFC1035_MessageCompression(t *testing.T) {
 	_ = req.Write(reqBuf)
 
 	var capturedResp []byte
-	_ = srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 53}, func(resp []byte) error {
+	_ = srv.handlePacket(context.Background(),reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 53}, func(resp []byte) error {
 		capturedResp = resp
 		return nil
 	}, "udp")
@@ -66,7 +67,7 @@ func TestRFC1035_ResponseFormat(t *testing.T) {
 	_ = req.Write(reqBuf)
 
 	var capturedResp []byte
-	_ = srv.handlePacket(reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 53}, func(resp []byte) error {
+	_ = srv.handlePacket(context.Background(),reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 53}, func(resp []byte) error {
 		capturedResp = resp
 		return nil
 	}, "udp")
@@ -117,7 +118,7 @@ func TestRFC1035_AXFR(t *testing.T) {
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "axfr.test.", QType: packet.AXFR})
 	
 	// Handle AXFR in background
-	go srv.handleAXFR(serverConn, req)
+	go srv.handleAXFR(context.Background(), serverConn, req)
 
 	// Read stream: RFC 1035 requires SOA first and SOA last
 	// We expect: SOA, NS, A, SOA (4 packets)
@@ -165,7 +166,7 @@ func TestHandleAXFR_ErrorPaths(t *testing.T) {
 	req.Header.ID = 1
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "missing.zone.", QType: packet.AXFR})
 	
-	srv.handleAXFR(conn, req)
+	srv.handleAXFR(context.Background(), conn, req)
 	if len(conn.captured) != 1 {
 		t.Errorf("Expected NXDOMAIN response")
 	}
@@ -174,7 +175,7 @@ func TestHandleAXFR_ErrorPaths(t *testing.T) {
 	repo.zones = append(repo.zones, domain.Zone{ID: "z1", Name: "nosoa.zone."})
 	req.Questions[0].Name = "nosoa.zone."
 	conn.captured = nil
-	srv.handleAXFR(conn, req)
+	srv.handleAXFR(context.Background(), conn, req)
 	if len(conn.captured) != 1 {
 		t.Errorf("Expected SERVFAIL response")
 	}

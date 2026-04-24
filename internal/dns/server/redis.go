@@ -9,12 +9,15 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// InvalidationChannel is the Redis pub/sub channel for cache invalidation events.
 const InvalidationChannel = "dns:invalidation"
 
+// RedisCache implements a DNS cache backed by Redis.
 type RedisCache struct {
 	client *redis.Client
 }
 
+// NewRedisCache creates a new Redis cache client.
 func NewRedisCache(addr string, password string, db int) *RedisCache {
 	rdb := redis.NewClient(&redis.Options{
 		Addr:     addr,
@@ -24,6 +27,7 @@ func NewRedisCache(addr string, password string, db int) *RedisCache {
 	return &RedisCache{client: rdb}
 }
 
+// Get retrieves a cached DNS response by key.
 func (r *RedisCache) Get(ctx context.Context, key string) ([]byte, bool) {
 	val, err := r.client.Get(ctx, "dns:"+key).Bytes()
 	if err != nil {
@@ -32,10 +36,12 @@ func (r *RedisCache) Get(ctx context.Context, key string) ([]byte, bool) {
 	return val, true
 }
 
+// Set stores a DNS response in the cache with the given TTL.
 func (r *RedisCache) Set(ctx context.Context, key string, data []byte, ttl time.Duration) {
 	r.client.Set(ctx, "dns:"+key, data, ttl)
 }
 
+// Ping checks Redis connectivity.
 func (r *RedisCache) Ping(ctx context.Context) error {
 	return r.client.Ping(ctx).Err()
 }

@@ -15,7 +15,9 @@ type MockRoutingEngine struct {
 	FailWithdraw     bool
 }
 
+// Start implements ports.RoutingEngine for testing.
 func (m *MockRoutingEngine) Start(_ context.Context, _, _ uint32, _ string) error { return nil }
+// Announce implements ports.RoutingEngine for testing.
 func (m *MockRoutingEngine) Announce(_ context.Context, _ string) error {
 	m.AnnounceAttempts++
 	if m.FailAnnounce {
@@ -24,6 +26,7 @@ func (m *MockRoutingEngine) Announce(_ context.Context, _ string) error {
 	m.Announced = true
 	return nil
 }
+// Withdraw implements ports.RoutingEngine for testing.
 func (m *MockRoutingEngine) Withdraw(_ context.Context, _ string) error {
 	m.WithdrawAttempts++
 	if m.FailWithdraw {
@@ -33,6 +36,7 @@ func (m *MockRoutingEngine) Withdraw(_ context.Context, _ string) error {
 	m.WithdrawCount++
 	return nil
 }
+// Stop implements ports.RoutingEngine for testing.
 func (m *MockRoutingEngine) Stop() error { return nil }
 
 // MockVIPManager implements ports.VIPManager for testing.
@@ -41,6 +45,7 @@ type MockVIPManager struct {
 	FailBind bool
 }
 
+// Bind implements ports.VIPManager for testing.
 func (m *MockVIPManager) Bind(_ context.Context, _, _ string) error {
 	if m.FailBind {
 		return errors.New("bind failed")
@@ -48,6 +53,7 @@ func (m *MockVIPManager) Bind(_ context.Context, _, _ string) error {
 	m.Bound = true
 	return nil
 }
+// Unbind implements ports.VIPManager for testing.
 func (m *MockVIPManager) Unbind(_ context.Context, _, _ string) error {
 	m.Bound = false
 	return nil

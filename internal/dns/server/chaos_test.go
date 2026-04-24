@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"net"
 	"testing"
@@ -36,7 +37,7 @@ func TestChaos_SimulateDBLatency(t *testing.T) {
 	packet.PutBuffer(buf)
 
 	start := time.Now()
-	err = srv.handlePacket(data, &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
+	err = srv.handlePacket(context.Background(),data, &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}, func(resp []byte) error {
 		return nil
 	}, "udp")
 
@@ -70,7 +71,7 @@ func TestChaos_DBError_Query(t *testing.T) {
 	packet.PutBuffer(buf)
 
 	var responseData []byte
-	err = srv.handlePacket(data, "127.0.0.1:54321", func(resp []byte) error {
+	err = srv.handlePacket(context.Background(),data, "127.0.0.1:54321", func(resp []byte) error {
 		responseData = resp
 		return nil
 	}, "udp")
@@ -114,7 +115,7 @@ func TestChaos_DBError_Update(t *testing.T) {
 	packet.PutBuffer(buf)
 
 	var responseData []byte
-	err = srv.handlePacket(data, "127.0.0.1:54321", func(resp []byte) error {
+	err = srv.handlePacket(context.Background(),data, "127.0.0.1:54321", func(resp []byte) error {
 		responseData = resp
 		return nil
 	}, "udp")

@@ -109,7 +109,7 @@ func withTenant(req *http.Request, tenantID string) *http.Request {
 func TestRegisterRoutes(_ *testing.T) {
 	svc := &testutil.MockDNSService{}
 	repo := &testutil.MockRepo{}
-	handler := NewAPIHandler(svc, repo)
+	handler := New(svc, repo)
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
 	// No error means routes were registered correctly with new Go 1.22 patterns
@@ -118,7 +118,7 @@ func TestRegisterRoutes(_ *testing.T) {
 func TestHealthCheck(t *testing.T) {
 	svc := &testutil.MockDNSService{}
 	repo := &testutil.MockRepo{}
-	handler := NewAPIHandler(svc, repo)
+	handler := New(svc, repo)
 
 	req := httptest.NewRequest("GET", "/health", nil)
 	w := httptest.NewRecorder()
@@ -141,7 +141,7 @@ func TestHealthCheck(t *testing.T) {
 func TestHealthCheckDegraded(t *testing.T) {
 	svc := &testutil.MockDNSService{}
 	repo := &testutil.MockRepo{}
-	handler := NewAPIHandler(svc, repo)
+	handler := New(svc, repo)
 
 	req := httptest.NewRequest("GET", "/health", nil)
 	w := httptest.NewRecorder()
@@ -158,7 +158,7 @@ func TestHealthCheckDegraded(t *testing.T) {
 func TestCreateZoneBadRequest(t *testing.T) {
 	svc := &mockDNSService{}
 	repo := &testutil.MockRepo{}
-	handler := NewAPIHandler(svc, repo)
+	handler := New(svc, repo)
 
 	req := httptest.NewRequest("POST", zonesPath, bytes.NewBuffer([]byte("invalid json")))
 	req = withTenant(req, testTenantID)
@@ -174,7 +174,7 @@ func TestCreateZoneBadRequest(t *testing.T) {
 func TestCreateZoneInternalError(t *testing.T) {
 	svc := &mockDNSService{err: errors.New("db error")}
 	repo := &testutil.MockRepo{}
-	handler := NewAPIHandler(svc, repo)
+	handler := New(svc, repo)
 
 	zoneReq := domain.Zone{Name: "test.com."}
 	body, _ := json.Marshal(zoneReq)
@@ -192,7 +192,7 @@ func TestCreateZoneInternalError(t *testing.T) {
 func TestCreateZoneSuccess(t *testing.T) {
 	svc := &mockDNSService{}
 	repo := &testutil.MockRepo{}
-	handler := NewAPIHandler(svc, repo)
+	handler := New(svc, repo)
 
 	zoneReq := domain.Zone{Name: "test.com.", TenantID: testTenantID}
 	body, _ := json.Marshal(zoneReq)
@@ -211,7 +211,7 @@ func TestCreateZoneSuccess(t *testing.T) {
 func TestCreateZoneValidation(t *testing.T) {
 	svc := &mockDNSService{}
 	repo := &testutil.MockRepo{}
-	handler := NewAPIHandler(svc, repo)
+	handler := New(svc, repo)
 
 	tests := []struct {
 		name    string
@@ -245,7 +245,7 @@ func TestCreateZoneValidation(t *testing.T) {
 func TestListZonesInternalError(t *testing.T) {
 	svc := &mockDNSService{err: errors.New("db error")}
 	repo := &testutil.MockRepo{}
-	handler := NewAPIHandler(svc, repo)
+	handler := New(svc, repo)
 
 	req := httptest.NewRequest("GET", zonesPath, nil)
 	req = withTenant(req, testTenantID)
@@ -263,7 +263,7 @@ func TestListZonesSuccess(t *testing.T) {
 		zones: []domain.Zone{{ID: "1", Name: "z1.com", TenantID: testTenantID}},
 	}
 	repo := &testutil.MockRepo{}
-	handler := NewAPIHandler(svc, repo)
+	handler := New(svc, repo)
 
 	req := httptest.NewRequest("GET", zonesPath, nil)
 	req = withTenant(req, testTenantID)
@@ -279,7 +279,7 @@ func TestListZonesSuccess(t *testing.T) {
 func TestCreateRecordBadRequest(t *testing.T) {
 	svc := &mockDNSService{}
 	repo := &testutil.MockRepo{}
-	handler := NewAPIHandler(svc, repo)
+	handler := New(svc, repo)
 
 	req := httptest.NewRequest("POST", recordsPath, bytes.NewBuffer([]byte("!!")))
 	req = withTenant(req, testTenantID)
@@ -295,7 +295,7 @@ func TestCreateRecordBadRequest(t *testing.T) {
 func TestCreateRecordInternalError(t *testing.T) {
 	svc := &mockDNSService{err: errors.New("fail")}
 	repo := &testutil.MockRepo{}
-	handler := NewAPIHandler(svc, repo)
+	handler := New(svc, repo)
 
 	rec := domain.Record{Name: "www.test.com.", Type: domain.TypeA, Content: "1.2.3.4", TTL: 300}
 	body, _ := json.Marshal(rec)
@@ -315,7 +315,7 @@ func TestListRecordsForZoneSuccess(t *testing.T) {
 		records: []domain.Record{{ID: "r1", Name: "www"}},
 	}
 	repo := &testutil.MockRepo{}
-	handler := NewAPIHandler(svc, repo)
+	handler := New(svc, repo)
 
 	req := httptest.NewRequest("GET", recordsPath, nil)
 	req = withTenant(req, testTenantID)
@@ -331,7 +331,7 @@ func TestListRecordsForZoneSuccess(t *testing.T) {
 func TestListRecordsForZoneInternalError(t *testing.T) {
 	svc := &mockDNSService{err: errors.New("fail")}
 	repo := &testutil.MockRepo{}
-	handler := NewAPIHandler(svc, repo)
+	handler := New(svc, repo)
 
 	req := httptest.NewRequest("GET", recordsPath, nil)
 	req = withTenant(req, testTenantID)
@@ -347,7 +347,7 @@ func TestListRecordsForZoneInternalError(t *testing.T) {
 func TestDeleteZoneInternalError(t *testing.T) {
 	svc := &mockDNSService{err: errors.New("fail")}
 	repo := &testutil.MockRepo{}
-	handler := NewAPIHandler(svc, repo)
+	handler := New(svc, repo)
 
 	req := httptest.NewRequest("DELETE", "/zones/z1", nil)
 	req = withTenant(req, testTenantID)
@@ -363,7 +363,7 @@ func TestDeleteZoneInternalError(t *testing.T) {
 func TestDeleteRecordInternalError(t *testing.T) {
 	svc := &mockDNSService{err: errors.New("fail")}
 	repo := &testutil.MockRepo{}
-	handler := NewAPIHandler(svc, repo)
+	handler := New(svc, repo)
 
 	req := httptest.NewRequest("DELETE", "/zones/z1/records/r1", nil)
 	req = withTenant(req, testTenantID)
@@ -379,7 +379,7 @@ func TestDeleteRecordInternalError(t *testing.T) {
 func TestListAuditLogsSuccess(t *testing.T) {
 	svc := &mockDNSService{}
 	repo := &testutil.MockRepo{}
-	handler := NewAPIHandler(svc, repo)
+	handler := New(svc, repo)
 
 	req := httptest.NewRequest("GET", "/audit", nil)
 	req = withTenant(req, testTenantID)
@@ -395,7 +395,7 @@ func TestListAuditLogsSuccess(t *testing.T) {
 func TestListAuditLogsInternalError(t *testing.T) {
 	svc := &mockDNSService{err: errors.New("fail")}
 	repo := &testutil.MockRepo{}
-	handler := NewAPIHandler(svc, repo)
+	handler := New(svc, repo)
 
 	req := httptest.NewRequest("GET", "/audit", nil)
 	req = withTenant(req, testTenantID)
@@ -411,7 +411,7 @@ func TestListAuditLogsInternalError(t *testing.T) {
 func TestCreateRecordSuccess(t *testing.T) {
 	svc := &mockDNSService{}
 	repo := &testutil.MockRepo{}
-	handler := NewAPIHandler(svc, repo)
+	handler := New(svc, repo)
 
 	rec := domain.Record{Name: "www.test.com.", Type: domain.TypeA, Content: "1.2.3.4", TTL: 300}
 	body, _ := json.Marshal(rec)
@@ -429,7 +429,7 @@ func TestCreateRecordSuccess(t *testing.T) {
 func TestCreateRecordValidation(t *testing.T) {
 	svc := &mockDNSService{}
 	repo := &testutil.MockRepo{}
-	handler := NewAPIHandler(svc, repo)
+	handler := New(svc, repo)
 
 	tests := []struct {
 		name    string
@@ -458,7 +458,7 @@ func TestCreateRecordValidation(t *testing.T) {
 func TestDeleteZoneSuccess(t *testing.T) {
 	svc := &mockDNSService{}
 	repo := &testutil.MockRepo{}
-	handler := NewAPIHandler(svc, repo)
+	handler := New(svc, repo)
 
 	req := httptest.NewRequest("DELETE", "/zones/z1", nil)
 	req = withTenant(req, testTenantID)
@@ -474,7 +474,7 @@ func TestDeleteZoneSuccess(t *testing.T) {
 func TestDeleteRecordSuccess(t *testing.T) {
 	svc := &mockDNSService{}
 	repo := &testutil.MockRepo{}
-	handler := NewAPIHandler(svc, repo)
+	handler := New(svc, repo)
 
 	req := httptest.NewRequest("DELETE", "/zones/z1/records/r1", nil)
 	req = withTenant(req, testTenantID)
@@ -490,7 +490,7 @@ func TestDeleteRecordSuccess(t *testing.T) {
 func TestUnauthorizedAccess(t *testing.T) {
 	svc := &mockDNSService{}
 	repo := &testutil.MockRepo{}
-	handler := NewAPIHandler(svc, repo)
+	handler := New(svc, repo)
 
 	endpoints := []struct {
 		name   string
@@ -528,7 +528,7 @@ func TestUnauthorizedAccess(t *testing.T) {
 func TestMetrics(t *testing.T) {
 	svc := &mockDNSService{}
 	repo := &testutil.MockRepo{}
-	handler := NewAPIHandler(svc, repo)
+	handler := New(svc, repo)
 
 	req := httptest.NewRequest("GET", "/metrics", nil)
 	w := httptest.NewRecorder()

@@ -252,6 +252,23 @@ func (b *BytePacketBuffer) Write(val byte) error {
 	return nil
 }
 
+// WriteUint8 writes a uint8 value, constraining an int to [0,255] explicitly.
+// This avoids G115 integer overflow warnings when converting int lengths to bytes.
+func (b *BytePacketBuffer) WriteUint8(val int) error {
+	if b.Pos >= MaxPacketSize {
+		return errors.New("end of buffer")
+	}
+	if val < 0 || val > 255 {
+		return errors.New("value out of range for uint8")
+	}
+	b.Buf[b.Pos] = byte(val)
+	b.Pos++
+	if b.Pos > b.Len {
+		b.Len = b.Pos
+	}
+	return nil
+}
+
 // Writeu16 writes a uint16
 func (b *BytePacketBuffer) Writeu16(val uint16) error {
 	if b.Pos+2 > MaxPacketSize {
@@ -272,8 +289,8 @@ func (b *BytePacketBuffer) Writeu32(val uint32) error {
 		return errors.New("end of buffer")
 	}
 	b.Buf[b.Pos] = byte(val >> 24)
-	b.Buf[b.Pos+1] = byte(val >> 16)
-	b.Buf[b.Pos+2] = byte(val >> 8)
+	b.Buf[b.Pos+1] = byte((val >> 16) & 0xFF)
+	b.Buf[b.Pos+2] = byte((val >> 8) & 0xFF)
 	b.Buf[b.Pos+3] = byte(val & 0xFF)
 	b.Pos += 4
 	if b.Pos > b.Len {
@@ -302,7 +319,9 @@ func (b *BytePacketBuffer) WriteName(name string) error {
 		if b.HasNames {
 			lower := strings.ToLower(curr)
 			if pos, ok := b.names[lower]; ok {
-				return b.Writeu16(uint16(pos) | 0xC000) // #nosec G115
+				// Compression pointer: high bits 11, low bits are offset
+				offset := uint16(0xC000) | uint16(pos&0x3FFF)
+				return b.Writeu16(offset)
 			}
 			if b.Pos < 0x4000 {
 				b.names[lower] = b.Pos
@@ -319,7 +338,7 @@ func (b *BytePacketBuffer) WriteName(name string) error {
 			return errors.New("label too long")
 		}
 		if len(label) > 0 {
-			if err := b.Write(byte(len(label))); err != nil {
+			if err := b.WriteUint8(len(label)); err != nil {
 				return err
 			}
 			for i := 0; i < len(label); i++ {
@@ -358,7 +377,7 @@ func (b *BytePacketBuffer) WriteNameUncompressed(name string) error {
 			return errors.New("label too long")
 		}
 		if len(label) > 0 {
-			if err := b.Write(byte(len(label))); err != nil {
+			if err := b.WriteUint8(len(label)); err != nil {
 				return err
 			}
 			for i := 0; i < len(label); i++ {

@@ -34,18 +34,24 @@ const (
 type HealthCheckType string
 
 const (
+	// HealthCheckNone means no health checking is performed.
 	HealthCheckNone HealthCheckType = "NONE"
+	// HealthCheckHTTP uses HTTP GET for health checks.
 	HealthCheckHTTP HealthCheckType = "HTTP"
-	HealthCheckTCP  HealthCheckType = "TCP"
+	// HealthCheckTCP uses TCP connection for health checks.
+	HealthCheckTCP HealthCheckType = "TCP"
 )
 
 // HealthStatus represents the current health state of a record endpoint.
 type HealthStatus string
 
 const (
-	HealthStatusHealthy   HealthStatus = "HEALTHY"
+	// HealthStatusHealthy indicates the endpoint is healthy.
+	HealthStatusHealthy HealthStatus = "HEALTHY"
+	// HealthStatusUnhealthy indicates the endpoint is unhealthy.
 	HealthStatusUnhealthy HealthStatus = "UNHEALTHY"
-	HealthStatusUnknown   HealthStatus = "UNKNOWN"
+	// HealthStatusUnknown indicates the health check result is unknown.
+	HealthStatusUnknown HealthStatus = "UNKNOWN"
 )
 
 // Zone represents a DNS zone.
