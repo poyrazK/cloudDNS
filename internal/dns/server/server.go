@@ -112,7 +112,7 @@ func NewServer(addr string, repo ports.DNSRepository, logger *slog.Logger) *Serv
 		WorkerCount:      runtime.NumCPU() * 32, // High concurrency tuning
 		udpQueue:         make(chan udpTask, 50000),
 		Logger:           logger,
-		limiter:          newRateLimiter(500000, 200000),
+		limiter:          newRateLimiter(500000, 200000, 1000000),
 		TsigKeys:         make(map[string][]byte),
 		NodeID:           nodeID,
 		RecursionEnabled: recursion,

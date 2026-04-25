@@ -1,12 +1,13 @@
 package server
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
 
 func TestRateLimiter(t *testing.T) {
-	rl := newRateLimiter(10, 5) // 10 tokens/sec, burst 5
+	rl := newRateLimiter(10, 5, 100) // 10 tokens/sec, burst 5, max 100 buckets
 	ip := "1.2.3.4"
 
 	// 1. Initial burst
@@ -29,7 +30,7 @@ func TestRateLimiter(t *testing.T) {
 }
 
 func TestRateLimiter_Isolation(t *testing.T) {
-	rl := newRateLimiter(10, 1)
+	rl := newRateLimiter(10, 1, 100)
 	ip1 := "1.1.1.1"
 	ip2 := "2.2.2.2"
 
@@ -46,9 +47,9 @@ func TestRateLimiter_Isolation(t *testing.T) {
 }
 
 func TestRateLimiter_Cleanup(t *testing.T) {
-	rl := newRateLimiter(10, 5)
+	rl := newRateLimiter(10, 5, 100)
 	rl.Allow("old.ip")
-	
+
 	// Force old timestamp
 	rl.mu.Lock()
 	rl.buckets["old.ip"].last = time.Now().Add(-20 * time.Minute)
@@ -62,5 +63,37 @@ func TestRateLimiter_Cleanup(t *testing.T) {
 
 	if exists {
 		t.Errorf("Old bucket should have been cleaned up")
+	}
+}
+
+func TestRateLimiter_MaxBuckets(t *testing.T) {
+	// Create limiter with max 5 buckets
+	rl := newRateLimiter(10, 1, 5)
+
+	// Add 5 different IPs
+	for i := 0; i < 5; i++ {
+		ip := fmt.Sprintf("1.2.3.%d", i)
+		if !rl.Allow(ip) {
+			t.Errorf("Should allow IP %s", ip)
+		}
+	}
+
+	rl.mu.Lock()
+	bucketCount := len(rl.buckets)
+	rl.mu.Unlock()
+
+	if bucketCount != 5 {
+		t.Errorf("Expected 5 buckets, got %d", bucketCount)
+	}
+
+	// 6th IP should evict an existing bucket
+	rl.Allow("new.ip")
+
+	rl.mu.Lock()
+	bucketCount = len(rl.buckets)
+	rl.mu.Unlock()
+
+	if bucketCount != 5 {
+		t.Errorf("Should still have 5 buckets after eviction, got %d", bucketCount)
 	}
 }
