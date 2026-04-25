@@ -66,7 +66,7 @@ func TestHandleIXFR_NoAuthority(t *testing.T) {
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "test.", QType: packet.IXFR})
 	
 	// No Authority section
-	srv.handleIXFR(context.Background(), &mockConn{}, req)
+	srv.handleIXFR(context.Background(), &mockConn{}, req, nil)
 }
 
 type mockConn struct {

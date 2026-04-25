@@ -1013,7 +1013,7 @@ func TestHandleAXFR_ConvertError(t *testing.T) {
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "axfr-fail.test.", QType: packet.AXFR})
 
 	conn := &mockTCPConn{}
-	srv.handleAXFR(context.Background(), conn, req)
+	srv.handleAXFR(context.Background(), conn, req, nil)
 
 	if len(conn.captured) < 2 {
 		t.Errorf("Expected at least 2 records (Start SOA and End SOA)")
@@ -1080,7 +1080,7 @@ func TestHandleAXFR_NoSOA(t *testing.T) {
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "nosoa.test.", QType: packet.AXFR})
 
 	conn := &mockTCPConn{}
-	srv.handleAXFR(context.Background(), conn, req)
+	srv.handleAXFR(context.Background(), conn, req, nil)
 
 	if len(conn.captured) != 1 {
 		t.Fatalf("Expected 1 error packet, got %d", len(conn.captured))

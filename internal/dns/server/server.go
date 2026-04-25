@@ -531,12 +531,12 @@ func (s *Server) handleTCPConnection(ctx context.Context, conn net.Conn) {
 		request := packet.NewDNSPacket()
 		if errFromBuf := request.FromBuffer(reqBuffer); errFromBuf == nil && len(request.Questions) > 0 {
 			if request.Questions[0].QType == packet.AXFR {
-				s.handleAXFR(ctx, conn, request)
+				s.handleAXFR(ctx, conn, request, data)
 				packet.PutBuffer(reqBuffer)
 				continue
 			}
 			if request.Questions[0].QType == packet.IXFR {
-				s.handleIXFR(ctx, conn, request)
+				s.handleIXFR(ctx, conn, request, data)
 				packet.PutBuffer(reqBuffer)
 				continue
 			}
@@ -554,10 +554,26 @@ func (s *Server) handleTCPConnection(ctx context.Context, conn net.Conn) {
 	}
 }
 
-func (s *Server) handleAXFR(ctx context.Context, conn net.Conn, request *packet.DNSPacket) {
+func (s *Server) handleAXFR(ctx context.Context, conn net.Conn, request *packet.DNSPacket, rawData []byte) {
 	q := request.Questions[0]
 	if !strings.HasSuffix(q.Name, ".") {
 		q.Name += "."
+	}
+
+	// Validate TSIG if present
+	if request.TSIGStart != -1 {
+		tsig := request.Resources[len(request.Resources)-1]
+		secret, ok := s.TsigKeys[tsig.Name]
+		if !ok {
+			s.Logger.Warn("AXFR failed: unknown TSIG key", "key", tsig.Name, "zone", q.Name)
+			s.sendTCPError(conn, request.Header.ID, 5) // NotAuth
+			return
+		}
+		if errVerify := request.VerifyTSIG(rawData, request.TSIGStart, secret); errVerify != nil {
+			s.Logger.Warn("AXFR failed: TSIG verification failed", "error", errVerify, "zone", q.Name)
+			s.sendTCPError(conn, request.Header.ID, 5) // NotAuth
+			return
+		}
 	}
 
 	zone, _ := s.Repo.GetZone(ctx, q.Name)
@@ -1299,10 +1315,26 @@ func (s *Server) handleUpdate(ctx context.Context, request *packet.DNSPacket, ra
 	return s.sendUpdateResponse(response, sendFn)
 }
 
-func (s *Server) handleIXFR(ctx context.Context, conn net.Conn, request *packet.DNSPacket) {
+func (s *Server) handleIXFR(ctx context.Context, conn net.Conn, request *packet.DNSPacket, rawData []byte) {
 	q := request.Questions[0]
 	if !strings.HasSuffix(q.Name, ".") {
 		q.Name += "."
+	}
+
+	// Validate TSIG if present
+	if request.TSIGStart != -1 {
+		tsig := request.Resources[len(request.Resources)-1]
+		secret, ok := s.TsigKeys[tsig.Name]
+		if !ok {
+			s.Logger.Warn("IXFR failed: unknown TSIG key", "key", tsig.Name, "zone", q.Name)
+			s.sendTCPError(conn, request.Header.ID, 5) // NotAuth
+			return
+		}
+		if errVerify := request.VerifyTSIG(rawData, request.TSIGStart, secret); errVerify != nil {
+			s.Logger.Warn("IXFR failed: TSIG verification failed", "error", errVerify, "zone", q.Name)
+			s.sendTCPError(conn, request.Header.ID, 5) // NotAuth
+			return
+		}
 	}
 
 	// RFC 1995: The client's current SOA is in the Authority section
