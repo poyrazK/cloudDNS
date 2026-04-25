@@ -7,11 +7,11 @@ import (
 
 // rateLimiter implements a simple per-IP token bucket
 type rateLimiter struct {
-	mu        sync.Mutex
-	buckets   map[string]*bucket
-	rate      float64 // tokens per second
-	burst     int     // max tokens
-	maxBuckets int   // maximum buckets to store (bounds memory)
+	mu         sync.Mutex
+	buckets    map[string]*bucket
+	rate       float64 // tokens per second
+	burst      int     // max tokens
+	maxBuckets int     // maximum buckets to store (bounds memory)
 }
 
 type bucket struct {
@@ -21,9 +21,9 @@ type bucket struct {
 
 func newRateLimiter(rate float64, burst int, maxBuckets int) *rateLimiter {
 	return &rateLimiter{
-		buckets:   make(map[string]*bucket),
-		rate:      rate,
-		burst:     burst,
+		buckets:    make(map[string]*bucket),
+		rate:       rate,
+		burst:      burst,
 		maxBuckets: maxBuckets,
 	}
 }
@@ -65,21 +65,30 @@ func (rl *rateLimiter) Allow(ip string) bool {
 }
 
 // evictIdleBucket removes a bucket that hasn't been used recently.
-// Returns the IP of the evicted bucket, or "" if none could be evicted.
-func (rl *rateLimiter) evictIdleBucket() string {
+// Performs a bounded scan of up to 8 entries to find an idle bucket.
+func (rl *rateLimiter) evictIdleBucket() {
 	now := time.Now()
+	found := -1
+	foundIP := ""
+	count := 0
 	for ip, b := range rl.buckets {
 		if now.Sub(b.last) > 1*time.Minute {
 			delete(rl.buckets, ip)
-			return ip
+			return
+		}
+		if found == -1 {
+			found = count
+			foundIP = ip
+		}
+		count++
+		if count >= 8 {
+			break
 		}
 	}
-	// If all are active recently, just evict a random one
-	for ip := range rl.buckets {
-		delete(rl.buckets, ip)
-		return ip
+	// If no idle bucket found, evict the first candidate
+	if foundIP != "" {
+		delete(rl.buckets, foundIP)
 	}
-	return ""
 }
 
 // Cleanup removes old buckets to prevent memory leaks.

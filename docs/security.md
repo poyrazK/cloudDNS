@@ -36,4 +36,4 @@ DNSSEC validation is supported with ECDSA P-256 (NSEC3) signatures. See [dnssec.
 
 ## API Authentication
 
-The REST API uses SHA-256 hashed API keys with role-based access control (admin, writer, reader). See [docs/decisions/0004-api-authentication-and-rbac.md](docs/decisions/0004-api-authentication-and-rbac.md).
+The REST API uses SHA-256 hashed API keys with role-based access control (admin, writer, reader). See [decisions/0004-api-authentication-and-rbac.md](decisions/0004-api-authentication-and-rbac.md).

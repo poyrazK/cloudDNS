@@ -86,13 +86,27 @@ func TestRateLimiter_MaxBuckets(t *testing.T) {
 		t.Errorf("Expected 5 buckets, got %d", bucketCount)
 	}
 
-	// 6th IP should evict an existing bucket
+	// Backdate one bucket to force idle eviction path
+	rl.mu.Lock()
+	rl.buckets["1.2.3.0"].last = time.Now().Add(-2 * time.Minute)
+	rl.mu.Unlock()
+
+	// 6th IP should evict the backdated idle bucket
 	rl.Allow("new.ip")
 
 	rl.mu.Lock()
+	_, exists0 := rl.buckets["1.2.3.0"]
+	_, exists4 := rl.buckets["1.2.3.4"]
 	bucketCount = len(rl.buckets)
 	rl.mu.Unlock()
 
+	if exists0 {
+		t.Errorf("Idle bucket 1.2.3.0 should have been evicted")
+	}
+	// Last recently-used bucket should remain
+	if !exists4 {
+		t.Errorf("Recently used bucket 1.2.3.4 should still exist")
+	}
 	if bucketCount != 5 {
 		t.Errorf("Should still have 5 buckets after eviction, got %d", bucketCount)
 	}
