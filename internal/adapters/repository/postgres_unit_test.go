@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 	"time"
@@ -533,7 +534,7 @@ func TestPostgresRepository_Extra_Unit(t *testing.T) {
 
 		t.Run("OperationError", func(t *testing.T) {
 			mock.ExpectBegin()
-			mock.ExpectQuery("SELECT content FROM dns_records").WillReturnError(errors.New("no SOA"))
+			mock.ExpectQuery("SELECT content FROM dns_records").WillReturnError(sql.ErrNoRows)
 			mock.ExpectExec("DELETE FROM dns_records").WillReturnError(errors.New("delete fail"))
 			mock.ExpectRollback()
 			_, err := repo.ApplyZoneUpdate(ctx, "z1", []domain.UpdateOperation{{Action: domain.ActionDeleteAll, Record: domain.Record{Name: "test"}}}, nil)
@@ -542,7 +543,7 @@ func TestPostgresRepository_Extra_Unit(t *testing.T) {
 
 		t.Run("CommitError", func(t *testing.T) {
 			mock.ExpectBegin()
-			mock.ExpectQuery("SELECT content FROM dns_records").WillReturnError(errors.New("no SOA"))
+			mock.ExpectQuery("SELECT content FROM dns_records").WillReturnError(sql.ErrNoRows)
 			mock.ExpectCommit().WillReturnError(errors.New("commit fail"))
 			_, err := repo.ApplyZoneUpdate(ctx, "z1", nil, nil)
 			if err == nil { t.Error("expected error") }
