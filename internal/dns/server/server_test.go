@@ -30,6 +30,7 @@ type mockServerRepo struct {
 	failListZones        bool
 	failCreateKey        bool
 	failListRecords      bool
+	failListRecordsStreaming bool
 	failCreateRecord     bool
 	failDeleteRecord     bool
 	failRecordZoneChange bool
@@ -158,6 +159,9 @@ func (m *mockServerRepo) ListRecordsForZone(ctx context.Context, zoneID string, 
 }
 
 func (m *mockServerRepo) ListRecordsForZoneStreaming(ctx context.Context, zoneID string, tenantID string) (ports.RecordIterator, error) {
+	if m.failListRecordsStreaming {
+		return nil, errors.New("list records streaming failed")
+	}
 	records, err := m.ListRecordsForZone(ctx, zoneID, tenantID)
 	if err != nil {
 		return nil, err
@@ -183,6 +187,9 @@ func (it *sliceRecordIterator) Err() error {
 }
 
 func (it *sliceRecordIterator) Record() domain.Record {
+	if it.index < 1 || it.index > len(it.records) {
+		return domain.Record{}
+	}
 	return it.records[it.index-1]
 }
 
@@ -1086,6 +1093,35 @@ func TestHandleAXFR_NoSOA(t *testing.T) {
 		t.Fatalf("Expected 1 error packet, got %d", len(conn.captured))
 	}
 	
+	res := packet.NewDNSPacket()
+	pb := packet.NewBytePacketBuffer()
+	pb.Load(conn.captured[0])
+	_ = res.FromBuffer(pb)
+	if res.Header.ResCode != packet.RcodeServFail {
+		t.Errorf("Expected SERVFAIL (2), got %d", res.Header.ResCode)
+	}
+}
+
+func TestHandleAXFR_StreamingError(t *testing.T) {
+	repo := &mockServerRepo{
+		zones: []domain.Zone{{ID: "z1", Name: "stream-fail.test."}},
+		records: []domain.Record{
+			{ZoneID: "z1", Name: "stream-fail.test.", Type: domain.TypeSOA, Content: "ns1. ns2. 1 2 3 4 5"},
+		},
+		failListRecordsStreaming: true,
+	}
+	srv := NewServer(":0", repo, nil)
+
+	req := packet.NewDNSPacket()
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "stream-fail.test.", QType: packet.AXFR})
+
+	conn := &mockTCPConn{}
+	srv.handleAXFR(context.Background(), conn, req, nil)
+
+	if len(conn.captured) != 1 {
+		t.Fatalf("Expected 1 error packet, got %d", len(conn.captured))
+	}
+
 	res := packet.NewDNSPacket()
 	pb := packet.NewBytePacketBuffer()
 	pb.Load(conn.captured[0])
