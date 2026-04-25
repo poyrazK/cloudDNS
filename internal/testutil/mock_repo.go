@@ -169,9 +169,9 @@ func (m *MockRepo) Ping(_ context.Context) error {
 }
 
 // ApplyZoneUpdate implements ports.DNSRepository for testing.
-func (m *MockRepo) ApplyZoneUpdate(_ context.Context, zoneID string, operations []domain.UpdateOperation, newSerial uint32, changes []domain.ZoneChange) error {
-	args := m.Called(zoneID, operations, newSerial, changes)
-	return args.Error(0)
+func (m *MockRepo) ApplyZoneUpdate(_ context.Context, zoneID string, operations []domain.UpdateOperation, changes []domain.ZoneChange) (uint32, error) {
+	args := m.Called(zoneID, operations, changes)
+	return args.Get(0).(uint32), args.Error(1)
 }
 
 // CreateKey implements ports.DNSRepository for testing.

@@ -804,16 +804,36 @@ func (r *PostgresRepository) GetAuditLogs(ctx context.Context, tenantID string) 
 }
 
 // ApplyZoneUpdate implements ports.DNSRepository.
-func (r *PostgresRepository) ApplyZoneUpdate(ctx context.Context, zoneID string, operations []domain.UpdateOperation, newSerial uint32, changes []domain.ZoneChange) error {
+// It fetches the current SOA serial inside the transaction and increments it atomically
+// only if all operations succeed. Returns the new serial.
+func (r *PostgresRepository) ApplyZoneUpdate(ctx context.Context, zoneID string, operations []domain.UpdateOperation, changes []domain.ZoneChange) (uint32, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer func() {
 		if errRollback := tx.Rollback(); errRollback != nil && !errors.Is(errRollback, sql.ErrTxDone) {
 			log.Printf("failed to rollback transaction: %v", errRollback)
 		}
 	}()
+
+	// Fetch current SOA serial inside the transaction
+	var currentSerial uint32
+	soaQuery := `SELECT content FROM dns_records WHERE zone_id = $1 AND type = 'SOA' LIMIT 1`
+	var soaContent string
+	err = tx.QueryRowContext(ctx, soaQuery, zoneID).Scan(&soaContent)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return 0, fmt.Errorf("failed to fetch SOA: %w", err)
+	}
+	if err == nil {
+		parts := strings.Fields(soaContent)
+		if len(parts) >= 3 {
+			if _, parseErr := fmt.Sscanf(parts[2], "%d", &currentSerial); parseErr != nil {
+				return 0, fmt.Errorf("failed to parse SOA serial: %w", parseErr)
+			}
+		}
+	}
+	newSerial := currentSerial + 1
 
 	for _, op := range operations {
 		switch op.Action {
@@ -840,21 +860,24 @@ func (r *PostgresRepository) ApplyZoneUpdate(ctx context.Context, zoneID string,
 		}
 
 		if err != nil {
-			return fmt.Errorf("failed to apply operation %s: %w", op.Action, err)
+			return 0, fmt.Errorf("failed to apply operation %s: %w", op.Action, err)
 		}
 	}
 
 	// Record historical changes for IXFR
 	for _, change := range changes {
-		query := `INSERT INTO dns_zone_changes (id, zone_id, serial, action, name, type, content, ttl, priority, weight, port, created_at) 
+		query := `INSERT INTO dns_zone_changes (id, zone_id, serial, action, name, type, content, ttl, priority, weight, port, created_at)
 				  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
 		_, err = tx.ExecContext(ctx, query, change.ID, change.ZoneID, newSerial, change.Action, change.Name, string(change.Type), change.Content, change.TTL, change.Priority, change.Weight, change.Port, change.CreatedAt)
 		if err != nil {
-			return fmt.Errorf("failed to record zone change: %w", err)
+			return 0, fmt.Errorf("failed to record zone change: %w", err)
 		}
 	}
 
-	return tx.Commit()
+	if errCommit := tx.Commit(); errCommit != nil {
+		return 0, errCommit
+	}
+	return newSerial, nil
 }
 
 // Ping implements ports.DNSRepository.

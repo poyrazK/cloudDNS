@@ -1202,7 +1202,6 @@ func (s *Server) handleUpdate(ctx context.Context, request *packet.DNSPacket, ra
 	}
 
 	// 3. Prepare Updates (UPCOUNT)
-	var newSerial uint32
 	operations := make([]domain.UpdateOperation, 0, len(request.Authorities))
 	changes := make([]domain.ZoneChange, 0, len(request.Authorities))
 
@@ -1219,71 +1218,10 @@ func (s *Server) handleUpdate(ctx context.Context, request *packet.DNSPacket, ra
 
 	// 4. Handle Serial Increment and Atomic Apply
 	if len(changes) > 0 {
-		soaRecords, err := s.Repo.GetRecords(ctx, dbZone.Name, domain.TypeSOA, "")
-		if err == nil && len(soaRecords) > 0 {
-			oldSOA := soaRecords[0]
-			parts := strings.Fields(oldSOA.Content)
-			if len(parts) >= 3 {
-				var currentSerial uint32
-				if _, errParse := fmt.Sscanf(parts[2], "%d", &currentSerial); errParse == nil {
-					newSerial = currentSerial + 1
-					parts[2] = fmt.Sprintf("%d", newSerial)
-					newSOAContent := strings.Join(parts, " ")
-					updatedSOA := oldSOA
-					updatedSOA.Content = newSOAContent
-					updatedSOA.UpdatedAt = time.Now()
-
-					// Add SOA changes to atomic transaction
-					// 1. Delete Old SOA from historical log
-					changes = append([]domain.ZoneChange{{
-						ID:        fmt.Sprintf("%d-soa-old", time.Now().UnixNano()),
-						ZoneID:    dbZone.ID,
-						Action:    "DELETE",
-						Name:      oldSOA.Name,
-						Type:      domain.TypeSOA,
-						Content:   oldSOA.Content,
-						TTL:       oldSOA.TTL,
-						CreatedAt: time.Now(),
-					}}, changes...)
-
-					// 2. Add New SOA to historical log
-					changes = append(changes, domain.ZoneChange{
-						ID:        fmt.Sprintf("%d-soa-new", time.Now().UnixNano()),
-						ZoneID:    dbZone.ID,
-						Action:    "ADD",
-						Name:      updatedSOA.Name,
-						Type:      domain.TypeSOA,
-						Content:   newSOAContent,
-						TTL:       updatedSOA.TTL,
-						CreatedAt: time.Now(),
-					})
-
-					// 3. Add SOA updates to operations
-					operations = append(operations, domain.UpdateOperation{
-						Action: domain.ActionDeleteSpecific,
-						Record: oldSOA,
-					}, domain.UpdateOperation{
-						Action: domain.ActionAdd,
-						Record: updatedSOA,
-					})
-				} else {
-					s.Logger.Error("failed to parse SOA serial during update", "zone", dbZone.Name, "error", errParse)
-					response.Header.ResCode = packet.RcodeServFail
-					return s.sendUpdateResponse(response, sendFn)
-				}
-			} else {
-				s.Logger.Error("failed to process SOA for update: malformed content", "zone", dbZone.Name)
-				response.Header.ResCode = packet.RcodeServFail
-				return s.sendUpdateResponse(response, sendFn)
-			}
-		} else if err != nil {
-			s.Logger.Error("failed to fetch SOA for update", "zone", dbZone.Name, "error", err)
-			response.Header.ResCode = packet.RcodeServFail
-			return s.sendUpdateResponse(response, sendFn)
-		}
-
 		// Apply everything in a single transaction
-		if errApply := s.Repo.ApplyZoneUpdate(ctx, dbZone.ID, operations, newSerial, changes); errApply != nil {
+		// Repository fetches current SOA serial inside the tx and increments atomically
+		newSerial, errApply := s.Repo.ApplyZoneUpdate(ctx, dbZone.ID, operations, changes)
+		if errApply != nil {
 			s.Logger.Error("atomic update failed", "zone", dbZone.Name, "error", errApply)
 			response.Header.ResCode = packet.RcodeServFail
 			return s.sendUpdateResponse(response, sendFn)

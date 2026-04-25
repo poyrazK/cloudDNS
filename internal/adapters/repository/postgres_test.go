@@ -101,6 +101,16 @@ func TestPostgresRepository_IXFR_And_Updates(t *testing.T) {
 		t.Fatalf("CreateZone failed: %v", err)
 	}
 
+	// Create SOA record so ApplyZoneUpdate can fetch and increment serial
+	soa := domain.Record{
+		ID: "550e8400-e29b-41d4-a716-446655440099", ZoneID: zID, Name: "ixfr.test.",
+		Type: domain.TypeSOA, Content: "ns1.clouddns.io. admin.clouddns.io. 1 3600 600 1209600 300",
+		TTL: 300,
+	}
+	if err := repo.CreateRecord(ctx, &soa); err != nil {
+		t.Fatalf("CreateRecord SOA failed: %v", err)
+	}
+
 	// 2. Initial Records
 	rec1 := domain.Record{
 		ID: "550e8400-e29b-41d4-a716-446655440012", ZoneID: zID, Name: "www.ixfr.test.", 
@@ -129,7 +139,7 @@ func TestPostgresRepository_IXFR_And_Updates(t *testing.T) {
 		{ID: "550e8400-e29b-41d4-a716-446655440015", ZoneID: zID, Action: "DELETE", Name: "www.ixfr.test.", Type: domain.TypeA, CreatedAt: time.Now()},
 	}
 
-	if err := repo.ApplyZoneUpdate(ctx, zID, []domain.UpdateOperation{opAdd, opDel}, 2, changes); err != nil {
+	if _, err := repo.ApplyZoneUpdate(ctx, zID, []domain.UpdateOperation{opAdd, opDel}, changes); err != nil {
 		t.Fatalf("ApplyZoneUpdate failed: %v", err)
 	}
 

@@ -184,8 +184,8 @@ func (m *mockRepo) GetIXFRChain(_ context.Context, _ string, _, _ uint32) ([]dom
 	return nil, m.err
 }
 
-func (m *mockRepo) ApplyZoneUpdate(_ context.Context, _ string, _ []domain.UpdateOperation, _ uint32, _ []domain.ZoneChange) error {
-	return m.err
+func (m *mockRepo) ApplyZoneUpdate(_ context.Context, _ string, _ []domain.UpdateOperation, _ []domain.ZoneChange) (uint32, error) {
+	return 0, m.err
 }
 
 func (m *mockRepo) SaveAuditLog(_ context.Context, _ *domain.AuditLog) error { return m.err }
