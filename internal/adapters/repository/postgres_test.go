@@ -103,7 +103,7 @@ func TestPostgresRepository_IXFR_And_Updates(t *testing.T) {
 
 	// Create SOA record so ApplyZoneUpdate can fetch and increment serial
 	soa := domain.Record{
-		ID: "soa-record-id", ZoneID: zID, Name: "ixfr.test.",
+		ID: "550e8400-e29b-41d4-a716-446655440099", ZoneID: zID, Name: "ixfr.test.",
 		Type: domain.TypeSOA, Content: "ns1.clouddns.io. admin.clouddns.io. 1 3600 600 1209600 300",
 		TTL: 300,
 	}
