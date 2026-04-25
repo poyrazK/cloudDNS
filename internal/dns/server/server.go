@@ -1116,6 +1116,13 @@ func (s *Server) handleNotify(ctx context.Context, request *packet.DNSPacket, cl
 	// Trigger async refresh if it's a slave zone
 	if !s.DisableAsync {
 		go func(zoneName string) {
+			select {
+			case <-ctx.Done():
+				return
+			case <-s.done:
+				return
+			default:
+			}
 			zone, err := s.Repo.GetZone(ctx, zoneName)
 			if err != nil {
 				s.Logger.Error("failed to fetch zone for notify refresh", "zone", zoneName, "error", err)
@@ -1807,6 +1814,13 @@ func (s *Server) prepareUpdate(zoneID string, up packet.DNSRecord) (domain.Updat
 }
 
 func (s *Server) notifySlaves(ctx context.Context, zoneName string) {
+	select {
+	case <-ctx.Done():
+		return
+	case <-s.done:
+		return
+	default:
+	}
 	dbZone, errZone := s.Repo.GetZone(ctx, zoneName)
 	if errZone != nil || dbZone == nil {
 		return
