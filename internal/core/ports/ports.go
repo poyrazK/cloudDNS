@@ -8,6 +8,14 @@ import (
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
 )
 
+// RecordIterator allows streaming access to records without full materialization.
+type RecordIterator interface {
+	Next() bool
+	Err() error
+	Record() domain.Record
+	Close() error
+}
+
 // DNSRepository defines the interface for DNS data persistence.
 type DNSRepository interface {
 	GetRecords(ctx context.Context, name string, qType domain.RecordType, clientIP string) ([]domain.Record, error)
@@ -15,6 +23,7 @@ type DNSRepository interface {
 	GetZone(ctx context.Context, name string) (*domain.Zone, error)
 	GetRecord(ctx context.Context, id string, zoneID string, tenantID string) (*domain.Record, error)
 	ListRecordsForZone(ctx context.Context, zoneID string, tenantID string) ([]domain.Record, error)
+	ListRecordsForZoneStreaming(ctx context.Context, zoneID string, tenantID string) (RecordIterator, error)
 	CreateZone(ctx context.Context, zone *domain.Zone) error
 	CreateZoneWithRecords(ctx context.Context, zone *domain.Zone, records []domain.Record) error
 	CreateRecord(ctx context.Context, record *domain.Record) error
