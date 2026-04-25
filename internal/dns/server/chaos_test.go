@@ -23,6 +23,7 @@ func TestChaos_SimulateDBLatency(t *testing.T) {
 	srv.SimulateDBLatency = baseLatency
 
 	mockRepo.On("GetZone", mock.Anything).Return(&domain.Zone{ID: "zone1", Name: "example.com."}, nil)
+	mockRepo.On("GetZoneLongestMatch", mock.Anything, mock.Anything).Return(&domain.Zone{ID: "zone1", Name: "example.com."}, nil)
 	mockRepo.On("GetRecords", mock.Anything, mock.Anything, mock.Anything).Return([]domain.Record{
 		{Name: "example.com.", Type: domain.TypeA, Content: "1.2.3.4", TTL: 300},
 	}, nil)
@@ -59,6 +60,7 @@ func TestChaos_DBError_Query(t *testing.T) {
 
 	// Simulate database connection failure during zone and records fetch
 	mockRepo.On("GetZone", mock.Anything).Return((*domain.Zone)(nil), errors.New("simulated db connection lost"))
+	mockRepo.On("GetZoneLongestMatch", mock.Anything, mock.Anything).Return((*domain.Zone)(nil), errors.New("simulated db connection lost"))
 	mockRepo.On("GetRecords", mock.Anything, mock.Anything, mock.Anything).Return(([]domain.Record)(nil), errors.New("simulated db connection lost"))
 
 	req := packet.NewDNSPacket()
@@ -98,6 +100,7 @@ func TestChaos_DBError_Update(t *testing.T) {
 
 	// Simulate zone exists, but prerequisite check fails because GetRecords throws a DB error
 	mockRepo.On("GetZone", mock.Anything).Return(&domain.Zone{ID: "zone1", Name: "update.test."}, nil)
+	mockRepo.On("GetZoneLongestMatch", mock.Anything, mock.Anything).Return(&domain.Zone{ID: "zone1", Name: "update.test."}, nil)
 	mockRepo.On("GetRecords", mock.Anything, mock.Anything, mock.Anything).Return(([]domain.Record)(nil), errors.New("db offline"))
 
 	req := packet.NewDNSPacket()

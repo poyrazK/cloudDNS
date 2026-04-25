@@ -133,6 +133,26 @@ func (m *mockServerRepo) GetZone(_ context.Context, name string) (*domain.Zone, 
 	return nil, nil
 }
 
+func (m *mockServerRepo) GetZoneLongestMatch(_ context.Context, qName string) (*domain.Zone, error) {
+	if m.failGetZone {
+		return nil, errors.New("get zone failed")
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	// Find longest matching zone
+	qNameClean := strings.TrimSuffix(strings.ToLower(qName), ".")
+	var bestMatch *domain.Zone
+	bestLen := 0
+	for _, z := range m.zones {
+		zName := strings.TrimSuffix(strings.ToLower(z.Name), ".")
+		if len(zName) > bestLen && strings.HasSuffix(qNameClean, "."+zName) {
+			bestMatch = &z
+			bestLen = len(zName)
+		}
+	}
+	return bestMatch, nil
+}
+
 func (m *mockServerRepo) GetRecord(ctx context.Context, id string, zoneID string, tenantID string) (*domain.Record, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

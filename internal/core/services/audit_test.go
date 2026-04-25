@@ -26,6 +26,10 @@ func (m *auditMockRepo) GetZone(ctx context.Context, name string) (*domain.Zone,
 	return m.mockRepo.GetZone(ctx, name)
 }
 
+func (m *auditMockRepo) GetZoneLongestMatch(ctx context.Context, qName string) (*domain.Zone, error) {
+	return m.mockRepo.GetZoneLongestMatch(ctx, qName)
+}
+
 func (m *auditMockRepo) ListRecordsForZone(ctx context.Context, zoneID string, tenantID string) ([]domain.Record, error) {
 	return m.mockRepo.ListRecordsForZone(ctx, zoneID, tenantID)
 }

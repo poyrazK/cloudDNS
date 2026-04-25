@@ -58,6 +58,58 @@ func TestPostgresRepository_Unit(t *testing.T) {
 		}
 	})
 
+	// 2b. Test GetZoneLongestMatch
+	t.Run("GetZoneLongestMatch", func(t *testing.T) {
+		// Test exact match
+		rows := sqlmock.NewRows([]string{"id", "tenant_id", "name", "vpc_id", "description", "role", "master_server", "created_at", "updated_at"}).
+			AddRow("z1", "t1", "example.com.", "", "", "master", "", time.Now(), time.Now())
+
+		mock.ExpectQuery(`SELECT .* FROM dns_zones WHERE LOWER\(\$1\) LIKE LOWER\(name\)`).
+			WithArgs("example.com.").
+			WillReturnRows(rows)
+
+		zone, err := repo.GetZoneLongestMatch(ctx, "example.com.")
+		if err != nil {
+			t.Errorf("GetZoneLongestMatch failed: %v", err)
+		}
+		if zone == nil || zone.ID != "z1" {
+			t.Errorf("Unexpected zone: %+v", zone)
+		}
+	})
+
+	// 2c. Test GetZoneLongestMatch subdomain
+	t.Run("GetZoneLongestMatch_Subdomain", func(t *testing.T) {
+		rows := sqlmock.NewRows([]string{"id", "tenant_id", "name", "vpc_id", "description", "role", "master_server", "created_at", "updated_at"}).
+			AddRow("z1", "t1", "example.com.", "", "", "master", "", time.Now(), time.Now())
+
+		mock.ExpectQuery(`SELECT .* FROM dns_zones WHERE LOWER\(\$1\) LIKE LOWER\(name\)`).
+			WithArgs("www.example.com.").
+			WillReturnRows(rows)
+
+		zone, err := repo.GetZoneLongestMatch(ctx, "www.example.com.")
+		if err != nil {
+			t.Errorf("GetZoneLongestMatch failed: %v", err)
+		}
+		if zone == nil || zone.Name != "example.com." {
+			t.Errorf("Unexpected zone: %+v", zone)
+		}
+	})
+
+	// 2d. Test GetZoneLongestMatch no match
+	t.Run("GetZoneLongestMatch_NoMatch", func(t *testing.T) {
+		mock.ExpectQuery(`SELECT .* FROM dns_zones WHERE LOWER\(\$1\) LIKE LOWER\(name\)`).
+			WithArgs("unknown.domain.").
+			WillReturnError(sql.ErrNoRows)
+
+		zone, err := repo.GetZoneLongestMatch(ctx, "unknown.domain.")
+		if err != nil {
+			t.Errorf("GetZoneLongestMatch should not error on no match: %v", err)
+		}
+		if zone != nil {
+			t.Errorf("Expected nil zone for unknown domain, got: %+v", zone)
+		}
+	})
+
 	// 3. Test CreateZone
 	t.Run("CreateZone", func(t *testing.T) {
 		zone := &domain.Zone{ID: "z2", Name: "new.test.", TenantID: "t1", Role: "master", MasterServer: ""}

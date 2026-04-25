@@ -36,6 +36,15 @@ func (m *MockRepo) GetZone(_ context.Context, name string) (*domain.Zone, error)
 	return args.Get(0).(*domain.Zone), args.Error(1)
 }
 
+// GetZoneLongestMatch implements ports.DNSRepository for testing.
+func (m *MockRepo) GetZoneLongestMatch(_ context.Context, qName string) (*domain.Zone, error) {
+	args := m.Called(qName)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*domain.Zone), args.Error(1)
+}
+
 // GetRecord implements ports.DNSRepository for testing.
 func (m *MockRepo) GetRecord(_ context.Context, id string, zoneID string, tenantID string) (*domain.Record, error) {
 	args := m.Called(id, zoneID, tenantID)

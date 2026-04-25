@@ -24,6 +24,7 @@ func (m *mockDNSSECRepo) GetIPsForName(_ context.Context, _ string, _ string) ([
 	return nil, nil
 }
 func (m *mockDNSSECRepo) GetZone(_ context.Context, _ string) (*domain.Zone, error) { return nil, nil }
+func (m *mockDNSSECRepo) GetZoneLongestMatch(_ context.Context, _ string) (*domain.Zone, error) { return nil, nil }
 func (m *mockDNSSECRepo) GetRecord(_ context.Context, _ string, _ string, _ string) (*domain.Record, error) {
 	return nil, nil
 }
