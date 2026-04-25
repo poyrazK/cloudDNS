@@ -11,13 +11,14 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"net"
 	"regexp"
 	"sort"
-	"net"
 	"strings"
 	"time"
 
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
+	"github.com/poyrazK/cloudDNS/internal/core/ports"
 	"github.com/poyrazK/cloudDNS/internal/dns/packet"
 )
 
@@ -317,6 +318,96 @@ func (r *PostgresRepository) ListRecordsForZone(ctx context.Context, zoneID stri
 	}
 
 	return records, nil
+}
+
+// postgresRecordIterator implements RecordIterator by streaming rows one at a time.
+type postgresRecordIterator struct {
+	rows           *sql.Rows
+	currentRecord  domain.Record
+	err            error
+}
+
+// Next advances the iterator and scans the next record.
+// Returns false when there are no more records or an error occurred.
+func (it *postgresRecordIterator) Next() bool {
+	if it.rows == nil {
+		return false
+	}
+	if !it.rows.Next() {
+		it.err = it.rows.Err()
+		return false
+	}
+	var rec domain.Record
+	var priority, weight, port sql.NullInt32
+	var hcType, hcTarget, hStatus sql.NullString
+	if errScan := it.rows.Scan(
+		&rec.ID, &rec.ZoneID, &rec.Name, &rec.Type, &rec.Content, &rec.TTL, &priority, &weight, &port, &rec.Network,
+		&hcType, &hcTarget, &hStatus,
+	); errScan != nil {
+		it.err = errScan
+		return false
+	}
+	if priority.Valid {
+		p := int(priority.Int32)
+		rec.Priority = &p
+	}
+	if weight.Valid {
+		w := int(weight.Int32)
+		rec.Weight = &w
+	}
+	if port.Valid {
+		p := int(port.Int32)
+		rec.Port = &p
+	}
+	if hcType.Valid {
+		rec.HealthCheckType = domain.HealthCheckType(hcType.String)
+	}
+	if hcTarget.Valid {
+		rec.HealthCheckTarget = hcTarget.String
+	}
+	if hStatus.Valid {
+		rec.HealthStatus = domain.HealthStatus(hStatus.String)
+	}
+	it.currentRecord = rec
+	return true
+}
+
+// Err returns any error that occurred during iteration.
+func (it *postgresRecordIterator) Err() error {
+	return it.err
+}
+
+// Record returns the current record.
+func (it *postgresRecordIterator) Record() domain.Record {
+	return it.currentRecord
+}
+
+// Close releases resources held by the iterator.
+func (it *postgresRecordIterator) Close() error {
+	if it.rows == nil {
+		return nil
+	}
+	closeErr := it.rows.Close()
+	if it.err != nil {
+		return it.err
+	}
+	return closeErr
+}
+
+// ListRecordsForZoneStreaming implements ports.DNSRepository.
+func (r *PostgresRepository) ListRecordsForZoneStreaming(ctx context.Context, zoneID string, tenantID string) (ports.RecordIterator, error) {
+	query := `
+		SELECT r.id, r.zone_id, r.name, r.type, r.content, r.ttl, r.priority, r.weight, r.port, r.network,
+		       r.health_check_type, r.health_check_target, COALESCE(h.status, 'UNKNOWN')
+		FROM dns_records r
+		JOIN dns_zones z ON r.zone_id = z.id
+		LEFT JOIN record_health h ON r.id = h.record_id
+		WHERE r.zone_id = $1 AND z.tenant_id = $2`
+	rows, errQuery := r.db.QueryContext(ctx, query, zoneID, tenantID)
+	if errQuery != nil {
+		return nil, errQuery
+	}
+	return &postgresRecordIterator{rows: rows}, nil
 }
 
 // CreateZone implements ports.DNSRepository.

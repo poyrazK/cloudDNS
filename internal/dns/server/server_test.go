@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
+	"github.com/poyrazK/cloudDNS/internal/core/ports"
 	"github.com/poyrazK/cloudDNS/internal/dns/packet"
 )
 
@@ -154,6 +155,39 @@ func (m *mockServerRepo) ListRecordsForZone(ctx context.Context, zoneID string, 
 		}
 	}
 	return res, nil
+}
+
+func (m *mockServerRepo) ListRecordsForZoneStreaming(ctx context.Context, zoneID string, tenantID string) (ports.RecordIterator, error) {
+	records, err := m.ListRecordsForZone(ctx, zoneID, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	return &sliceRecordIterator{records: records, index: 0}, nil
+}
+
+type sliceRecordIterator struct {
+	records []domain.Record
+	index   int
+}
+
+func (it *sliceRecordIterator) Next() bool {
+	if it.index >= len(it.records) {
+		return false
+	}
+	it.index++
+	return true
+}
+
+func (it *sliceRecordIterator) Err() error {
+	return nil
+}
+
+func (it *sliceRecordIterator) Record() domain.Record {
+	return it.records[it.index-1]
+}
+
+func (it *sliceRecordIterator) Close() error {
+	return nil
 }
 
 func (m *mockServerRepo) CreateZone(ctx context.Context, zone *domain.Zone) error {
