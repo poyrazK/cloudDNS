@@ -162,7 +162,7 @@ func (r *PostgresRepository) GetZone(ctx context.Context, name string) (*domain.
 func (r *PostgresRepository) GetZoneLongestMatch(ctx context.Context, qName string) (*domain.Zone, error) {
 	query := `SELECT id, tenant_id, name, vpc_id, description, role, master_server, created_at, updated_at
 		 FROM dns_zones
-		 WHERE $1 LIKE name || '%'
+		 WHERE LOWER($1) LIKE LOWER(name) || '%'
 		 ORDER BY LENGTH(name) DESC
 		 LIMIT 1`
 	var z domain.Zone
