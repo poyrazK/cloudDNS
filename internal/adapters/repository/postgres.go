@@ -156,6 +156,33 @@ func (r *PostgresRepository) GetZone(ctx context.Context, name string) (*domain.
 	return &z, nil
 }
 
+// GetZoneLongestMatch implements ports.DNSRepository.
+// Finds the longest-matching zone for a query name using a single query.
+// This replaces the N+1 label-traversal loop with one efficient query.
+func (r *PostgresRepository) GetZoneLongestMatch(ctx context.Context, qName string) (*domain.Zone, error) {
+	query := `SELECT id, tenant_id, name, vpc_id, description, role, master_server, created_at, updated_at
+		 FROM dns_zones
+		 WHERE $1 LIKE name || '%'
+		 ORDER BY LENGTH(name) DESC
+		 LIMIT 1`
+	var z domain.Zone
+	var role, masterServer sql.NullString
+	errRow := r.db.QueryRowContext(ctx, query, qName).Scan(&z.ID, &z.TenantID, &z.Name, &z.VPCID, &z.Description, &role, &masterServer, &z.CreatedAt, &z.UpdatedAt)
+	if errors.Is(errRow, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if errRow != nil {
+		return nil, errRow
+	}
+	if role.Valid {
+		z.Role = role.String
+	}
+	if masterServer.Valid {
+		z.MasterServer = masterServer.String
+	}
+	return &z, nil
+}
+
 // GetDNSKEYs implements ports.DNSRepository.
 func (r *PostgresRepository) GetDNSKEYs(ctx context.Context, zoneName string) ([]domain.Record, error) {
 	// First get the zone to find zone ID

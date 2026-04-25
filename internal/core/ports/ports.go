@@ -21,6 +21,7 @@ type DNSRepository interface {
 	GetRecords(ctx context.Context, name string, qType domain.RecordType, clientIP string) ([]domain.Record, error)
 	GetIPsForName(ctx context.Context, name string, clientIP string) ([]string, error)
 	GetZone(ctx context.Context, name string) (*domain.Zone, error)
+	GetZoneLongestMatch(ctx context.Context, qName string) (*domain.Zone, error)
 	GetRecord(ctx context.Context, id string, zoneID string, tenantID string) (*domain.Record, error)
 	ListRecordsForZone(ctx context.Context, zoneID string, tenantID string) ([]domain.Record, error)
 	ListRecordsForZoneStreaming(ctx context.Context, zoneID string, tenantID string) (RecordIterator, error)

@@ -896,20 +896,8 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 	}
 
 	// 1. Find the zone for this query to include Authority/Additional records
-	zoneName := q.Name
-	var zone *domain.Zone
-	for {
-		z, _ := s.Repo.GetZone(ctx, zoneName)
-		if z != nil {
-			zone = z
-			break
-		}
-		idx := strings.Index(zoneName, ".")
-		if idx == -1 || idx == len(zoneName)-1 {
-			break
-		}
-		zoneName = zoneName[idx+1:]
-	}
+	// Use single-query longest-match instead of N+1 label traversal
+	zone, _ := s.Repo.GetZoneLongestMatch(ctx, q.Name)
 
 	// 2. Resolve Main Records
 	dbStart := time.Now()

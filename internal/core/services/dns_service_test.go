@@ -55,6 +55,18 @@ func (m *mockRepo) GetZone(_ context.Context, name string) (*domain.Zone, error)
 	return nil, nil
 }
 
+func (m *mockRepo) GetZoneLongestMatch(_ context.Context, qName string) (*domain.Zone, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	for _, z := range m.zones {
+		if strings.HasSuffix(qName, z.Name) || qName == z.Name {
+			return &z, nil
+		}
+	}
+	return nil, nil
+}
+
 func (m *mockRepo) GetRecord(_ context.Context, id string, zoneID string, tenantID string) (*domain.Record, error) {
 	if m.err != nil {
 		return nil, m.err
