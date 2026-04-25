@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
+	"github.com/poyrazK/cloudDNS/internal/core/ports"
 	"github.com/stretchr/testify/mock"
 )
 
@@ -51,6 +52,15 @@ func (m *MockRepo) ListRecordsForZone(_ context.Context, zoneID string, tenantID
 		return nil, args.Error(1)
 	}
 	return args.Get(0).([]domain.Record), args.Error(1)
+}
+
+// ListRecordsForZoneStreaming implements ports.DNSRepository for testing.
+func (m *MockRepo) ListRecordsForZoneStreaming(_ context.Context, zoneID string, tenantID string) (ports.RecordIterator, error) {
+	args := m.Called(zoneID, tenantID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(ports.RecordIterator), args.Error(1)
 }
 
 // CreateZone implements ports.DNSRepository for testing.

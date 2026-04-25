@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
+	"github.com/poyrazK/cloudDNS/internal/core/ports"
 	"github.com/poyrazK/cloudDNS/internal/dns/packet"
 )
 
@@ -29,6 +30,7 @@ type mockServerRepo struct {
 	failListZones        bool
 	failCreateKey        bool
 	failListRecords      bool
+	failListRecordsStreaming bool
 	failCreateRecord     bool
 	failDeleteRecord     bool
 	failRecordZoneChange bool
@@ -154,6 +156,45 @@ func (m *mockServerRepo) ListRecordsForZone(ctx context.Context, zoneID string, 
 		}
 	}
 	return res, nil
+}
+
+func (m *mockServerRepo) ListRecordsForZoneStreaming(ctx context.Context, zoneID string, tenantID string) (ports.RecordIterator, error) {
+	if m.failListRecordsStreaming {
+		return nil, errors.New("list records streaming failed")
+	}
+	records, err := m.ListRecordsForZone(ctx, zoneID, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	return &sliceRecordIterator{records: records, index: 0}, nil
+}
+
+type sliceRecordIterator struct {
+	records []domain.Record
+	index   int
+}
+
+func (it *sliceRecordIterator) Next() bool {
+	if it.index >= len(it.records) {
+		return false
+	}
+	it.index++
+	return true
+}
+
+func (it *sliceRecordIterator) Err() error {
+	return nil
+}
+
+func (it *sliceRecordIterator) Record() domain.Record {
+	if it.index < 1 || it.index > len(it.records) {
+		return domain.Record{}
+	}
+	return it.records[it.index-1]
+}
+
+func (it *sliceRecordIterator) Close() error {
+	return nil
 }
 
 func (m *mockServerRepo) CreateZone(ctx context.Context, zone *domain.Zone) error {
@@ -979,7 +1020,7 @@ func TestHandleAXFR_ConvertError(t *testing.T) {
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "axfr-fail.test.", QType: packet.AXFR})
 
 	conn := &mockTCPConn{}
-	srv.handleAXFR(context.Background(), conn, req)
+	srv.handleAXFR(context.Background(), conn, req, nil)
 
 	if len(conn.captured) < 2 {
 		t.Errorf("Expected at least 2 records (Start SOA and End SOA)")
@@ -1046,7 +1087,7 @@ func TestHandleAXFR_NoSOA(t *testing.T) {
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "nosoa.test.", QType: packet.AXFR})
 
 	conn := &mockTCPConn{}
-	srv.handleAXFR(context.Background(), conn, req)
+	srv.handleAXFR(context.Background(), conn, req, nil)
 
 	if len(conn.captured) != 1 {
 		t.Fatalf("Expected 1 error packet, got %d", len(conn.captured))
@@ -1058,6 +1099,111 @@ func TestHandleAXFR_NoSOA(t *testing.T) {
 	_ = res.FromBuffer(pb)
 	if res.Header.ResCode != packet.RcodeServFail {
 		t.Errorf("Expected SERVFAIL (2), got %d", res.Header.ResCode)
+	}
+}
+
+func TestHandleAXFR_StreamingError(t *testing.T) {
+	repo := &mockServerRepo{
+		zones: []domain.Zone{{ID: "z1", Name: "stream-fail.test."}},
+		records: []domain.Record{
+			{ZoneID: "z1", Name: "stream-fail.test.", Type: domain.TypeSOA, Content: "ns1. ns2. 1 2 3 4 5"},
+		},
+		failListRecordsStreaming: true,
+	}
+	srv := NewServer(":0", repo, nil)
+
+	req := packet.NewDNSPacket()
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "stream-fail.test.", QType: packet.AXFR})
+
+	conn := &mockTCPConn{}
+	srv.handleAXFR(context.Background(), conn, req, nil)
+
+	if len(conn.captured) != 1 {
+		t.Fatalf("Expected 1 error packet, got %d", len(conn.captured))
+	}
+
+	res := packet.NewDNSPacket()
+	pb := packet.NewBytePacketBuffer()
+	pb.Load(conn.captured[0])
+	_ = res.FromBuffer(pb)
+	if res.Header.ResCode != packet.RcodeServFail {
+		t.Errorf("Expected SERVFAIL (2), got %d", res.Header.ResCode)
+	}
+}
+
+func TestHandleAXFR_TSIGUnknownKey(t *testing.T) {
+	repo := &mockServerRepo{
+		zones: []domain.Zone{{ID: "z1", Name: "tsig.test."}},
+		records: []domain.Record{
+			{ZoneID: "z1", Name: "tsig.test.", Type: domain.TypeSOA, Content: "ns1. ns2. 1 2 3 4 5"},
+		},
+	}
+	srv := NewServer(":0", repo, nil)
+	srv.TsigKeys = map[string][]byte{
+		"real-key.": []byte("secret"),
+	}
+
+	req := packet.NewDNSPacket()
+	req.Header.ID = 1234
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "tsig.test.", QType: packet.AXFR})
+
+	buf := packet.NewBytePacketBuffer()
+	_ = req.Write(buf)
+	_ = req.SignTSIG(buf, "unknown-key.", []byte("any"))
+
+	conn := &mockTCPConn{}
+	srv.handleAXFR(context.Background(), conn, req, buf.Buf[:buf.Position()])
+
+	if len(conn.captured) != 1 {
+		t.Fatalf("Expected 1 response, got %d", len(conn.captured))
+	}
+
+	res := packet.NewDNSPacket()
+	pb := packet.NewBytePacketBuffer()
+	pb.Load(conn.captured[0])
+	_ = res.FromBuffer(pb)
+	if res.Header.ResCode != packet.RcodeRefused {
+		t.Errorf("Expected REFUSED (5), got %d", res.Header.ResCode)
+	}
+}
+
+func TestHandleAXFR_TSIGVerifyFailed(t *testing.T) {
+	repo := &mockServerRepo{
+		zones: []domain.Zone{{ID: "z1", Name: "tsig.test."}},
+		records: []domain.Record{
+			{ZoneID: "z1", Name: "tsig.test.", Type: domain.TypeSOA, Content: "ns1. ns2. 1 2 3 4 5"},
+		},
+	}
+	srv := NewServer(":0", repo, nil)
+	srv.TsigKeys = map[string][]byte{
+		"real-key.": []byte("secret"),
+	}
+
+	req := packet.NewDNSPacket()
+	req.Header.ID = 1234
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "tsig.test.", QType: packet.AXFR})
+
+	buf := packet.NewBytePacketBuffer()
+	_ = req.Write(buf)
+	// Sign with wrong secret
+	_ = req.SignTSIG(buf, "real-key.", []byte("wrong-secret"))
+
+	// Tamper with buffer to cause verify failure
+	buf.Buf[0] ^= 0xFF
+
+	conn := &mockTCPConn{}
+	srv.handleAXFR(context.Background(), conn, req, buf.Buf[:buf.Position()])
+
+	if len(conn.captured) != 1 {
+		t.Fatalf("Expected 1 response, got %d", len(conn.captured))
+	}
+
+	res := packet.NewDNSPacket()
+	pb := packet.NewBytePacketBuffer()
+	pb.Load(conn.captured[0])
+	_ = res.FromBuffer(pb)
+	if res.Header.ResCode != packet.RcodeRefused {
+		t.Errorf("Expected REFUSED (5), got %d", res.Header.ResCode)
 	}
 }
 
@@ -1094,5 +1240,91 @@ func TestServer_Run_NonBlockingOnTCPDoTFailure(t *testing.T) {
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("srv.Run blocked for too long")
+	}
+}
+
+func TestHandleIXFR_TSIGUnknownKey(t *testing.T) {
+	repo := &mockServerRepo{
+		zones: []domain.Zone{{ID: "z1", Name: "ixfr-tsig.test."}},
+		records: []domain.Record{
+			{ZoneID: "z1", Name: "ixfr-tsig.test.", Type: domain.TypeSOA, Content: "ns1. ns2. 1 2 3 4 5"},
+		},
+	}
+	srv := NewServer(":0", repo, nil)
+	srv.TsigKeys = map[string][]byte{
+		"real-key.": []byte("secret"),
+	}
+
+	req := packet.NewDNSPacket()
+	req.Header.ID = 5678
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "ixfr-tsig.test.", QType: packet.IXFR})
+	req.Authorities = append(req.Authorities, packet.DNSRecord{
+		Name:   "ixfr-tsig.test.",
+		Type:   packet.SOA,
+		Serial: 1,
+	})
+
+	buf := packet.NewBytePacketBuffer()
+	_ = req.Write(buf)
+	_ = req.SignTSIG(buf, "unknown-key.", []byte("any"))
+
+	conn := &mockTCPConn{}
+	srv.handleIXFR(context.Background(), conn, req, buf.Buf[:buf.Position()])
+
+	if len(conn.captured) != 1 {
+		t.Fatalf("Expected 1 response, got %d", len(conn.captured))
+	}
+
+	res := packet.NewDNSPacket()
+	pb := packet.NewBytePacketBuffer()
+	pb.Load(conn.captured[0])
+	_ = res.FromBuffer(pb)
+	if res.Header.ResCode != packet.RcodeRefused {
+		t.Errorf("Expected NOTAUTH (5), got %d", res.Header.ResCode)
+	}
+}
+
+func TestHandleIXFR_TSIGVerifyFailed(t *testing.T) {
+	repo := &mockServerRepo{
+		zones: []domain.Zone{{ID: "z1", Name: "ixfr-tsig.test."}},
+		records: []domain.Record{
+			{ZoneID: "z1", Name: "ixfr-tsig.test.", Type: domain.TypeSOA, Content: "ns1. ns2. 1 2 3 4 5"},
+		},
+	}
+	srv := NewServer(":0", repo, nil)
+	srv.TsigKeys = map[string][]byte{
+		"real-key.": []byte("secret"),
+	}
+
+	req := packet.NewDNSPacket()
+	req.Header.ID = 5678
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "ixfr-tsig.test.", QType: packet.IXFR})
+	req.Authorities = append(req.Authorities, packet.DNSRecord{
+		Name:   "ixfr-tsig.test.",
+		Type:   packet.SOA,
+		Serial: 1,
+	})
+
+	buf := packet.NewBytePacketBuffer()
+	_ = req.Write(buf)
+	// Sign with correct key name but wrong secret
+	_ = req.SignTSIG(buf, "real-key.", []byte("wrong-secret"))
+
+	// Tamper with buffer to cause verify failure
+	buf.Buf[0] ^= 0xFF
+
+	conn := &mockTCPConn{}
+	srv.handleIXFR(context.Background(), conn, req, buf.Buf[:buf.Position()])
+
+	if len(conn.captured) != 1 {
+		t.Fatalf("Expected 1 response, got %d", len(conn.captured))
+	}
+
+	res := packet.NewDNSPacket()
+	pb := packet.NewBytePacketBuffer()
+	pb.Load(conn.captured[0])
+	_ = res.FromBuffer(pb)
+	if res.Header.ResCode != packet.RcodeRefused {
+		t.Errorf("Expected NOTAUTH (5), got %d", res.Header.ResCode)
 	}
 }

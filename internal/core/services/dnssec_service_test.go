@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
+	"github.com/poyrazK/cloudDNS/internal/core/ports"
 	"github.com/poyrazK/cloudDNS/internal/dns/packet"
 )
 
@@ -27,6 +28,9 @@ func (m *mockDNSSECRepo) GetRecord(_ context.Context, _ string, _ string, _ stri
 	return nil, nil
 }
 func (m *mockDNSSECRepo) ListRecordsForZone(_ context.Context, _ string, _ string) ([]domain.Record, error) {
+	return nil, nil
+}
+func (m *mockDNSSECRepo) ListRecordsForZoneStreaming(_ context.Context, _ string, _ string) (ports.RecordIterator, error) {
 	return nil, nil
 }
 func (m *mockDNSSECRepo) CreateZone(_ context.Context, _ *domain.Zone) error { return nil }

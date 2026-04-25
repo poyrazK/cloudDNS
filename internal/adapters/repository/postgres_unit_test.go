@@ -593,3 +593,121 @@ func TestPostgresRepository_Extra_Unit(t *testing.T) {
 		if err == nil { t.Error("expected error") }
 	})
 }
+
+func TestPostgresRecordIterator_Unit(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("Next_Success", func(t *testing.T) {
+		db, mock, _ := sqlmock.New()
+		defer db.Close()
+		repo := NewPostgresRepository(db)
+
+		rows := sqlmock.NewRows([]string{"id", "zone_id", "name", "type", "content", "ttl", "priority", "weight", "port", "network", "health_check_type", "health_check_target", "status"}).
+			AddRow("r1", "z1", "www.test.", "A", "1.2.3.4", 300, 10, 5, 80, nil, "HTTP", "http://target", "HEALTHY").
+			AddRow("r2", "z1", "mail.test.", "A", "5.6.7.8", 300, nil, nil, nil, nil, "NONE", nil, "UNKNOWN")
+
+		mock.ExpectQuery("SELECT .* FROM dns_records").WillReturnRows(rows)
+
+		iter, err := repo.ListRecordsForZoneStreaming(ctx, "z1", "t1")
+		if err != nil { t.Fatalf("ListRecordsForZoneStreaming failed: %v", err) }
+
+		// First record
+		if !iter.Next() { t.Fatal("Expected first record") }
+		rec := iter.Record()
+		if rec.ID != "r1" || rec.Content != "1.2.3.4" || *rec.Priority != 10 { t.Errorf("Unexpected record: %+v", rec) }
+
+		// Second record
+		if !iter.Next() { t.Fatal("Expected second record") }
+		rec = iter.Record()
+		if rec.ID != "r2" || rec.Content != "5.6.7.8" { t.Errorf("Unexpected record: %+v", rec) }
+
+		// No more records
+		if iter.Next() { t.Fatal("Did not expect more records") }
+		if iter.Err() != nil { t.Errorf("Unexpected error: %v", iter.Err()) }
+
+		iter.Close()
+	})
+
+	t.Run("Next_ScanError", func(t *testing.T) {
+		db, mock, _ := sqlmock.New()
+		defer db.Close()
+		repo := NewPostgresRepository(db)
+
+		// Wrong column type to cause scan error
+		rows := sqlmock.NewRows([]string{"id", "zone_id", "name", "type", "content", "ttl", "priority", "weight", "port", "network", "health_check_type", "health_check_target", "status"}).
+			AddRow("r1", "z1", "www.test.", "A", "1.2.3.4", "not-an-int", nil, nil, nil, nil, nil, nil, nil) // ttl should be int
+
+		mock.ExpectQuery("SELECT .* FROM dns_records").WillReturnRows(rows)
+
+		iter, err := repo.ListRecordsForZoneStreaming(ctx, "z1", "t1")
+		if err != nil { t.Fatalf("ListRecordsForZoneStreaming failed: %v", err) }
+
+		if iter.Next() { t.Error("Did not expect record after scan error") }
+		if iter.Err() == nil { t.Error("Expected scan error") }
+
+		iter.Close()
+	})
+
+	t.Run("Next_RowsError", func(t *testing.T) {
+		db, mock, _ := sqlmock.New()
+		defer db.Close()
+		repo := NewPostgresRepository(db)
+
+		// RowError(0, ...) causes rows.Next() to return false immediately with the error set
+		rows := sqlmock.NewRows([]string{"id", "zone_id", "name", "type", "content", "ttl", "priority", "weight", "port", "network", "health_check_type", "health_check_target", "status"}).
+			AddRow("r1", "z1", "www.test.", "A", "1.2.3.4", 300, nil, nil, nil, nil, nil, nil, nil).
+			RowError(0, errors.New("rows error"))
+
+		mock.ExpectQuery("SELECT .* FROM dns_records").WillReturnRows(rows)
+
+		iter, err := repo.ListRecordsForZoneStreaming(ctx, "z1", "t1")
+		if err != nil { t.Fatalf("ListRecordsForZoneStreaming failed: %v", err) }
+
+		// rows error causes Next() to return false immediately
+		if iter.Next() { t.Error("Did not expect record when rows has error") }
+		if iter.Err() == nil { t.Error("Expected rows error") }
+
+		iter.Close()
+	})
+
+	t.Run("Close_NilRows", func(t *testing.T) {
+		db, _, _ := sqlmock.New()
+		defer db.Close()
+
+		// Directly test iterator with nil rows by checking the Close behavior on error path
+		iter := &postgresRecordIterator{}
+		if err := iter.Close(); err != nil { t.Errorf("Close with nil rows failed: %v", err) }
+	})
+
+	t.Run("Close_WithError", func(t *testing.T) {
+		db, mock, _ := sqlmock.New()
+		defer db.Close()
+		repo := NewPostgresRepository(db)
+
+		rows := sqlmock.NewRows([]string{"id", "zone_id", "name", "type", "content", "ttl", "priority", "weight", "port", "network", "health_check_type", "health_check_target", "status"}).
+			AddRow("r1", "z1", "www.test.", "A", "1.2.3.4", 300, nil, nil, nil, nil, nil, nil, nil).
+			RowError(0, errors.New("close error"))
+
+		mock.ExpectQuery("SELECT .* FROM dns_records").WillReturnRows(rows)
+
+		iter, err := repo.ListRecordsForZoneStreaming(ctx, "z1", "t1")
+		if err != nil { t.Fatalf("ListRecordsForZoneStreaming failed: %v", err) }
+
+		iter.Next()
+		closeErr := iter.Close()
+
+		// The rows error should have been captured via Close
+		if closeErr == nil { t.Error("Expected error from Close") }
+	})
+
+	t.Run("ListRecordsForZoneStreaming_Error", func(t *testing.T) {
+		db, mock, _ := sqlmock.New()
+		defer db.Close()
+		repo := NewPostgresRepository(db)
+
+		mock.ExpectQuery("SELECT .* FROM dns_records").WillReturnError(errors.New("query error"))
+
+		_, err := repo.ListRecordsForZoneStreaming(ctx, "z1", "t1")
+		if err == nil { t.Error("Expected error from ListRecordsForZoneStreaming") }
+	})
+}

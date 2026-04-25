@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
+	"github.com/poyrazK/cloudDNS/internal/core/ports"
 )
 
 // Mock repository that captures audit logs
@@ -27,6 +28,10 @@ func (m *auditMockRepo) GetZone(ctx context.Context, name string) (*domain.Zone,
 
 func (m *auditMockRepo) ListRecordsForZone(ctx context.Context, zoneID string, tenantID string) ([]domain.Record, error) {
 	return m.mockRepo.ListRecordsForZone(ctx, zoneID, tenantID)
+}
+
+func (m *auditMockRepo) ListRecordsForZoneStreaming(ctx context.Context, zoneID string, tenantID string) (ports.RecordIterator, error) {
+	return m.mockRepo.ListRecordsForZoneStreaming(ctx, zoneID, tenantID)
 }
 
 func (m *auditMockRepo) ListZoneChanges(ctx context.Context, zoneID string, fromSerial uint32) ([]domain.ZoneChange, error) {

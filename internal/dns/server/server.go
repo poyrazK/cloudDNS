@@ -80,7 +80,6 @@ type Server struct {
 	cancel       context.CancelFunc
 	done         chan struct{}
 	wg           sync.WaitGroup
-	shutdownOnce sync.Once
 }
 
 type udpTask struct {
@@ -253,15 +252,21 @@ func (s *Server) startInvalidationListener(ctx context.Context) {
 	}
 }
 
+
+// udpReadDeadline is the read deadline set on UDP sockets to allow periodic
+// re-checking of the shutdown signal (s.done). Without this, ReadFrom blocks
+// indefinitely and goroutines don't exit promptly on cancellation.
+const udpReadDeadline = 500 * time.Millisecond
 // Run starts the DNS server and blocks until the context is canceled.
 func (s *Server) Run(ctx context.Context) error {
 	s.Logger.Info("starting parallel server", "addr", s.Addr, "listeners", runtime.NumCPU())
 
-	// Deferred shutdown signals all goroutines to exit when Run returns
-	// Uses sync.Once to ensure it runs exactly once, even on early return (started==0)
-	//nolint:contextcheck // defer cannot receive ctx parameter, shutdown is fire-and-forget
-	defer s.shutdownOnce.Do(func() {
-		s.cancel()   // Cancel lifecycle context (stops NOTIFY goroutines)
+	// Deferred shutdown signals all goroutines to exit when Run returns.
+	// Uses a deferred function to ensure cleanup runs even on early return.
+	// The context parameter satisfies the contextcheck linter but is not used
+	// because s.cancel is bound to lifecycleCtx at server creation.
+	defer func(_ context.Context) {
+		s.cancel()
 		close(s.done) // Signal all workers to exit (goroutines check s.done and exit via wg.Done)
 		// Close listeners to unblock Accept/ReadFrom calls
 		if s.tcpListener != nil {
@@ -271,11 +276,11 @@ func (s *Server) Run(ctx context.Context) error {
 			_ = s.dotListener.Close()
 		}
 		if s.dohServer != nil {
-			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
 			_ = s.dohServer.Shutdown(shutdownCtx)
 		}
-	})
+	}(ctx)
 
 	// Initialize DNSSECValidator from config if provided
 	if s.DNSSECConfig != nil {
@@ -325,8 +330,8 @@ func (s *Server) Run(ctx context.Context) error {
 				_ = c.Close()
 			}()
 			defer s.wg.Done()
-			// Set a 500ms read deadline so select can re-check s.done periodically
-			_ = c.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+			// Set read deadline so select can re-check s.done periodically
+			_ = c.SetReadDeadline(time.Now().Add(udpReadDeadline))
 			buf := make([]byte, 512)
 			for {
 				select {
@@ -339,7 +344,7 @@ func (s *Server) Run(ctx context.Context) error {
 							return
 						}
 						// Refresh deadline to allow re-check of s.done
-						_ = c.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+						_ = c.SetReadDeadline(time.Now().Add(udpReadDeadline))
 						continue
 					}
 					data := make([]byte, n)
@@ -526,12 +531,12 @@ func (s *Server) handleTCPConnection(ctx context.Context, conn net.Conn) {
 		request := packet.NewDNSPacket()
 		if errFromBuf := request.FromBuffer(reqBuffer); errFromBuf == nil && len(request.Questions) > 0 {
 			if request.Questions[0].QType == packet.AXFR {
-				s.handleAXFR(ctx, conn, request)
+				s.handleAXFR(ctx, conn, request, data)
 				packet.PutBuffer(reqBuffer)
 				continue
 			}
 			if request.Questions[0].QType == packet.IXFR {
-				s.handleIXFR(ctx, conn, request)
+				s.handleIXFR(ctx, conn, request, data)
 				packet.PutBuffer(reqBuffer)
 				continue
 			}
@@ -549,10 +554,26 @@ func (s *Server) handleTCPConnection(ctx context.Context, conn net.Conn) {
 	}
 }
 
-func (s *Server) handleAXFR(ctx context.Context, conn net.Conn, request *packet.DNSPacket) {
+func (s *Server) handleAXFR(ctx context.Context, conn net.Conn, request *packet.DNSPacket, rawData []byte) {
 	q := request.Questions[0]
 	if !strings.HasSuffix(q.Name, ".") {
 		q.Name += "."
+	}
+
+	// Validate TSIG if present
+	if request.TSIGStart != -1 {
+		tsig := request.Resources[len(request.Resources)-1]
+		secret, ok := s.TsigKeys[tsig.Name]
+		if !ok {
+			s.Logger.Warn("AXFR failed: unknown TSIG key", "key", tsig.Name, "zone", q.Name)
+			s.sendTCPError(conn, request.Header.ID, 5) // NotAuth
+			return
+		}
+		if errVerify := request.VerifyTSIG(rawData, request.TSIGStart, secret); errVerify != nil {
+			s.Logger.Warn("AXFR failed: TSIG verification failed", "error", errVerify, "zone", q.Name)
+			s.sendTCPError(conn, request.Header.ID, 5) // NotAuth
+			return
+		}
 	}
 
 	zone, _ := s.Repo.GetZone(ctx, q.Name)
@@ -562,77 +583,95 @@ func (s *Server) handleAXFR(ctx context.Context, conn net.Conn, request *packet.
 		return
 	}
 
-	records, errList := s.Repo.ListRecordsForZone(ctx, zone.ID, zone.TenantID)
-	if errList != nil {
-		s.Logger.Error("AXFR failed to list records", "zone", zone.ID, "error", errList)
+	iter, errIter := s.Repo.ListRecordsForZoneStreaming(ctx, zone.ID, zone.TenantID)
+	if errIter != nil {
+		s.Logger.Error("AXFR failed to open record stream", "zone", zone.ID, "error", errIter)
 		s.sendTCPError(conn, request.Header.ID, 2) // SERVFAIL
 		return
 	}
+	defer func() { _ = iter.Close() }()
 
-	var soa *domain.Record
-	for _, rec := range records {
+	// First pass: find SOA record
+	var soa domain.Record
+	var foundSOA bool
+	for iter.Next() {
+		rec := iter.Record()
 		if rec.Type == domain.TypeSOA {
-			soa = &rec
+			soa = rec
+			foundSOA = true
 			break
 		}
 	}
-
-	if soa == nil {
+	if err := iter.Err(); err != nil {
+		s.Logger.Error("AXFR failed during SOA lookup", "zone", zone.ID, "error", err)
+		s.sendTCPError(conn, request.Header.ID, 2)
+		return
+	}
+	if !foundSOA {
 		s.Logger.Error("AXFR failed: zone has no SOA", "zone", zone.Name)
 		s.sendTCPError(conn, request.Header.ID, 2)
 		return
 	}
 
-	// Filter out the SOA record from the main list to avoid duplication if it's already there
-	var otherRecords []domain.Record
-	for _, rec := range records {
-		if rec.Type != domain.TypeSOA {
-			otherRecords = append(otherRecords, rec)
-		}
-	}
+	s.Logger.Info("AXFR starting", "zone", zone.Name)
 
-	// Stream packets: SOA -> [all other records] -> SOA
-	stream := make([]domain.Record, 0, len(otherRecords)+2)
-	stream = append(stream, *soa)
-	stream = append(stream, otherRecords...)
-	stream = append(stream, *soa)
+	// Stream SOA first
+	s.sendAXFRRecord(conn, request.Header.ID, q, soa, 0)
 
-	s.Logger.Info("AXFR starting", "zone", zone.Name, "records", len(stream))
-
-	for i, rec := range stream {
-		pRec, errConv := repository.ConvertDomainToPacketRecord(rec)
-		if errConv != nil {
-			s.Logger.Error("AXFR failed to convert record", "type", rec.Type, "error", errConv)
+	// Stream all non-SOA records
+	index := 1
+	for iter.Next() {
+		rec := iter.Record()
+		if rec.Type == domain.TypeSOA {
 			continue
 		}
-
-		response := packet.NewDNSPacket()
-		response.Header.ID = request.Header.ID
-		response.Header.Response = true
-		response.Header.AuthoritativeAnswer = true
-		response.Questions = append(response.Questions, q)
-		response.Answers = append(response.Answers, pRec)
-
-		resBuffer := packet.GetBuffer()
-		resBuffer.HasNames = true
-		if errWrite := response.Write(resBuffer); errWrite != nil {
-			s.Logger.Error("AXFR failed to write response", "error", errWrite)
-			packet.PutBuffer(resBuffer)
-			continue
-		}
-		resData := resBuffer.Buf[:resBuffer.Position()]
-
-		resLen := uint16(len(resData)) // #nosec G115
-		fullResp := append([]byte{byte(resLen >> 8), byte(resLen & 0xFF)}, resData...)
-		if _, errW := conn.Write(fullResp); errW != nil {
-			s.Logger.Error("AXFR connection broken", "error", errW)
-			packet.PutBuffer(resBuffer)
-			return
-		}
-		s.Logger.Debug("AXFR sent packet", "index", i, "type", pRec.Type)
-		packet.PutBuffer(resBuffer)
+		s.sendAXFRRecord(conn, request.Header.ID, q, rec, index)
+		index++
 	}
+	if err := iter.Err(); err != nil {
+		s.Logger.Error("AXFR failed during record streaming", "zone", zone.ID, "error", err)
+		s.sendTCPError(conn, request.Header.ID, 2)
+		return
+	}
+
+	// Stream SOA last
+	s.sendAXFRRecord(conn, request.Header.ID, q, soa, index)
 	s.Logger.Info("AXFR completed", "zone", zone.Name)
+}
+
+// sendAXFRRecord converts a domain.Record to a packet record and sends it over TCP.
+func (s *Server) sendAXFRRecord(conn net.Conn, id uint16, q packet.DNSQuestion, rec domain.Record, index int) {
+	pRec, errConv := repository.ConvertDomainToPacketRecord(rec)
+	if errConv != nil {
+		s.Logger.Error("AXFR failed to convert record", "type", rec.Type, "error", errConv)
+		return
+	}
+
+	response := packet.NewDNSPacket()
+	response.Header.ID = id
+	response.Header.Response = true
+	response.Header.AuthoritativeAnswer = true
+	response.Questions = append(response.Questions, q)
+	response.Answers = append(response.Answers, pRec)
+
+	resBuffer := packet.GetBuffer()
+	resBuffer.HasNames = true
+	if errWrite := response.Write(resBuffer); errWrite != nil {
+		s.Logger.Error("AXFR failed to write response", "error", errWrite)
+		packet.PutBuffer(resBuffer)
+		return
+	}
+	resData := resBuffer.Buf[:resBuffer.Position()]
+
+	resLen := uint16(len(resData)) // #nosec G115
+	fullResp := append([]byte{byte(resLen >> 8), byte(resLen & 0xFF)}, resData...)
+	if _, errW := conn.Write(fullResp); errW != nil {
+		s.Logger.Error("AXFR connection broken", "error", errW)
+		packet.PutBuffer(resBuffer)
+		return
+	}
+	s.Logger.Debug("AXFR sent packet", "index", index, "type", pRec.Type)
+	packet.PutBuffer(resBuffer)
 }
 
 func (s *Server) sendTCPError(conn net.Conn, id uint16, rcode uint8) {
@@ -1276,10 +1315,26 @@ func (s *Server) handleUpdate(ctx context.Context, request *packet.DNSPacket, ra
 	return s.sendUpdateResponse(response, sendFn)
 }
 
-func (s *Server) handleIXFR(ctx context.Context, conn net.Conn, request *packet.DNSPacket) {
+func (s *Server) handleIXFR(ctx context.Context, conn net.Conn, request *packet.DNSPacket, rawData []byte) {
 	q := request.Questions[0]
 	if !strings.HasSuffix(q.Name, ".") {
 		q.Name += "."
+	}
+
+	// Validate TSIG if present
+	if request.TSIGStart != -1 {
+		tsig := request.Resources[len(request.Resources)-1]
+		secret, ok := s.TsigKeys[tsig.Name]
+		if !ok {
+			s.Logger.Warn("IXFR failed: unknown TSIG key", "key", tsig.Name, "zone", q.Name)
+			s.sendTCPError(conn, request.Header.ID, 5) // NotAuth
+			return
+		}
+		if errVerify := request.VerifyTSIG(rawData, request.TSIGStart, secret); errVerify != nil {
+			s.Logger.Warn("IXFR failed: TSIG verification failed", "error", errVerify, "zone", q.Name)
+			s.sendTCPError(conn, request.Header.ID, 5) // NotAuth
+			return
+		}
 	}
 
 	// RFC 1995: The client's current SOA is in the Authority section
@@ -1348,14 +1403,14 @@ func (s *Server) handleIXFR(ctx context.Context, conn net.Conn, request *packet.
 		s.Logger.Info("IXFR history not found or gap detected, falling back to AXFR sequence",
 			"zone", zone.Name, "client_serial", clientSerial)
 
-		// RFC 1995: If IXFR is not possible, fall back to AXFR sequence.
-		// 1. Fetch all records first to ensure we don't send partial data
-		records, errList := s.Repo.ListRecordsForZone(ctx, zone.ID, zone.TenantID)
-		if errList != nil {
-			s.Logger.Error("IXFR/AXFR fallback failed to list records", "zone", zone.Name, "error", errList)
+		// RFC 1995: If IXFR is not possible, fall back to AXFR sequence using streaming
+		iter, errIter := s.Repo.ListRecordsForZoneStreaming(ctx, zone.ID, zone.TenantID)
+		if errIter != nil {
+			s.Logger.Error("IXFR/AXFR fallback failed to open record stream", "zone", zone.Name, "error", errIter)
 			s.sendTCPError(conn, request.Header.ID, 2) // SERVFAIL
 			return
 		}
+		defer func() { _ = iter.Close() }()
 
 		pSOA, errConv := repository.ConvertDomainToPacketRecord(currentSOA)
 		if errConv != nil {
@@ -1367,15 +1422,21 @@ func (s *Server) handleIXFR(ctx context.Context, conn net.Conn, request *packet.
 		// 2. Send Current SOA (start)
 		s.sendSingleRecordResponse(conn, request.Header.ID, q, pSOA)
 
-		// 3. Send all records in the zone
-		for _, rec := range records {
+		// 3. Stream all records in the zone
+		for iter.Next() {
+			rec := iter.Record()
 			if rec.Type == domain.TypeSOA {
 				continue
-			} // skip SOA, we send it as bounds
+			}
 			pRec, errConv := repository.ConvertDomainToPacketRecord(rec)
 			if errConv == nil {
 				s.sendSingleRecordResponse(conn, request.Header.ID, q, pRec)
 			}
+		}
+		if err := iter.Err(); err != nil {
+			s.Logger.Error("IXFR/AXFR fallback failed during streaming", "zone", zone.Name, "error", err)
+			s.sendTCPError(conn, request.Header.ID, 2)
+			return
 		}
 
 		// 4. Send Current SOA (end)
@@ -1878,27 +1939,34 @@ func (s *Server) notifySlaves(ctx context.Context, zoneName string) {
 }
 
 func (s *Server) generateNSEC(ctx context.Context, zone *domain.Zone, queryName string) (packet.DNSRecord, error) {
-	records, errZoneRecs := s.Repo.ListRecordsForZone(ctx, zone.ID, zone.TenantID)
+	iter, errZoneRecs := s.Repo.ListRecordsForZoneStreaming(ctx, zone.ID, zone.TenantID)
 	if errZoneRecs != nil {
 		return packet.DNSRecord{}, errZoneRecs
 	}
-
-	master.SortRecordsCanonically(records)
+	defer func() { _ = iter.Close() }()
 
 	nameToTypes := make(map[string][]domain.RecordType)
 	var uniqueNames []string
 	seen := make(map[string]bool)
-	for _, r := range records {
+	for iter.Next() {
+		r := iter.Record()
 		if !seen[r.Name] {
 			uniqueNames = append(uniqueNames, r.Name)
 			seen[r.Name] = true
 		}
 		nameToTypes[r.Name] = append(nameToTypes[r.Name], r.Type)
 	}
+	if err := iter.Err(); err != nil {
+		return packet.DNSRecord{}, err
+	}
 
 	if len(uniqueNames) == 0 {
 		return packet.DNSRecord{}, fmt.Errorf("no records in zone")
 	}
+
+	sort.Slice(uniqueNames, func(i, j int) bool {
+		return master.CompareNamesCanonically(uniqueNames[i], uniqueNames[j]) < 0
+	})
 
 	var ownerName, nextName string
 	found := false
@@ -1969,17 +2037,24 @@ func (s *Server) generateNSEC3(ctx context.Context, zone *domain.Zone, queryName
 		salt = ""
 	}
 
-	records, _ := s.Repo.ListRecordsForZone(ctx, zone.ID, zone.TenantID)
+	iter, errIter := s.Repo.ListRecordsForZoneStreaming(ctx, zone.ID, zone.TenantID)
+	if errIter != nil {
+		return packet.DNSRecord{}, errIter
+	}
+	defer func() { _ = iter.Close() }()
+
 	nameToTypes := make(map[string][]domain.RecordType)
 	var ownerNames []string
 	seen := make(map[string]bool)
-	for _, r := range records {
+	for iter.Next() {
+		r := iter.Record()
 		if !seen[r.Name] {
 			ownerNames = append(ownerNames, r.Name)
 			seen[r.Name] = true
 		}
 		nameToTypes[r.Name] = append(nameToTypes[r.Name], r.Type)
 	}
+	_ = iter.Err()
 
 	hashes := make([]hashEntry, 0, len(ownerNames))
 	for _, name := range ownerNames {
