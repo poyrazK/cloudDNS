@@ -822,13 +822,15 @@ func (r *PostgresRepository) ApplyZoneUpdate(ctx context.Context, zoneID string,
 	soaQuery := `SELECT content FROM dns_records WHERE zone_id = $1 AND type = 'SOA' LIMIT 1`
 	var soaContent string
 	err = tx.QueryRowContext(ctx, soaQuery, zoneID).Scan(&soaContent)
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return 0, fmt.Errorf("failed to fetch SOA: %w", err)
 	}
 	if err == nil {
 		parts := strings.Fields(soaContent)
 		if len(parts) >= 3 {
-			fmt.Sscanf(parts[2], "%d", &currentSerial)
+			if _, parseErr := fmt.Sscanf(parts[2], "%d", &currentSerial); parseErr != nil {
+				return 0, fmt.Errorf("failed to parse SOA serial: %w", parseErr)
+			}
 		}
 	}
 	newSerial := currentSerial + 1
