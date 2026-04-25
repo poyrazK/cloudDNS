@@ -43,7 +43,8 @@ type DNSRepository interface {
 	Ping(ctx context.Context) error
 
 	// ApplyZoneUpdate applies a batch of updates and records historical changes atomically.
-	ApplyZoneUpdate(ctx context.Context, zoneID string, operations []domain.UpdateOperation, newSerial uint32, changes []domain.ZoneChange) error
+	// Returns the new serial if SOA was updated, or 0 if no SOA changes.
+	ApplyZoneUpdate(ctx context.Context, zoneID string, operations []domain.UpdateOperation, changes []domain.ZoneChange) (uint32, error)
 
 	// DNSSEC Key Management
 	CreateKey(ctx context.Context, key *domain.DNSSECKey) error

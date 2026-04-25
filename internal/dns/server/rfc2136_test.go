@@ -563,10 +563,16 @@ func TestHandleUpdateDeleteRRSetSpecific(t *testing.T) {
 	}
 }
 
-func TestHandleUpdate_SOAFetchError(t *testing.T) {
+// TestHandleUpdate_SOAError tests that ApplyZoneUpdate errors are properly handled.
+// Note: The specific SOA fetch/delete/create failures are now handled inside ApplyZoneUpdate
+// within the transaction. We test the ApplyZoneUpdate error path via failRecordZoneChange.
+func TestHandleUpdate_SOAError(t *testing.T) {
 	repo := &mockServerRepo{
-		zones:          []domain.Zone{{ID: "z1", Name: "soaerr.test."}},
-		failGetRecords: true, // Fail fetching SOA
+		zones: []domain.Zone{{ID: "z1", Name: "soaerr.test."}},
+		records: []domain.Record{
+			{ZoneID: "z1", Name: "soaerr.test.", Type: domain.TypeSOA, Content: "ns1. ns2. 1 2 3 4 5"},
+		},
+		failRecordZoneChange: true, // Causes ApplyZoneUpdate to fail
 	}
 	srv := NewServer(":0", repo, nil)
 
@@ -576,66 +582,6 @@ func TestHandleUpdate_SOAFetchError(t *testing.T) {
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "soaerr.test.", QType: packet.SOA})
 	req.Authorities = append(req.Authorities, packet.DNSRecord{
 		Name: "new.soaerr.test.", Type: packet.A, Class: 1, TTL: 60, IP: net.ParseIP("1.1.1.1"),
-	})
-
-	_ = srv.handleUpdate(context.Background(),req, nil, "127.0.0.1", func(resp []byte) error {
-		p := packet.NewDNSPacket()
-		pb := packet.NewBytePacketBuffer()
-		pb.Load(resp)
-		_ = p.FromBuffer(pb)
-		if p.Header.ResCode != packet.RcodeServFail {
-			t.Errorf("Expected SERVFAIL, got %d", p.Header.ResCode)
-		}
-		return nil
-	})
-}
-
-func TestHandleUpdate_SOADeleteError(t *testing.T) {
-	repo := &mockServerRepo{
-		zones: []domain.Zone{{ID: "z1", Name: "soadel.test."}},
-		records: []domain.Record{
-			{ZoneID: "z1", Name: "soadel.test.", Type: domain.TypeSOA, Content: "ns1. ns2. 1 2 3 4 5"},
-		},
-		failDeleteSOA: true,
-	}
-	srv := NewServer(":0", repo, nil)
-
-	req := packet.NewDNSPacket()
-	req.Header.ID = 0
-	req.Header.Opcode = packet.OpcodeUpdate
-	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "soadel.test.", QType: packet.SOA})
-	req.Authorities = append(req.Authorities, packet.DNSRecord{
-		Name: "new.soadel.test.", Type: packet.A, Class: 1, TTL: 60, IP: net.ParseIP("1.1.1.1"),
-	})
-
-	_ = srv.handleUpdate(context.Background(),req, nil, "127.0.0.1", func(resp []byte) error {
-		p := packet.NewDNSPacket()
-		pb := packet.NewBytePacketBuffer()
-		pb.Load(resp)
-		_ = p.FromBuffer(pb)
-		if p.Header.ResCode != packet.RcodeServFail {
-			t.Errorf("Expected SERVFAIL, got %d", p.Header.ResCode)
-		}
-		return nil
-	})
-}
-
-func TestHandleUpdate_SOACreateError(t *testing.T) {
-	repo := &mockServerRepo{
-		zones: []domain.Zone{{ID: "z1", Name: "soacrt.test."}},
-		records: []domain.Record{
-			{ZoneID: "z1", Name: "soacrt.test.", Type: domain.TypeSOA, Content: "ns1. ns2. 1 2 3 4 5"},
-		},
-		failCreateSOA: true, // Only fail when creating SOA
-	}
-	srv := NewServer(":0", repo, nil)
-
-	req := packet.NewDNSPacket()
-	req.Header.ID = 0
-	req.Header.Opcode = packet.OpcodeUpdate
-	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "soacrt.test.", QType: packet.SOA})
-	req.Authorities = append(req.Authorities, packet.DNSRecord{
-		Name: "new.soacrt.test.", Type: packet.A, Class: 1, TTL: 60, IP: net.ParseIP("1.1.1.1"),
 	})
 
 	_ = srv.handleUpdate(context.Background(),req, nil, "127.0.0.1", func(resp []byte) error {

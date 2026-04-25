@@ -199,10 +199,13 @@ func TestMockRepo_Ping(t *testing.T) {
 
 func TestMockRepo_ApplyZoneUpdate(t *testing.T) {
 	m := new(MockRepo)
-	m.On("ApplyZoneUpdate", "z1", mock.Anything, uint32(2), mock.Anything).Return(nil)
-	err := m.ApplyZoneUpdate(context.Background(), "z1", []domain.UpdateOperation{}, 2, []domain.ZoneChange{})
+	m.On("ApplyZoneUpdate", "z1", mock.Anything, mock.Anything).Return(uint32(3), nil)
+	serial, err := m.ApplyZoneUpdate(context.Background(), "z1", []domain.UpdateOperation{}, []domain.ZoneChange{})
 	if err != nil {
 		t.Errorf("Mock failed")
+	}
+	if serial != 3 {
+		t.Errorf("Expected serial 3, got %d", serial)
 	}
 }
 

@@ -129,7 +129,7 @@ func TestPostgresRepository_IXFR_And_Updates(t *testing.T) {
 		{ID: "550e8400-e29b-41d4-a716-446655440015", ZoneID: zID, Action: "DELETE", Name: "www.ixfr.test.", Type: domain.TypeA, CreatedAt: time.Now()},
 	}
 
-	if err := repo.ApplyZoneUpdate(ctx, zID, []domain.UpdateOperation{opAdd, opDel}, 2, changes); err != nil {
+	if _, err := repo.ApplyZoneUpdate(ctx, zID, []domain.UpdateOperation{opAdd, opDel}, changes); err != nil {
 		t.Fatalf("ApplyZoneUpdate failed: %v", err)
 	}
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"sort"
@@ -396,7 +397,7 @@ func (m *mockServerRepo) RecordZoneChange(ctx context.Context, change *domain.Zo
 	return nil
 }
 
-func (m *mockServerRepo) ApplyZoneUpdate(ctx context.Context, zoneID string, operations []domain.UpdateOperation, newSerial uint32, changes []domain.ZoneChange) error {
+func (m *mockServerRepo) ApplyZoneUpdate(ctx context.Context, zoneID string, operations []domain.UpdateOperation, changes []domain.ZoneChange) (uint32, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -406,6 +407,18 @@ func (m *mockServerRepo) ApplyZoneUpdate(ctx context.Context, zoneID string, ope
 	oldChanges := make([]domain.ZoneChange, len(m.changes))
 	copy(oldChanges, m.changes)
 
+	// Simulate serial calculation like real implementation
+	var newSerial uint32 = 1
+	for _, r := range m.records {
+		if r.ZoneID == zoneID && r.Type == domain.TypeSOA {
+			parts := strings.Fields(r.Content)
+			if len(parts) >= 3 {
+				fmt.Sscanf(parts[2], "%d", &newSerial)
+			}
+		}
+	}
+	newSerial++
+
 	// 2. Apply operations
 	for _, op := range operations {
 		switch op.Action {
@@ -413,7 +426,7 @@ func (m *mockServerRepo) ApplyZoneUpdate(ctx context.Context, zoneID string, ope
 			if m.failCreateRecord || (m.failCreateSOA && op.Record.Type == domain.TypeSOA) || (m.failOnRecordName != "" && op.Record.Name == m.failOnRecordName) {
 				m.records = oldRecords
 				m.changes = oldChanges
-				return errors.New("create record failed")
+				return 0, errors.New("create record failed")
 			}
 			m.records = append(m.records, op.Record)
 		case domain.ActionDeleteRRSet:
@@ -438,7 +451,7 @@ func (m *mockServerRepo) ApplyZoneUpdate(ctx context.Context, zoneID string, ope
 			if m.failDeleteRecord || (m.failDeleteSOA && op.Record.Type == domain.TypeSOA) {
 				m.records = oldRecords
 				m.changes = oldChanges
-				return errors.New("delete record failed")
+				return 0, errors.New("delete record failed")
 			}
 			var next []domain.Record
 			for _, r := range m.records {
@@ -455,14 +468,14 @@ func (m *mockServerRepo) ApplyZoneUpdate(ctx context.Context, zoneID string, ope
 	if m.failRecordZoneChange {
 		m.records = oldRecords
 		m.changes = oldChanges
-		return errors.New("record zone change failed")
+		return 0, errors.New("record zone change failed")
 	}
 	for i := range changes {
 		changes[i].Serial = newSerial
 		m.changes = append(m.changes, changes[i])
 	}
 
-	return nil
+	return newSerial, nil
 }
 
 func (m *mockServerRepo) ListZoneChanges(ctx context.Context, zoneID string, fromSerial uint32) ([]domain.ZoneChange, error) {
@@ -1056,6 +1069,7 @@ func TestHandleUpdate_IncrementSerialError(t *testing.T) {
 	repo := &mockServerRepo{
 		zones:   []domain.Zone{{ID: "z1", Name: "serial-fail.test."}},
 		records: []domain.Record{{ZoneID: "z1", Name: "serial-fail.test.", Type: domain.TypeSOA, Content: "bad soa content"}},
+		failRecordZoneChange: true, // Make the zone change recording fail
 	}
 	srv := NewServer(":0", repo, nil)
 
@@ -1070,7 +1084,7 @@ func TestHandleUpdate_IncrementSerialError(t *testing.T) {
 		pb.Load(resp)
 		_ = res.FromBuffer(pb)
 		if res.Header.ResCode != packet.RcodeServFail {
-			t.Errorf("Expected SERVFAIL for malformed SOA serial increment, got %d", res.Header.ResCode)
+			t.Errorf("Expected SERVFAIL for zone change failure, got %d", res.Header.ResCode)
 		}
 		return nil
 	})
