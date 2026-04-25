@@ -3,6 +3,7 @@ package server
 import (
 	"crypto/rand"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	mrand "math/rand"
@@ -53,6 +54,10 @@ func (r *recursiveResolver) getShuffledRoots() []string {
 }
 
 func (s *Server) resolveRecursive(name string, qType packet.QueryType) (*packet.DNSPacket, error) {
+	// Total timeout to prevent indefinite blocking on failing root servers
+	const recursiveTimeout = 30 * time.Second
+	resolveStart := time.Now()
+
 	// Start with a random root server for load balancing and resilience.
 	resolver := newRecursiveResolver()
 	roots := resolver.getShuffledRoots()
@@ -66,11 +71,16 @@ func (s *Server) resolveRecursive(name string, qType packet.QueryType) (*packet.
 	}
 
 	for i := 0; i < maxRoots; i++ {
+		// Check total resolution timeout
+		if time.Since(resolveStart) >= recursiveTimeout {
+			s.Logger.Warn("recursive resolution timed out after 30s", "name", name)
+			return nil, errors.New("recursive resolution timeout")
+		}
 		rootNS := roots[i]
 		ns := rootNS
 		currentName := name
 		depth := 0
-		
+
 		for depth < 15 { // Increase depth for deep SRV/CNAME chains
 			depth++
 			s.Logger.Info("recursive lookup", "name", currentName, "type", qType, "ns", ns)
