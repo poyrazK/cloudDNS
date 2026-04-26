@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -73,7 +74,7 @@ func (r *RedisCache) PushToDLQ(ctx context.Context, msg string) error {
 func (r *RedisCache) PopFromDLQ(ctx context.Context, timeout time.Duration) (string, error) {
 	result, err := r.client.BRPop(ctx, timeout, DLQChannel).Result()
 	if err != nil {
-		if err == redis.Nil {
+		if errors.Is(err, redis.Nil) {
 			return "", nil
 		}
 		return "", err
