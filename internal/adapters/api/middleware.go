@@ -88,3 +88,25 @@ func RequireRole(roles ...domain.Role) func(http.Handler) http.Handler {
 		})
 	}
 }
+
+// RateLimitMiddleware creates middleware that applies per-tenant rate limiting.
+// Pass a pointer to the tenantLimiter from the Handler.
+func RateLimitMiddleware(limiter *tenantLimiter) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			tenantID, ok := r.Context().Value(CtxTenantID).(string)
+			if !ok || tenantID == "" {
+				// Let auth middleware handle missing tenant
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			if !limiter.Allow(tenantID) {
+				http.Error(w, "Too Many Requests: rate limit exceeded for tenant", http.StatusTooManyRequests)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}

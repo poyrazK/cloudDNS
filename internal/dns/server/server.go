@@ -1332,8 +1332,10 @@ func (s *Server) handleIXFR(ctx context.Context, conn net.Conn, request *packet.
 		}
 	}
 
-	if err != nil || !historyValid {
-		s.Logger.Info("IXFR history not found or gap detected, falling back to AXFR sequence",
+	if err != nil {
+		s.Logger.Warn("IXFR chain query failed, falling back to AXFR", "zone", zone.Name, "error", err)
+	} else if !historyValid {
+		s.Logger.Info("IXFR history gap detected, falling back to AXFR",
 			"zone", zone.Name, "client_serial", clientSerial)
 
 		// RFC 1995: If IXFR is not possible, fall back to AXFR sequence using streaming
