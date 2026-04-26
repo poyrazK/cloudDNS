@@ -861,9 +861,9 @@ func (r *PostgresRepository) ApplyZoneUpdate(ctx context.Context, zoneID string,
 		}
 	}
 	newSerial := currentSerial + 1
-	if currentSerial >= 4294967295 {
+	// Detect uint32 wraparound (Go doesn't panic on overflow, it wraps silently)
+	if newSerial == 0 && currentSerial != 0 {
 		log.Printf("SOA serial overflow, resetting to 0 for zone %s", zoneID)
-		newSerial = 0
 	}
 
 	for _, op := range operations {
