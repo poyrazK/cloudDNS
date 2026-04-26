@@ -1104,6 +1104,21 @@ func ConvertPacketRecordToDomain(pRec packet.DNSRecord, zoneID string) (domain.R
 	return rec, nil
 }
 
+// unescapeCAAValue removes outer quotes and unescapes backslash sequences per RFC 6844.
+func unescapeCAAValue(s string) string {
+	// Trim outer quotes if present
+	s = strings.Trim(s, "\"")
+	var result strings.Builder
+	result.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) {
+			i++ // skip escape char, add the next char literally
+		}
+		result.WriteByte(s[i])
+	}
+	return result.String()
+}
+
 // ConvertDomainToPacketRecord is a helper to bridge domain model and wire format
 func ConvertDomainToPacketRecord(rec domain.Record) (packet.DNSRecord, error) {
 	name := rec.Name
@@ -1385,8 +1400,8 @@ func ConvertDomainToPacketRecord(rec domain.Record) (packet.DNSRecord, error) {
 	case domain.TypeCAA:
 		pRec.Type = packet.CAA
 		// CAA content format: "[flag] [tag] \"[value]\""
-		// Value can contain spaces, so Fields is not enough.
-		re := regexp.MustCompile(`^(\d+)\s+([a-zA-Z0-9]+)\s+"(.*)"$`)
+		// RFC 6844: value can contain escaped characters
+		re := regexp.MustCompile(`^(\d+)\s+([a-zA-Z0-9]+)\s+"((?:[^"\\]|\\.)*)"$`)
 		matches := re.FindStringSubmatch(rec.Content)
 		if len(matches) == 4 {
 			var flag uint16
@@ -1394,7 +1409,7 @@ func ConvertDomainToPacketRecord(rec domain.Record) (packet.DNSRecord, error) {
 				pRec.CAAFlag = uint8(flag) // #nosec G115
 			}
 			pRec.CAATag = matches[2]
-			pRec.CAAValue = matches[3]
+			pRec.CAAValue = unescapeCAAValue(matches[3])
 		}
 
 	default:
