@@ -111,7 +111,9 @@ func (s *dnsService) audit(ctx context.Context, tenantID, action, resType, resID
 		Details:      details,
 		CreatedAt:    time.Now(),
 	}
-	_ = s.repo.SaveAuditLog(ctx, logEntry) // Fire and forget audit for now
+	if err := s.repo.SaveAuditLog(ctx, logEntry); err != nil {
+		s.logger.Warn("failed to save audit log", "action", action, "resource_id", resID, "error", err)
+	}
 }
 
 func (s *dnsService) Resolve(ctx context.Context, name string, qType domain.RecordType, clientIP string) ([]domain.Record, error) {

@@ -13,13 +13,18 @@ import (
 
 // Handler handles HTTP requests for zone and record management.
 type Handler struct {
-	svc  ports.DNSService
-	repo ports.DNSRepository
+	svc         ports.DNSService
+	repo        ports.DNSRepository
+	tenantLimiter *tenantLimiter
 }
 
 // New creates and returns a new Handler instance.
 func New(svc ports.DNSService, repo ports.DNSRepository) *Handler {
-	return &Handler{svc: svc, repo: repo}
+	return &Handler{
+		svc:          svc,
+		repo:         repo,
+		tenantLimiter: NewTenantLimiter(100, 200, 100000), // 100 writes/sec, burst 200, max 100k tenants
+	}
 }
 
 // RegisterRoutes registers the API routes with the provided ServeMux.
@@ -31,14 +36,16 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	// Middleware
 	auth := AuthMiddleware(h.repo)
 	admin := RequireRole(domain.RoleAdmin)
+	rateLimit := RateLimitMiddleware(h.tenantLimiter)
 
 	// Protected Routes (scoped by tenant_id from auth key)
-	mux.Handle("POST /zones", auth(admin(http.HandlerFunc(h.CreateZone))))
+	// Write operations are rate-limited per tenant
+	mux.Handle("POST /zones", auth(rateLimit(admin(http.HandlerFunc(h.CreateZone)))))
 	mux.Handle("GET /zones", auth(http.HandlerFunc(h.ListZones)))
 	mux.Handle("GET /zones/{id}/records", auth(http.HandlerFunc(h.ListRecordsForZone)))
-	mux.Handle("DELETE /zones/{id}", auth(admin(http.HandlerFunc(h.DeleteZone))))
-	mux.Handle("POST /zones/{id}/records", auth(admin(http.HandlerFunc(h.CreateRecord))))
-	mux.Handle("DELETE /zones/{zone_id}/records/{id}", auth(admin(http.HandlerFunc(h.DeleteRecord))))
+	mux.Handle("DELETE /zones/{id}", auth(rateLimit(admin(http.HandlerFunc(h.DeleteZone)))))
+	mux.Handle("POST /zones/{id}/records", auth(rateLimit(admin(http.HandlerFunc(h.CreateRecord)))))
+	mux.Handle("DELETE /zones/{zone_id}/records/{id}", auth(rateLimit(admin(http.HandlerFunc(h.DeleteRecord)))))
 	mux.Handle("GET /audit-logs", auth(http.HandlerFunc(h.ListAuditLogs)))
 }
 
