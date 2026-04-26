@@ -244,7 +244,9 @@ func (s *Server) startInvalidationListener(ctx context.Context) {
 			if len(parts) == 2 {
 				qType := packet.RecordTypeToQueryType(domain.RecordType(parts[1]))
 				l1Key := fmt.Sprintf("%s:%d", strings.ToLower(parts[0]), qType)
-				s.Cache.Invalidate(l1Key)
+				if s.Cache != nil {
+					s.Cache.Invalidate(l1Key)
+				}
 			} else {
 				s.Logger.Warn("received malformed cache invalidation payload", "payload", msg.Payload)
 			}

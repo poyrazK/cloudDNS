@@ -861,6 +861,10 @@ func (r *PostgresRepository) ApplyZoneUpdate(ctx context.Context, zoneID string,
 		}
 	}
 	newSerial := currentSerial + 1
+	if currentSerial >= 4294967295 {
+		log.Printf("SOA serial overflow, resetting to 0 for zone %s", zoneID)
+		newSerial = 0
+	}
 
 	for _, op := range operations {
 		switch op.Action {
