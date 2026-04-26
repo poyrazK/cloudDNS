@@ -78,6 +78,10 @@ func (m *mockDNSSECRepo) GetRecordsToProbe(_ context.Context) ([]domain.Record, 
 	return nil, nil
 }
 
+func (m *mockDNSSECRepo) GetRecordsToProbeStreaming(_ context.Context) (ports.RecordIterator, error) {
+	return nil, nil
+}
+
 func (m *mockDNSSECRepo) CreateKey(_ context.Context, key *domain.DNSSECKey) error {
 	if m.err != nil {
 		return m.err

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
+	"github.com/poyrazK/cloudDNS/internal/core/ports"
 	"github.com/poyrazK/cloudDNS/internal/testutil"
 )
 
@@ -46,6 +47,10 @@ func (m *mockAnycastDNSService) ListAuditLogs(_ context.Context, _ string) ([]do
 }
 
 func (m *mockAnycastDNSService) GetRecordsToProbe(_ context.Context) ([]domain.Record, error) {
+	return nil, nil
+}
+
+func (m *mockAnycastDNSService) GetRecordsToProbeStreaming(_ context.Context) (ports.RecordIterator, error) {
 	return nil, nil
 }
 
@@ -146,6 +151,10 @@ func (m *mockMultiBackendService) HealthCheck(_ context.Context) map[string]erro
 }
 
 func (m *mockMultiBackendService) GetRecordsToProbe(_ context.Context) ([]domain.Record, error) {
+	return nil, nil
+}
+
+func (m *mockMultiBackendService) GetRecordsToProbeStreaming(_ context.Context) (ports.RecordIterator, error) {
 	return nil, nil
 }
 

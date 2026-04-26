@@ -11,6 +11,27 @@ import (
 	"github.com/poyrazK/cloudDNS/internal/core/ports"
 )
 
+type testRecordIterator struct {
+	records []domain.Record
+	index   int
+}
+
+func (it *testRecordIterator) Next() bool {
+	return it.index < len(it.records)
+}
+
+func (it *testRecordIterator) Record() domain.Record {
+	return it.records[it.index]
+}
+
+func (it *testRecordIterator) Err() error {
+	return nil
+}
+
+func (it *testRecordIterator) Close() error {
+	return nil
+}
+
 type mockRepo struct {
 	zones   []domain.Zone
 	records []domain.Record
@@ -237,6 +258,10 @@ func (m *mockRepo) GetRecordsToProbe(_ context.Context) ([]domain.Record, error)
 		return nil, m.err
 	}
 	return []domain.Record{{ID: "probe-1"}}, nil
+}
+
+func (m *mockRepo) GetRecordsToProbeStreaming(_ context.Context) (ports.RecordIterator, error) {
+	return &testRecordIterator{records: m.records}, nil
 }
 
 func (m *mockRepo) UpdateRecordHealth(_ context.Context, _ string, _ domain.HealthStatus, _ string) error {

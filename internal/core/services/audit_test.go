@@ -83,6 +83,10 @@ func (m *auditMockRepo) GetRecordsToProbe(ctx context.Context) ([]domain.Record,
 	return m.mockRepo.GetRecordsToProbe(ctx)
 }
 
+func (m *auditMockRepo) GetRecordsToProbeStreaming(ctx context.Context) (ports.RecordIterator, error) {
+	return m.mockRepo.GetRecordsToProbeStreaming(ctx)
+}
+
 func (m *auditMockRepo) UpdateRecordHealth(ctx context.Context, recordID string, status domain.HealthStatus, errMsg string) error {
 	return m.mockRepo.UpdateRecordHealth(ctx, recordID, status, errMsg)
 }

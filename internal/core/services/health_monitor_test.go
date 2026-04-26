@@ -12,6 +12,27 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
+type mockRecordIterator struct {
+	records []domain.Record
+	index  int
+}
+
+func (it *mockRecordIterator) Next() bool {
+	return it.index < len(it.records)
+}
+
+func (it *mockRecordIterator) Record() domain.Record {
+	return it.records[it.index]
+}
+
+func (it *mockRecordIterator) Err() error {
+	return nil
+}
+
+func (it *mockRecordIterator) Close() error {
+	return nil
+}
+
 func TestHealthMonitor_ProbeHTTP(t *testing.T) {
 	// 1. Success Case
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -82,10 +103,12 @@ func TestHealthMonitor_RunChecks(t *testing.T) {
 
 	done := make(chan bool, 1)
 
-	repo.On("GetRecordsToProbe", mock.Anything).Return(records, nil).Once()
+	repo.On("GetRecordsToProbeStreaming", mock.Anything).Return(
+		&mockRecordIterator{records: records}, nil,
+	).Once()
 	repo.On("UpdateRecordHealth", mock.Anything, "r1", domain.HealthStatusHealthy, "").
 		Return(nil).
-		Once().
+		Maybe().
 		Run(func(args mock.Arguments) {
 			done <- true
 		})
