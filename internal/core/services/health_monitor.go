@@ -55,25 +55,51 @@ func (m *HealthMonitor) Start(ctx context.Context, interval time.Duration) {
 }
 
 func (m *HealthMonitor) runChecks(ctx context.Context) {
-	records, err := m.repo.GetRecordsToProbe(ctx)
+	const batchSize = 100
+
+	iter, err := m.repo.GetRecordsToProbeStreaming(ctx)
 	if err != nil {
-		m.logger.Error("failed to fetch records to probe", "error", err)
+		m.logger.Error("failed to create records iterator", "error", err)
 		return
 	}
+	defer func() {
+		if closeErr := iter.Close(); closeErr != nil {
+			m.logger.Error("failed to close records iterator", "error", closeErr)
+		}
+	}()
 
+	batch := make([]domain.Record, 0, batchSize)
 	var wg sync.WaitGroup
 	semaphore := make(chan struct{}, maxProbeWorkers)
 
-	for _, rec := range records {
-		wg.Add(1)
-		go func(r domain.Record) {
-			defer wg.Done()
-			semaphore <- struct{}{}        // Acquire
-			defer func() { <-semaphore }() // Release
-			m.probeRecord(ctx, r)
-		}(rec)
+	for {
+		// Fill batch
+		for len(batch) < batchSize && iter.Next() {
+			batch = append(batch, iter.Record())
+		}
+
+		if iter.Err() != nil {
+			m.logger.Error("iterator error during health check fetch", "error", iter.Err())
+			break
+		}
+
+		if len(batch) == 0 {
+			break
+		}
+
+		for _, rec := range batch {
+			wg.Add(1)
+			go func(r domain.Record) {
+				defer wg.Done()
+				semaphore <- struct{}{}
+				defer func() { <-semaphore }()
+				m.probeRecord(ctx, r)
+			}(rec)
+		}
+		wg.Wait()
+
+		batch = batch[:0]
 	}
-	wg.Wait()
 }
 
 func (m *HealthMonitor) probeRecord(ctx context.Context, rec domain.Record) {

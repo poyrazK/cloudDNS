@@ -546,6 +546,24 @@ func (r *PostgresRepository) GetRecordsToProbe(ctx context.Context) ([]domain.Re
 	return records, nil
 }
 
+// GetRecordsToProbeStreaming implements ports.DNSRepository.
+// It returns a RecordIterator that streams records with health checks configured,
+// ordered by id for consistent pagination across calls.
+func (r *PostgresRepository) GetRecordsToProbeStreaming(ctx context.Context) (ports.RecordIterator, error) {
+	query := `
+		SELECT id, zone_id, name, type, content, ttl, priority, weight, port, network,
+		       health_check_type, health_check_target
+		FROM dns_records
+		WHERE health_check_type IN ('HTTP', 'TCP')
+		AND health_check_target IS NOT NULL AND health_check_target <> ''
+		ORDER BY id`
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	return &postgresRecordIterator{rows: rows}, nil
+}
+
 // BatchCreateRecords implements ports.DNSRepository.
 func (r *PostgresRepository) BatchCreateRecords(ctx context.Context, records []domain.Record) error {
 	if len(records) == 0 {

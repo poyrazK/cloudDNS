@@ -245,6 +245,11 @@ func (s *dnsService) GetRecordsToProbe(ctx context.Context) ([]domain.Record, er
 	return s.repo.GetRecordsToProbe(ctx)
 }
 
+// GetRecordsToProbeStreaming returns an iterator for records that have health checks configured.
+func (s *dnsService) GetRecordsToProbeStreaming(ctx context.Context) (ports.RecordIterator, error) {
+	return s.repo.GetRecordsToProbeStreaming(ctx)
+}
+
 // UpdateRecordHealth updates the health status and error message for a specific record.
 func (s *dnsService) UpdateRecordHealth(ctx context.Context, recordID string, status domain.HealthStatus, errMsg string) error {
 	return s.repo.UpdateRecordHealth(ctx, recordID, status, errMsg)
