@@ -301,7 +301,9 @@ func (s *Server) dlqRetryWorker(ctx context.Context) {
 				s.Cache.Invalidate(l1Key)
 				s.Logger.Debug("DLQ message processed successfully", "key", l1Key)
 			} else {
-				s.Logger.Warn("cache still nil after DLQ retry, re-queuing", "key", l1Key)
+				// Cache still nil, wait before re-queue to avoid tight loop
+				s.Logger.Warn("cache still nil after DLQ retry, waiting to re-queue", "key", l1Key)
+				time.Sleep(5 * time.Second)
 				if errRequeue := s.Redis.PushToDLQ(ctx, msg); errRequeue != nil {
 					s.Logger.Error("failed to re-queue DLQ message", "error", errRequeue)
 				}
