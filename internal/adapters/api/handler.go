@@ -23,7 +23,7 @@ func New(svc ports.DNSService, repo ports.DNSRepository) *Handler {
 	return &Handler{
 		svc:          svc,
 		repo:         repo,
-		tenantLimiter: NewTenantLimiter(100, 200, 100000), // 100 writes/sec, burst 200, max 100k tenants
+		tenantLimiter: newTenantLimiter(100, 200, 100000), // 100 writes/sec, burst 200, max 100k tenants
 	}
 }
 

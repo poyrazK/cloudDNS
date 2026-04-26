@@ -19,8 +19,8 @@ type tenantBucket struct {
 	last   time.Time
 }
 
-// NewTenantLimiter creates a new per-tenant rate limiter.
-func NewTenantLimiter(rate float64, burst int, maxTenants int) *tenantLimiter {
+// newTenantLimiter creates a new per-tenant rate limiter.
+func newTenantLimiter(rate float64, burst int, maxTenants int) *tenantLimiter {
 	return &tenantLimiter{
 		buckets:     make(map[string]*tenantBucket),
 		rate:        rate,
