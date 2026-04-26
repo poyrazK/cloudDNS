@@ -322,6 +322,23 @@ func TestConvertDomainToPacketRecord(t *testing.T) {
 			},
 		},
 		{
+			name: "CAA record with escaped quote",
+			rec: domain.Record{
+				Name:    "test",
+				Type:    domain.TypeCAA,
+				Content: `0 issue "value with \" quote"`,
+				TTL:     3600,
+			},
+			want: packet.DNSRecord{
+				Name:     "test.",
+				Type:     packet.CAA,
+				CAAFlag:  0,
+				CAATag:   "issue",
+				CAAValue: `value with " quote`,
+				TTL:      3600,
+			},
+		},
+		{
 			name: "Unsupported type",
 			rec: domain.Record{
 				Type: "UNKNOWN",
