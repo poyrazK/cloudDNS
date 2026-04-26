@@ -3,7 +3,7 @@ package api
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
@@ -13,17 +13,22 @@ import (
 
 // Handler handles HTTP requests for zone and record management.
 type Handler struct {
-	svc         ports.DNSService
-	repo        ports.DNSRepository
+	svc          ports.DNSService
+	repo         ports.DNSRepository
 	tenantLimiter *tenantLimiter
+	logger       *slog.Logger
 }
 
 // New creates and returns a new Handler instance.
-func New(svc ports.DNSService, repo ports.DNSRepository) *Handler {
+func New(svc ports.DNSService, repo ports.DNSRepository, logger *slog.Logger) *Handler {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &Handler{
 		svc:          svc,
 		repo:         repo,
 		tenantLimiter: newTenantLimiter(100, 200, 100000), // 100 writes/sec, burst 200, max 100k tenants
+		logger:       logger,
 	}
 }
 
@@ -64,7 +69,7 @@ func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 		if checkErr != nil {
 			status = "DEGRADED"
 			details[name] = checkErr.Error()
-			log.Printf("Health check failed: %s: %v", name, checkErr)
+			h.logger.Warn("health check failed", "check", name, "error", checkErr)
 		} else {
 			details[name] = "OK"
 		}
@@ -83,7 +88,7 @@ func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		log.Printf("failed to encode health check response: %v", err)
+		h.logger.Error("failed to encode health check response", "error", err)
 	}
 }
 
@@ -91,7 +96,7 @@ func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := r.Context().Value(CtxTenantID).(string)
 	if !ok || tenantID == "" {
-		log.Printf("ListAuditLogs: missing or invalid tenant ID in context")
+		h.logger.Warn("ListAuditLogs: missing or invalid tenant ID in context")
 		http.Error(w, "Unauthorized: missing tenant context", http.StatusUnauthorized)
 		return
 	}
@@ -104,7 +109,7 @@ func (h *Handler) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(logs); err != nil {
-		log.Printf("failed to encode audit logs response: %v", err)
+		h.logger.Error("failed to encode audit logs response", "error", err)
 	}
 }
 
@@ -124,7 +129,7 @@ func (h *Handler) CreateZone(w http.ResponseWriter, r *http.Request) {
 	// Extract TenantID from Auth context
 	tenantID, ok := r.Context().Value(CtxTenantID).(string)
 	if !ok || tenantID == "" {
-		log.Printf("CreateZone: missing or invalid tenant ID in context")
+		h.logger.Warn("CreateZone: missing or invalid tenant ID in context")
 		http.Error(w, "Unauthorized: missing tenant context", http.StatusUnauthorized)
 		return
 	}
@@ -146,7 +151,7 @@ func (h *Handler) CreateZone(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	if err := json.NewEncoder(w).Encode(zone); err != nil {
-		log.Printf("failed to encode zone response: %v", err)
+		h.logger.Error("failed to encode zone response", "error", err)
 	}
 }
 
@@ -154,7 +159,7 @@ func (h *Handler) CreateZone(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ListZones(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := r.Context().Value(CtxTenantID).(string)
 	if !ok || tenantID == "" {
-		log.Printf("ListZones: missing or invalid tenant ID in context")
+		h.logger.Warn("ListZones: missing or invalid tenant ID in context")
 		http.Error(w, "Unauthorized: missing tenant context", http.StatusUnauthorized)
 		return
 	}
@@ -167,7 +172,7 @@ func (h *Handler) ListZones(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(zones); err != nil {
-		log.Printf("failed to encode zones response: %v", err)
+		h.logger.Error("failed to encode zones response", "error", err)
 	}
 }
 
@@ -177,7 +182,7 @@ func (h *Handler) ListRecordsForZone(w http.ResponseWriter, r *http.Request) {
 
 	tenantID, ok := r.Context().Value(CtxTenantID).(string)
 	if !ok || tenantID == "" {
-		log.Printf("ListRecordsForZone: missing or invalid tenant ID in context")
+		h.logger.Warn("ListRecordsForZone: missing or invalid tenant ID in context")
 		http.Error(w, "Unauthorized: missing tenant context", http.StatusUnauthorized)
 		return
 	}
@@ -190,7 +195,7 @@ func (h *Handler) ListRecordsForZone(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(records); err != nil {
-		log.Printf("failed to encode records response: %v", err)
+		h.logger.Error("failed to encode records response", "error", err)
 	}
 }
 
@@ -212,7 +217,7 @@ func (h *Handler) CreateRecord(w http.ResponseWriter, r *http.Request) {
 
 	tenantID, ok := r.Context().Value(CtxTenantID).(string)
 	if !ok || tenantID == "" {
-		log.Printf("CreateRecord: missing or invalid tenant ID in context")
+		h.logger.Warn("CreateRecord: missing or invalid tenant ID in context")
 		http.Error(w, "Unauthorized: missing tenant context", http.StatusUnauthorized)
 		return
 	}
@@ -226,7 +231,7 @@ func (h *Handler) CreateRecord(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	if err := json.NewEncoder(w).Encode(record); err != nil {
-		log.Printf("failed to encode record response: %v", err)
+		h.logger.Error("failed to encode record response", "error", err)
 	}
 }
 
@@ -235,7 +240,7 @@ func (h *Handler) DeleteZone(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	tenantID, ok := r.Context().Value(CtxTenantID).(string)
 	if !ok || tenantID == "" {
-		log.Printf("DeleteZone: missing or invalid tenant ID in context")
+		h.logger.Warn("DeleteZone: missing or invalid tenant ID in context")
 		http.Error(w, "Unauthorized: missing tenant context", http.StatusUnauthorized)
 		return
 	}
@@ -255,7 +260,7 @@ func (h *Handler) DeleteRecord(w http.ResponseWriter, r *http.Request) {
 
 	tenantID, ok := r.Context().Value(CtxTenantID).(string)
 	if !ok || tenantID == "" {
-		log.Printf("DeleteRecord: missing or invalid tenant ID in context")
+		h.logger.Warn("DeleteRecord: missing or invalid tenant ID in context")
 		http.Error(w, "Unauthorized: missing tenant context", http.StatusUnauthorized)
 		return
 	}

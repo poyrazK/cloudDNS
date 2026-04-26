@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"testing"
@@ -40,7 +41,7 @@ func TestEndToEnd_Protocols(t *testing.T) {
 		_ = dnsSrv.Run(ctx)
 	}()
 
-	apiHandler := api.New(svc, repo)
+	apiHandler := api.New(svc, repo, slog.Default())
 	mux := http.NewServeMux()
 	apiHandler.RegisterRoutes(mux)
 	apiSrv := &http.Server{Addr: apiAddr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}

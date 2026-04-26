@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -14,7 +15,7 @@ import (
 func TestListAuditLogs(t *testing.T) {
 	svc := &mockDNSService{}
 	repo := &testutil.MockRepo{}
-	handler := New(svc, repo)
+	handler := New(svc, repo, slog.Default())
 
 	req := httptest.NewRequest("GET", "/audit-logs", nil)
 	ctx := context.WithValue(req.Context(), CtxTenantID, "t1")
