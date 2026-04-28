@@ -262,10 +262,8 @@ func (s *Server) startInvalidationListener(ctx context.Context) {
 }
 
 // dlqRetryWorker processes messages from the dead letter queue with retry logic.
-// It runs until the context is canceled. Messages are re-queued with exponential backoff
-// up to a maximum retry count before being dropped.
+// It runs until the context is canceled.
 func (s *Server) dlqRetryWorker(ctx context.Context) {
-	const maxRetries = 5
 	s.Logger.Info("starting DLQ retry worker")
 
 	for {
