@@ -62,6 +62,7 @@ type DNSRepository interface {
 	// Smart Engine (GSLB) Support
 	UpdateRecordHealth(ctx context.Context, recordID string, status domain.HealthStatus, errMsg string) error
 	GetRecordsToProbe(ctx context.Context) ([]domain.Record, error)
+	GetRecordsToProbeStreaming(ctx context.Context) (RecordIterator, error)
 }
 
 // DNSService defines the interface for core DNS business logic.
@@ -70,6 +71,7 @@ type DNSService interface {
 	CreateRecord(ctx context.Context, record *domain.Record) error
 	Resolve(ctx context.Context, name string, qType domain.RecordType, clientIP string) ([]domain.Record, error)
 	GetRecordsToProbe(ctx context.Context) ([]domain.Record, error) // Added for Smart Engine
+	GetRecordsToProbeStreaming(ctx context.Context) (RecordIterator, error) // Added for Smart Engine
 	UpdateRecordHealth(ctx context.Context, recordID string, status domain.HealthStatus, errMsg string) error // Added for Smart Engine
 	ListZones(ctx context.Context, tenantID string) ([]domain.Zone, error)
 	ListRecordsForZone(ctx context.Context, zoneID string, tenantID string) ([]domain.Record, error)

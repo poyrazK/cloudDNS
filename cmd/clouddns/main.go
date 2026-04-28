@@ -248,7 +248,7 @@ func run(ctx context.Context) error {
 	if apiAddr == "" {
 		apiAddr = ":8080"
 	}
-	apiHandler := api.New(dnsSvc, repo)
+	apiHandler := api.New(dnsSvc, repo, logger)
 	mux := http.NewServeMux()
 	apiHandler.RegisterRoutes(mux)
 

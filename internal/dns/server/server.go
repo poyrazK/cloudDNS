@@ -241,15 +241,69 @@ func (s *Server) startInvalidationListener(ctx context.Context) {
 
 			// Standardize key for L1 cache lookup (lowercase name)
 			parts := strings.SplitN(msg.Payload, ":", 2)
-			if len(parts) == 2 {
-				qType := packet.RecordTypeToQueryType(domain.RecordType(parts[1]))
-				l1Key := fmt.Sprintf("%s:%d", strings.ToLower(parts[0]), qType)
-				if s.Cache != nil {
-					s.Cache.Invalidate(l1Key)
-				}
-			} else {
-				s.Logger.Warn("received malformed cache invalidation payload", "payload", msg.Payload)
+			if len(parts) != 2 {
+				s.Logger.Warn("malformed cache invalidation payload, dropping", "payload", msg.Payload)
+				continue
 			}
+
+			qType := packet.RecordTypeToQueryType(domain.RecordType(parts[1]))
+			l1Key := fmt.Sprintf("%s:%d", strings.ToLower(parts[0]), qType)
+			if s.Cache == nil {
+				s.Logger.Warn("cache is nil, pushing to DLQ", "key", l1Key)
+				if errDLQ := s.Redis.PushToDLQ(ctx, msg.Payload); errDLQ != nil {
+					s.Logger.Error("failed to push nil-cache message to DLQ", "error", errDLQ)
+				}
+				continue
+			}
+
+			s.Cache.Invalidate(l1Key)
+		}
+	}
+}
+
+// dlqRetryWorker processes messages from the dead letter queue with retry logic.
+// It runs until the context is canceled.
+func (s *Server) dlqRetryWorker(ctx context.Context) {
+	s.Logger.Info("starting DLQ retry worker")
+
+	for {
+		select {
+		case <-ctx.Done():
+			s.Logger.Info("stopping DLQ retry worker")
+			return
+		case <-time.After(5 * time.Second):
+			// Continue to process DLQ after backoff
+		}
+
+		msg, err := s.Redis.PopFromDLQ(ctx, 0)
+		if err != nil {
+			if ctx.Err() != nil {
+				return // Context canceled
+			}
+			s.Logger.Error("failed to pop from DLQ", "error", err)
+			continue
+		}
+		if msg == "" {
+			continue // No messages
+		}
+
+		s.Logger.Debug("retrying DLQ message", "msg", msg)
+		parts := strings.SplitN(msg, ":", 2)
+		if len(parts) != 2 {
+			s.Logger.Warn("DLQ message malformed, dropping", "msg", msg)
+			continue
+		}
+
+		qType := packet.RecordTypeToQueryType(domain.RecordType(parts[1]))
+		l1Key := fmt.Sprintf("%s:%d", strings.ToLower(parts[0]), qType)
+
+		if s.Cache != nil {
+			s.Cache.Invalidate(l1Key)
+			s.Logger.Debug("DLQ message processed successfully", "key", l1Key)
+		} else {
+			// Cache still nil, log and drop (malformed messages from startInvalidationListener
+			// are already dropped there; if we get here with nil cache, something is wrong)
+			s.Logger.Warn("cache still nil, dropping DLQ message", "key", l1Key)
 		}
 	}
 }
@@ -304,6 +358,13 @@ func (s *Server) Run(ctx context.Context) error {
 		go func() {
 			defer s.wg.Done()
 			s.startInvalidationListener(ctx)
+		}()
+
+		// Start DLQ retry worker
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			s.dlqRetryWorker(ctx)
 		}()
 	}
 

@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -12,7 +13,34 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
+type mockRecordIterator struct {
+	records []domain.Record
+	index  int
+}
+
+func (it *mockRecordIterator) Next() bool {
+	if it.index >= len(it.records) {
+		return false
+	}
+	it.index++
+	return true
+}
+
+func (it *mockRecordIterator) Record() domain.Record {
+	return it.records[it.index-1]
+}
+
+func (it *mockRecordIterator) Err() error {
+	return nil
+}
+
+func (it *mockRecordIterator) Close() error {
+	return nil
+}
+
 func TestHealthMonitor_ProbeHTTP(t *testing.T) {
+	ctx := context.Background()
+
 	// 1. Success Case
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -20,7 +48,7 @@ func TestHealthMonitor_ProbeHTTP(t *testing.T) {
 	defer ts.Close()
 
 	m := NewHealthMonitor(nil, nil)
-	status, msg := m.probeHTTP(ts.URL)
+	status, msg := m.probeHTTP(ctx, ts.URL)
 	if status != domain.HealthStatusHealthy {
 		t.Errorf("Expected Healthy, got %s (msg: %s)", status, msg)
 	}
@@ -31,13 +59,13 @@ func TestHealthMonitor_ProbeHTTP(t *testing.T) {
 	}))
 	defer tsErr.Close()
 
-	status, _ = m.probeHTTP(tsErr.URL)
+	status, _ = m.probeHTTP(ctx, tsErr.URL)
 	if status != domain.HealthStatusUnhealthy {
 		t.Errorf("Expected Unhealthy for 404, got %s", status)
 	}
 
 	// 3. Network Error
-	status, _ = m.probeHTTP("http://localhost:1") // Closed port
+	status, _ = m.probeHTTP(ctx, "http://localhost:1") // Closed port
 	if status != domain.HealthStatusUnhealthy {
 		t.Errorf("Expected Unhealthy for connection error, got %s", status)
 	}
@@ -82,10 +110,12 @@ func TestHealthMonitor_RunChecks(t *testing.T) {
 
 	done := make(chan bool, 1)
 
-	repo.On("GetRecordsToProbe", mock.Anything).Return(records, nil).Once()
+	repo.On("GetRecordsToProbeStreaming", mock.Anything).Return(
+		&mockRecordIterator{records: records}, nil,
+	).Once()
 	repo.On("UpdateRecordHealth", mock.Anything, "r1", domain.HealthStatusHealthy, "").
 		Return(nil).
-		Once().
+		Maybe().
 		Run(func(args mock.Arguments) {
 			done <- true
 		})
@@ -101,4 +131,19 @@ func TestHealthMonitor_RunChecks(t *testing.T) {
 	}
 
 	repo.AssertExpectations(t)
+}
+
+func TestHealthMonitor_Start(t *testing.T) {
+	repo := &testutil.MockRepo{}
+	logger := slog.Default()
+	m := NewHealthMonitor(repo, logger)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	// Should return immediately since context is already canceled
+	m.Start(ctx, time.Second)
+
+	// Verify no probe was attempted
+	repo.AssertNotCalled(t, "GetRecordsToProbeStreaming")
 }

@@ -55,25 +55,60 @@ func (m *HealthMonitor) Start(ctx context.Context, interval time.Duration) {
 }
 
 func (m *HealthMonitor) runChecks(ctx context.Context) {
-	records, err := m.repo.GetRecordsToProbe(ctx)
+	const batchSize = 100
+
+	iter, err := m.repo.GetRecordsToProbeStreaming(ctx)
 	if err != nil {
-		m.logger.Error("failed to fetch records to probe", "error", err)
+		m.logger.Error("failed to create records iterator", "error", err)
 		return
 	}
+	defer func() {
+		if closeErr := iter.Close(); closeErr != nil {
+			m.logger.Error("failed to close records iterator", "error", closeErr)
+		}
+	}()
 
+	batch := make([]domain.Record, 0, batchSize)
 	var wg sync.WaitGroup
 	semaphore := make(chan struct{}, maxProbeWorkers)
 
-	for _, rec := range records {
-		wg.Add(1)
-		go func(r domain.Record) {
-			defer wg.Done()
-			semaphore <- struct{}{}        // Acquire
-			defer func() { <-semaphore }() // Release
-			m.probeRecord(ctx, r)
-		}(rec)
+	for {
+		// Check context cancellation at start of each iteration
+		select {
+		case <-ctx.Done():
+			wg.Wait() // Wait for in-flight probes to complete
+			return
+		default:
+		}
+
+		// Fill batch
+		for len(batch) < batchSize && iter.Next() {
+			batch = append(batch, iter.Record())
+		}
+
+		if iter.Err() != nil {
+			m.logger.Error("iterator error during health check fetch", "error", iter.Err())
+			break
+		}
+
+		if len(batch) == 0 {
+			break
+		}
+
+		for _, rec := range batch {
+			// Acquire semaphore slot before spawning goroutine
+			semaphore <- struct{}{}
+			wg.Add(1)
+			go func(r domain.Record) {
+				defer wg.Done()
+				defer func() { <-semaphore }()
+				m.probeRecord(ctx, r)
+			}(rec)
+		}
+		wg.Wait()
+
+		batch = batch[:0]
 	}
-	wg.Wait()
 }
 
 func (m *HealthMonitor) probeRecord(ctx context.Context, rec domain.Record) {
@@ -82,7 +117,7 @@ func (m *HealthMonitor) probeRecord(ctx context.Context, rec domain.Record) {
 
 	switch rec.HealthCheckType {
 	case domain.HealthCheckHTTP:
-		status, errMsg = m.probeHTTP(rec.HealthCheckTarget)
+		status, errMsg = m.probeHTTP(ctx, rec.HealthCheckTarget)
 	case domain.HealthCheckTCP:
 		status, errMsg = m.probeTCP(rec.HealthCheckTarget)
 	default:
@@ -94,8 +129,12 @@ func (m *HealthMonitor) probeRecord(ctx context.Context, rec domain.Record) {
 	}
 }
 
-func (m *HealthMonitor) probeHTTP(target string) (domain.HealthStatus, string) {
-	resp, err := m.client.Get(target)
+func (m *HealthMonitor) probeHTTP(ctx context.Context, target string) (domain.HealthStatus, string) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return domain.HealthStatusUnhealthy, err.Error()
+	}
+	resp, err := m.client.Do(req)
 	if err != nil {
 		return domain.HealthStatusUnhealthy, err.Error()
 	}

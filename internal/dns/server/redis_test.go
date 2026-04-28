@@ -70,3 +70,52 @@ func TestRedisCache_Subscribe(t *testing.T) {
 		t.Error("Subscribe returned nil channel")
 	}
 }
+
+func TestRedisCache_PopFromDLQ(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("Failed to run miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	rdb := NewRedisCache(mr.Addr(), "", 0)
+	ctx := context.Background()
+
+	// Test timeout case
+	msg, err := rdb.PopFromDLQ(ctx, 100*time.Millisecond)
+	if msg != "" || err != nil {
+		t.Errorf("Expected empty msg on timeout, got %q, err=%v", msg, err)
+	}
+
+	// Test successful pop
+	rdb.PushToDLQ(ctx, "test-msg")
+	msg, err = rdb.PopFromDLQ(ctx, time.Second)
+	if msg != "test-msg" || err != nil {
+		t.Errorf("Expected 'test-msg', got %q, err=%v", msg, err)
+	}
+}
+
+func TestRedisCache_DLQLen(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("Failed to run miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	rdb := NewRedisCache(mr.Addr(), "", 0)
+	ctx := context.Background()
+
+	// Empty DLQ
+	n, err := rdb.DLQLen(ctx)
+	if n != 0 || err != nil {
+		t.Errorf("Expected 0, got %d, err=%v", n, err)
+	}
+
+	// Add items
+	rdb.PushToDLQ(ctx, "msg1")
+	rdb.PushToDLQ(ctx, "msg2")
+	n, err = rdb.DLQLen(ctx)
+	if n != 2 || err != nil {
+		t.Errorf("Expected 2, got %d, err=%v", n, err)
+	}
+}

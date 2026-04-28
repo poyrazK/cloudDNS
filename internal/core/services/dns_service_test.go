@@ -11,6 +11,31 @@ import (
 	"github.com/poyrazK/cloudDNS/internal/core/ports"
 )
 
+type testRecordIterator struct {
+	records []domain.Record
+	index   int
+}
+
+func (it *testRecordIterator) Next() bool {
+	if it.index >= len(it.records) {
+		return false
+	}
+	it.index++
+	return true
+}
+
+func (it *testRecordIterator) Record() domain.Record {
+	return it.records[it.index-1]
+}
+
+func (it *testRecordIterator) Err() error {
+	return nil
+}
+
+func (it *testRecordIterator) Close() error {
+	return nil
+}
+
 type mockRepo struct {
 	zones   []domain.Zone
 	records []domain.Record
@@ -237,6 +262,10 @@ func (m *mockRepo) GetRecordsToProbe(_ context.Context) ([]domain.Record, error)
 		return nil, m.err
 	}
 	return []domain.Record{{ID: "probe-1"}}, nil
+}
+
+func (m *mockRepo) GetRecordsToProbeStreaming(_ context.Context) (ports.RecordIterator, error) {
+	return &testRecordIterator{records: m.records}, nil
 }
 
 func (m *mockRepo) UpdateRecordHealth(_ context.Context, _ string, _ domain.HealthStatus, _ string) error {
@@ -525,5 +554,41 @@ func TestResolve_SmartEngine(t *testing.T) {
 	if len(recs) != 2 {
 		t.Errorf("Expected fallback to return all 2 records, got %d", len(recs))
 	}
+}
+
+func TestGetRecordsToProbeStreaming(t *testing.T) {
+	repo := &mockRepo{
+		records: []domain.Record{
+			{ID: "r1", Name: "probe1.test.", Type: domain.TypeA, HealthCheckTarget: "http://probe1.test"},
+			{ID: "r2", Name: "probe2.test.", Type: domain.TypeA, HealthCheckTarget: "http://probe2.test"},
+		},
+	}
+	svc := NewDNSService(repo, nil)
+	ctx := context.Background()
+
+	iter, err := svc.GetRecordsToProbeStreaming(ctx)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	if iter == nil {
+		t.Fatal("Expected iterator, got nil")
+	}
+
+	// Should be able to iterate
+	count := 0
+	for iter.Next() {
+		count++
+		_ = iter.Record()
+	}
+	if count != 2 {
+		t.Errorf("Expected 2 records, got %d", count)
+	}
+
+	if err := iter.Err(); err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	iter.Close()
 }
 

@@ -2,12 +2,17 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
 	"github.com/redis/go-redis/v9"
 )
+
+// DLQChannel is the Redis list key for dead letter queue of failed invalidation messages.
+const DLQChannel = "dns:invalidation:dlq"
 
 // InvalidationChannel is the Redis pub/sub channel for cache invalidation events.
 const InvalidationChannel = "dns:invalidation"
@@ -55,4 +60,37 @@ func (r *RedisCache) Invalidate(ctx context.Context, name string, qType domain.R
 // Subscribe returns a PubSub instance that receives invalidation keys.
 func (r *RedisCache) Subscribe(ctx context.Context) *redis.PubSub {
 	return r.client.Subscribe(ctx, InvalidationChannel)
+}
+
+// PushToDLQ pushes a failed invalidation message to the dead letter queue.
+// The message is stored with a timestamp prefix for ordering.
+func (r *RedisCache) PushToDLQ(ctx context.Context, msg string) error {
+	dlqEntry := fmt.Sprintf("%d:%s", time.Now().UnixNano(), msg)
+	return r.client.LPush(ctx, DLQChannel, dlqEntry).Err()
+}
+
+// PopFromDLQ pops a message from the dead letter queue with blocking.
+// Returns ("", nil) if timeout is reached before a message is available.
+func (r *RedisCache) PopFromDLQ(ctx context.Context, timeout time.Duration) (string, error) {
+	result, err := r.client.BRPop(ctx, timeout, DLQChannel).Result()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return "", nil
+		}
+		return "", err
+	}
+	// result[0] is the key, result[1] is the value
+	if len(result) < 2 {
+		return "", nil
+	}
+	// Strip timestamp prefix (find first colon)
+	if idx := strings.Index(result[1], ":"); idx >= 0 {
+		return result[1][idx+1:], nil
+	}
+	return result[1], nil
+}
+
+// DLQLen returns the current length of the dead letter queue.
+func (r *RedisCache) DLQLen(ctx context.Context) (int64, error) {
+	return r.client.LLen(ctx, DLQChannel).Result()
 }

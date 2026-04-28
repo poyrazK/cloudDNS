@@ -249,6 +249,15 @@ func (m *MockRepo) GetRecordsToProbe(_ context.Context) ([]domain.Record, error)
 	return args.Get(0).([]domain.Record), args.Error(1)
 }
 
+// GetRecordsToProbeStreaming implements ports.DNSRepository for testing.
+func (m *MockRepo) GetRecordsToProbeStreaming(_ context.Context) (ports.RecordIterator, error) {
+	args := m.Called()
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(ports.RecordIterator), args.Error(1)
+}
+
 // MockDNSService implements ports.DNSService for testing.
 type MockDNSService struct {
 	mock.Mock
@@ -279,6 +288,15 @@ func (m *MockDNSService) GetRecordsToProbe(_ context.Context) ([]domain.Record, 
 		return nil, args.Error(1)
 	}
 	return args.Get(0).([]domain.Record), args.Error(1)
+}
+
+// GetRecordsToProbeStreaming implements ports.DNSService for testing.
+func (m *MockDNSService) GetRecordsToProbeStreaming(_ context.Context) (ports.RecordIterator, error) {
+	args := m.Called()
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(ports.RecordIterator), args.Error(1)
 }
 
 // UpdateRecordHealth implements ports.DNSService for testing.

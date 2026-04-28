@@ -19,6 +19,31 @@ import (
 	"github.com/poyrazK/cloudDNS/internal/dns/packet"
 )
 
+type mockRecordIterator struct {
+	records []domain.Record
+	index   int
+}
+
+func (it *mockRecordIterator) Next() bool {
+	if it.index >= len(it.records) {
+		return false
+	}
+	it.index++
+	return true
+}
+
+func (it *mockRecordIterator) Record() domain.Record {
+	return it.records[it.index-1]
+}
+
+func (it *mockRecordIterator) Err() error {
+	return nil
+}
+
+func (it *mockRecordIterator) Close() error {
+	return nil
+}
+
 type mockServerRepo struct {
 	mu      sync.RWMutex
 	records []domain.Record
@@ -255,6 +280,10 @@ func (m *mockServerRepo) GetRecordsToProbe(ctx context.Context) ([]domain.Record
 		}
 	}
 	return res, nil
+}
+
+func (m *mockServerRepo) GetRecordsToProbeStreaming(ctx context.Context) (ports.RecordIterator, error) {
+	return &mockRecordIterator{records: m.records}, nil
 }
 
 func (m *mockServerRepo) CreateRecord(ctx context.Context, record *domain.Record) error {
