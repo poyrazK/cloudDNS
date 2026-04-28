@@ -19,6 +19,10 @@ type recursiveResolver struct {
 	fallbacks []string
 }
 
+// recursiveTimeout is the maximum time allowed for recursive resolution.
+// Defaults to 30s but can be overridden in tests.
+var recursiveTimeout = 30 * time.Second
+
 func newRecursiveResolver() *recursiveResolver {
 	return &recursiveResolver{
 		rootHints: []string{
@@ -55,10 +59,7 @@ func (r *recursiveResolver) getShuffledRoots() []string {
 
 func (s *Server) resolveRecursive(name string, qType packet.QueryType) (*packet.DNSPacket, error) {
 	// Total timeout to prevent indefinite blocking on failing root servers
-	const (
-		recursiveTimeout       = 30 * time.Second
-		errRecursiveTimeout     = "recursive resolution timeout"
-	)
+	const errRecursiveTimeout = "recursive resolution timeout"
 	resolveStart := time.Now()
 
 	// Start with a random root server for load balancing and resilience.
@@ -76,7 +77,7 @@ func (s *Server) resolveRecursive(name string, qType packet.QueryType) (*packet.
 	for i := 0; i < maxRoots; i++ {
 		// Check total resolution timeout
 		if time.Since(resolveStart) >= recursiveTimeout {
-			s.Logger.Warn("recursive resolution timed out after 30s", "name", name)
+			s.Logger.Warn("recursive resolution timed out during root iteration", "name", name)
 			return nil, errors.New(errRecursiveTimeout)
 		}
 		rootNS := roots[i]
