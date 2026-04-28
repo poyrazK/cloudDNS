@@ -12,6 +12,14 @@ import (
 	"github.com/poyrazK/cloudDNS/internal/testutil"
 )
 
+// emptyRecordIterator is a safe iterator that always returns false.
+type emptyRecordIterator struct{}
+
+func (e *emptyRecordIterator) Next() bool   { return false }
+func (e *emptyRecordIterator) Record() domain.Record { return domain.Record{} }
+func (e *emptyRecordIterator) Err() error  { return nil }
+func (e *emptyRecordIterator) Close() error { return nil }
+
 type mockAnycastDNSService struct {
 	healthy bool
 }
@@ -51,7 +59,7 @@ func (m *mockAnycastDNSService) GetRecordsToProbe(_ context.Context) ([]domain.R
 }
 
 func (m *mockAnycastDNSService) GetRecordsToProbeStreaming(_ context.Context) (ports.RecordIterator, error) {
-	return nil, nil
+	return &emptyRecordIterator{}, nil
 }
 
 func (m *mockAnycastDNSService) UpdateRecordHealth(_ context.Context, _ string, _ domain.HealthStatus, _ string) error {
@@ -155,7 +163,7 @@ func (m *mockMultiBackendService) GetRecordsToProbe(_ context.Context) ([]domain
 }
 
 func (m *mockMultiBackendService) GetRecordsToProbeStreaming(_ context.Context) (ports.RecordIterator, error) {
-	return nil, nil
+	return &emptyRecordIterator{}, nil
 }
 
 func (m *mockMultiBackendService) UpdateRecordHealth(_ context.Context, _ string, _ domain.HealthStatus, _ string) error {

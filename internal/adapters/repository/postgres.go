@@ -551,12 +551,13 @@ func (r *PostgresRepository) GetRecordsToProbe(ctx context.Context) ([]domain.Re
 // ordered by id for consistent pagination across calls.
 func (r *PostgresRepository) GetRecordsToProbeStreaming(ctx context.Context) (ports.RecordIterator, error) {
 	query := `
-		SELECT id, zone_id, name, type, content, ttl, priority, weight, port, network,
-		       health_check_type, health_check_target
-		FROM dns_records
-		WHERE health_check_type IN ('HTTP', 'TCP')
-		AND health_check_target IS NOT NULL AND health_check_target <> ''
-		ORDER BY id`
+		SELECT r.id, r.zone_id, r.name, r.type, r.content, r.ttl, r.priority, r.weight, r.port, r.network,
+		       r.health_check_type, r.health_check_target, rh.status
+		FROM dns_records r
+		LEFT JOIN record_health rh ON r.id = rh.record_id
+		WHERE r.health_check_type IN ('HTTP', 'TCP')
+		AND r.health_check_target IS NOT NULL AND r.health_check_target <> ''
+		ORDER BY r.id`
 	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err

@@ -73,6 +73,14 @@ func (m *HealthMonitor) runChecks(ctx context.Context) {
 	semaphore := make(chan struct{}, maxProbeWorkers)
 
 	for {
+		// Check context cancellation at start of each iteration
+		select {
+		case <-ctx.Done():
+			wg.Wait() // Wait for in-flight probes to complete
+			return
+		default:
+		}
+
 		// Fill batch
 		for len(batch) < batchSize && iter.Next() {
 			batch = append(batch, iter.Record())
@@ -88,10 +96,11 @@ func (m *HealthMonitor) runChecks(ctx context.Context) {
 		}
 
 		for _, rec := range batch {
+			// Acquire semaphore slot before spawning goroutine
+			semaphore <- struct{}{}
 			wg.Add(1)
 			go func(r domain.Record) {
 				defer wg.Done()
-				semaphore <- struct{}{}
 				defer func() { <-semaphore }()
 				m.probeRecord(ctx, r)
 			}(rec)
@@ -108,7 +117,7 @@ func (m *HealthMonitor) probeRecord(ctx context.Context, rec domain.Record) {
 
 	switch rec.HealthCheckType {
 	case domain.HealthCheckHTTP:
-		status, errMsg = m.probeHTTP(rec.HealthCheckTarget)
+		status, errMsg = m.probeHTTP(ctx, rec.HealthCheckTarget)
 	case domain.HealthCheckTCP:
 		status, errMsg = m.probeTCP(rec.HealthCheckTarget)
 	default:
@@ -120,8 +129,12 @@ func (m *HealthMonitor) probeRecord(ctx context.Context, rec domain.Record) {
 	}
 }
 
-func (m *HealthMonitor) probeHTTP(target string) (domain.HealthStatus, string) {
-	resp, err := m.client.Get(target)
+func (m *HealthMonitor) probeHTTP(ctx context.Context, target string) (domain.HealthStatus, string) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return domain.HealthStatusUnhealthy, err.Error()
+	}
+	resp, err := m.client.Do(req)
 	if err != nil {
 		return domain.HealthStatusUnhealthy, err.Error()
 	}

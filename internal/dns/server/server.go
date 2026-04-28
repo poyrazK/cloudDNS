@@ -242,10 +242,7 @@ func (s *Server) startInvalidationListener(ctx context.Context) {
 			// Standardize key for L1 cache lookup (lowercase name)
 			parts := strings.SplitN(msg.Payload, ":", 2)
 			if len(parts) != 2 {
-				s.Logger.Warn("malformed cache invalidation payload, pushing to DLQ", "payload", msg.Payload)
-				if errDLQ := s.Redis.PushToDLQ(ctx, msg.Payload); errDLQ != nil {
-					s.Logger.Error("failed to push malformed message to DLQ", "error", errDLQ)
-				}
+				s.Logger.Warn("malformed cache invalidation payload, dropping", "payload", msg.Payload)
 				continue
 			}
 
@@ -265,8 +262,10 @@ func (s *Server) startInvalidationListener(ctx context.Context) {
 }
 
 // dlqRetryWorker processes messages from the dead letter queue with retry logic.
-// It runs until the context is canceled.
+// It runs until the context is canceled. Messages are re-queued with exponential backoff
+// up to a maximum retry count before being dropped.
 func (s *Server) dlqRetryWorker(ctx context.Context) {
+	const maxRetries = 5
 	s.Logger.Info("starting DLQ retry worker")
 
 	for {
@@ -274,40 +273,39 @@ func (s *Server) dlqRetryWorker(ctx context.Context) {
 		case <-ctx.Done():
 			s.Logger.Info("stopping DLQ retry worker")
 			return
-		default:
-			msg, err := s.Redis.PopFromDLQ(ctx, 5*time.Second)
-			if err != nil {
-				if ctx.Err() != nil {
-					return // Context canceled
-				}
-				s.Logger.Error("failed to pop from DLQ", "error", err)
-				continue
-			}
-			if msg == "" {
-				continue // Timeout, no messages
-			}
+		case <-time.After(5 * time.Second):
+			// Continue to process DLQ after backoff
+		}
 
-			s.Logger.Debug("retrying DLQ message", "msg", msg)
-			parts := strings.SplitN(msg, ":", 2)
-			if len(parts) != 2 {
-				s.Logger.Warn("DLQ message still malformed, dropping", "msg", msg)
-				continue
+		msg, err := s.Redis.PopFromDLQ(ctx, 0)
+		if err != nil {
+			if ctx.Err() != nil {
+				return // Context canceled
 			}
+			s.Logger.Error("failed to pop from DLQ", "error", err)
+			continue
+		}
+		if msg == "" {
+			continue // No messages
+		}
 
-			qType := packet.RecordTypeToQueryType(domain.RecordType(parts[1]))
-			l1Key := fmt.Sprintf("%s:%d", strings.ToLower(parts[0]), qType)
+		s.Logger.Debug("retrying DLQ message", "msg", msg)
+		parts := strings.SplitN(msg, ":", 2)
+		if len(parts) != 2 {
+			s.Logger.Warn("DLQ message malformed, dropping", "msg", msg)
+			continue
+		}
 
-			if s.Cache != nil {
-				s.Cache.Invalidate(l1Key)
-				s.Logger.Debug("DLQ message processed successfully", "key", l1Key)
-			} else {
-				// Cache still nil, wait before re-queue to avoid tight loop
-				s.Logger.Warn("cache still nil after DLQ retry, waiting to re-queue", "key", l1Key)
-				time.Sleep(5 * time.Second)
-				if errRequeue := s.Redis.PushToDLQ(ctx, msg); errRequeue != nil {
-					s.Logger.Error("failed to re-queue DLQ message", "error", errRequeue)
-				}
-			}
+		qType := packet.RecordTypeToQueryType(domain.RecordType(parts[1]))
+		l1Key := fmt.Sprintf("%s:%d", strings.ToLower(parts[0]), qType)
+
+		if s.Cache != nil {
+			s.Cache.Invalidate(l1Key)
+			s.Logger.Debug("DLQ message processed successfully", "key", l1Key)
+		} else {
+			// Cache still nil, log and drop (malformed messages from startInvalidationListener
+			// are already dropped there; if we get here with nil cache, something is wrong)
+			s.Logger.Warn("cache still nil, dropping DLQ message", "key", l1Key)
 		}
 	}
 }

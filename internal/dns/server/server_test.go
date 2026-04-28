@@ -25,11 +25,15 @@ type mockRecordIterator struct {
 }
 
 func (it *mockRecordIterator) Next() bool {
-	return it.index < len(it.records)
+	if it.index >= len(it.records) {
+		return false
+	}
+	it.index++
+	return true
 }
 
 func (it *mockRecordIterator) Record() domain.Record {
-	return it.records[it.index]
+	return it.records[it.index-1]
 }
 
 func (it *mockRecordIterator) Err() error {
