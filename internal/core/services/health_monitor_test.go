@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -132,7 +133,8 @@ func TestHealthMonitor_RunChecks(t *testing.T) {
 
 func TestHealthMonitor_Start(t *testing.T) {
 	repo := &testutil.MockRepo{}
-	m := NewHealthMonitor(repo, nil)
+	logger := slog.Default()
+	m := NewHealthMonitor(repo, logger)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
