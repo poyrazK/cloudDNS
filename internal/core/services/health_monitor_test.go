@@ -129,3 +129,17 @@ func TestHealthMonitor_RunChecks(t *testing.T) {
 
 	repo.AssertExpectations(t)
 }
+
+func TestHealthMonitor_Start(t *testing.T) {
+	repo := &testutil.MockRepo{}
+	m := NewHealthMonitor(repo, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	// Should return immediately since context is already canceled
+	m.Start(ctx, time.Second)
+
+	// Verify no probe was attempted
+	repo.AssertNotCalled(t, "GetRecordsToProbeStreaming")
+}

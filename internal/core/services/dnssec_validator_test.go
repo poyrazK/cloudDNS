@@ -661,3 +661,41 @@ func TestValidateChain_TrustAnchorMismatch(t *testing.T) {
 		t.Errorf("Unexpected error for zone without anchor: %v", err)
 	}
 }
+
+func TestEDE_String(t *testing.T) {
+	tests := []struct {
+		ede    EDE
+		expect string
+	}{
+		{EDE{Code: EDECodeOther, Info: "other error"}, "other error"},
+		{EDE{Code: EDECodeUnsupportedDNSKEYAlgo, Info: "algo"}, "unsupported-dnskey-algorithm"},
+		{EDE{Code: EDECodeUnsupportedDSDigest, Info: "digest"}, "unsupported-ds-digest"},
+		{EDE{Code: EDECodeStaleAnswer, Info: "stale"}, "stale-answer"},
+		{EDE{Code: EDECodeForgedAnswer, Info: "forged"}, "forged-answer"},
+		{EDE{Code: EDECodeIndeterminate, Info: "indet"}, "dnssec-indeterminate"},
+		{EDE{Code: EDECodeBogus, Info: "bogus"}, "dnssec-bogus"},
+		{EDE{Code: EDECodeSignatureExpired, Info: "expired"}, "signature-expired"},
+		{EDE{Code: EDECodeSignatureNotYetValid, Info: "notyet"}, "signature-not-yet-valid"},
+		{EDE{Code: EDECodeDNSKEYMissing, Info: "missing"}, "dnskey-missing"},
+		{EDE{Code: EDECodeDSMissing, Info: "ds"}, "ds-missing"},
+		{EDE{Code: EDECodeNoZoneKeyBitSet, Info: "nozone"}, "no-zone-key-bit-set"},
+		{EDE{Code: EDECodeSignatureUnsupported, Info: "unsup"}, "signature-unsupported"},
+		{EDE{Code: EDECodeDNSKEYNotAnchor, Info: "notanchor"}, "dnskey-not-anchor"},
+		{EDE{Code: EDECodeTrustAnchorUnknown, Info: "unknown"}, "trust-anchor-unknown"},
+		{EDE{Code: EDECodeExpectedAnswerAfterDNL, Info: "dnl"}, "expected-answer-after-dnl"},
+		{EDE{Code: EDECodeDelegationNotServed, Info: "dns"}, "delegation-not-served"},
+		{EDE{Code: EDECodeTTLMismatch, Info: "ttl"}, "ttl-mismatch"},
+		{EDE{Code: EDECodeCachedValidatedResponse, Info: "cached"}, "cached-validated-response"},
+		{EDE{Code: EDECodeNSEC3HashAlgoUnsupported, Info: "algo"}, "nsec3-hash-algo-unsupported"},
+		{EDE{Code: EDECodeNSEC3InvalidProof, Info: "proof"}, "nsec3-invalid-proof"},
+		{EDE{Code: EDECodeNSEC3ChainBroken, Info: "chain"}, "nsec3-chain-broken"},
+		{EDE{Code: EDECodeNSEC3NoMatchingName, Info: "name"}, "nsec3-no-matching-name"},
+		{EDE{Code: 9999, Info: "unknown"}, "unknown-error"},
+	}
+
+	for _, tc := range tests {
+		if got := tc.ede.String(); got != tc.expect {
+			t.Errorf("EDE{Code: %d}.String() = %q, want %q", tc.ede.Code, got, tc.expect)
+		}
+	}
+}
