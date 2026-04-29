@@ -90,6 +90,10 @@ CREATE INDEX idx_dns_records_network ON dns_records USING gist (network inet_ops
 -- Index for case-insensitive zone lookup (used by GetZoneLongestMatch)
 CREATE INDEX idx_dns_zones_name_lower ON dns_zones (LOWER(name));
 
+-- Expression index for efficient suffix-match zone lookup via reversed name
+-- Enables PostgreSQL to use index range scan instead of full table scan
+CREATE INDEX idx_dns_zones_name_reverse ON dns_zones (REVERSE(name));
+
 CREATE TABLE IF NOT EXISTS api_keys (
     id UUID PRIMARY KEY,
     tenant_id TEXT NOT NULL,
