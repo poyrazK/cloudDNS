@@ -38,7 +38,7 @@ Each bucket entry uses approximately 100 bytes. With bounded maps:
 | Tenant buckets | 100,000 | ~10 MB |
 | IP buckets | 1,000,000 | ~100 MB |
 
-When capacity is reached, idle buckets (unused for >1 minute) are evicted. If all buckets are active, the first one is evicted.
+When capacity is reached, the bucket with the oldest lastSeen timestamp is evicted.
 
 ## Implementation
 
