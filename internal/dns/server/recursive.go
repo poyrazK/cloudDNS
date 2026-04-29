@@ -19,6 +19,10 @@ type recursiveResolver struct {
 	fallbacks []string
 }
 
+// recursiveTimeout is the maximum time allowed for recursive resolution.
+// Defaults to 30s but can be overridden in tests.
+var recursiveTimeout = 30 * time.Second
+
 func newRecursiveResolver() *recursiveResolver {
 	return &recursiveResolver{
 		rootHints: []string{
@@ -55,7 +59,7 @@ func (r *recursiveResolver) getShuffledRoots() []string {
 
 func (s *Server) resolveRecursive(name string, qType packet.QueryType) (*packet.DNSPacket, error) {
 	// Total timeout to prevent indefinite blocking on failing root servers
-	const recursiveTimeout = 30 * time.Second
+	const errRecursiveTimeout = "recursive resolution timeout"
 	resolveStart := time.Now()
 
 	// Start with a random root server for load balancing and resilience.
@@ -73,8 +77,8 @@ func (s *Server) resolveRecursive(name string, qType packet.QueryType) (*packet.
 	for i := 0; i < maxRoots; i++ {
 		// Check total resolution timeout
 		if time.Since(resolveStart) >= recursiveTimeout {
-			s.Logger.Warn("recursive resolution timed out after 30s", "name", name)
-			return nil, errors.New("recursive resolution timeout")
+			s.Logger.Warn("recursive resolution timed out during root iteration", "name", name)
+			return nil, errors.New(errRecursiveTimeout)
 		}
 		rootNS := roots[i]
 		ns := rootNS
@@ -159,8 +163,18 @@ func (s *Server) resolveRecursive(name string, qType packet.QueryType) (*packet.
 	}
 
 	// 2. Fallback Strategy: Use reliable upstream resolvers if iterative resolution failed
+	// Check total resolution timeout before attempting fallbacks
+	if time.Since(resolveStart) >= recursiveTimeout {
+		s.Logger.Warn("recursive resolution timed out before fallback", "name", name)
+		return nil, errors.New(errRecursiveTimeout)
+	}
 	s.Logger.Info("iterative resolution failed or inconclusive, trying fallbacks", "name", name)
 	for _, fallback := range resolver.fallbacks {
+		// Check total resolution timeout before each fallback query
+		if time.Since(resolveStart) >= recursiveTimeout {
+			s.Logger.Warn("recursive resolution timed out during fallback", "name", name)
+			return nil, errors.New(errRecursiveTimeout)
+		}
 		serverAddr := net.JoinHostPort(fallback, "53")
 		// Use sendQueryInternal with RecursionDesired=true for fallbacks
 		resp, err := s.sendQueryInternal(serverAddr, name, qType, true)

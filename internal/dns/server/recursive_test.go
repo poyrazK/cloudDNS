@@ -1,10 +1,12 @@
 package server
 
 import (
+	"errors"
 	"io"
 	"net"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/poyrazK/cloudDNS/internal/dns/packet"
 )
@@ -263,5 +265,32 @@ func TestSendTCPQuery(t *testing.T) {
 
 	if len(resp.Answers) == 0 || resp.Answers[0].IP.String() != "1.2.3.4" {
 		t.Errorf("sendTCPQuery returned invalid response")
+	}
+}
+
+func TestResolveRecursiveFallbackTimeout(t *testing.T) {
+	// Save original timeout and restore after test
+	originalTimeout := recursiveTimeout
+	defer func() { recursiveTimeout = originalTimeout }()
+
+	// Set very short timeout for test
+	recursiveTimeout = 10 * time.Millisecond
+
+	s := NewServer(":0", nil, nil)
+
+	// Mock queryFn to fail on all servers (triggering fallback path)
+	// and be slow on fallbacks (triggering timeout before response)
+	s.queryFn = func(server string, name string, qtype packet.QueryType) (*packet.DNSPacket, error) {
+		// Simulate slow query - timeout should fire before we return
+		time.Sleep(100 * time.Millisecond)
+		return nil, errors.New("should not reach here - timeout should fire first")
+	}
+
+	_, err := s.resolveRecursive("timeout.test.", packet.A)
+	if err == nil {
+		t.Fatalf("Expected timeout error, got nil")
+	}
+	if err.Error() != "recursive resolution timeout" {
+		t.Errorf("Expected 'recursive resolution timeout', got: %v", err)
 	}
 }
