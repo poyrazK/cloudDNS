@@ -163,3 +163,106 @@ func TestRequireRole(t *testing.T) {
 		}
 	})
 }
+
+func TestClientIP(t *testing.T) {
+	tests := []struct {
+		name     string
+		headers  map[string]string
+		remote   string
+		expected string
+	}{
+		{
+			name:     "X-Real-IP preferred",
+			headers:  map[string]string{"X-Real-IP": "10.0.0.1"},
+			remote:   "192.168.1.1:1234",
+			expected: "10.0.0.1",
+		},
+		{
+			name:     "X-Forwarded-For first value",
+			headers:  map[string]string{"X-Forwarded-For": "10.0.0.1, 10.0.0.2"},
+			remote:   "192.168.1.1:1234",
+			expected: "10.0.0.1",
+		},
+		{
+			name:     "X-Forwarded-For single value",
+			headers:  map[string]string{"X-Forwarded-For": "10.0.0.1"},
+			remote:   "192.168.1.1:1234",
+			expected: "10.0.0.1",
+		},
+		{
+			name:     "No headers, fallback to RemoteAddr",
+			headers:  map[string]string{},
+			remote:   "192.168.1.1:1234",
+			expected: "192.168.1.1",
+		},
+		{
+			name:     "Empty X-Real-IP, fallback to RemoteAddr",
+			headers:  map[string]string{"X-Real-IP": ""},
+			remote:   "192.168.1.1:1234",
+			expected: "192.168.1.1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/test", nil)
+			for k, v := range tt.headers {
+				req.Header.Set(k, v)
+			}
+			req.RemoteAddr = tt.remote
+
+			got := clientIP(req)
+			if got != tt.expected {
+				t.Errorf("clientIP() = %q, want %q", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestRateLimitMiddleware(t *testing.T) {
+	ml := newMultiLimiter()
+
+	t.Run("Allowed when under limit", func(t *testing.T) {
+		middleware := RateLimitMiddleware(ml, categoryRead)
+		handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+
+		ctx := context.WithValue(context.Background(), CtxTenantID, "tenant-test")
+		req := httptest.NewRequest("GET", "/zones", nil).WithContext(ctx)
+		req.Header.Set("X-Real-IP", "10.0.0.1")
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Errorf("expected 200, got %d", rr.Code)
+		}
+	})
+
+	t.Run("Rate limited when tenant exhausted", func(t *testing.T) {
+		ml := newMultiLimiter()
+		middleware := RateLimitMiddleware(ml, categoryRead)
+		clientIP := "10.0.0.2"
+
+		// Exhaust tenant reads (500 burst) and IP reads (250 burst)
+		for i := 0; i < 500; i++ {
+			ml.Allow("tenant-test", clientIP, categoryRead)
+		}
+		for i := 0; i < 250; i++ {
+			ml.Allow("tenant-test", clientIP, categoryRead)
+		}
+
+		ctx := context.WithValue(context.Background(), CtxTenantID, "tenant-test")
+		req := httptest.NewRequest("GET", "/zones", nil).WithContext(ctx)
+		req.Header.Set("X-Real-IP", clientIP)
+		rr := httptest.NewRecorder()
+		handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+		handler.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusTooManyRequests {
+			t.Errorf("expected 429, got %d", rr.Code)
+		}
+	})
+}

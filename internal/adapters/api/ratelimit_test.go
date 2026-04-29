@@ -107,3 +107,62 @@ func TestMultiLimiter_CategoryIsolation(t *testing.T) {
 		t.Error("Write should still be allowed after read exhaustion (different bucket)")
 	}
 }
+
+func TestMultiLimiter_IPIsolation(t *testing.T) {
+	ml := newMultiLimiter()
+	tenant := "tenant-1"
+	ip1 := "192.168.1.1"
+	ip2 := "192.168.1.2"
+
+	// Exhaust ip1 reads (limit is 250)
+	for i := 0; i < 250; i++ {
+		ml.Allow(tenant, ip1, categoryRead)
+	}
+
+	// ip2 reads should still work (independent IP bucket)
+	if !ml.Allow(tenant, ip2, categoryRead) {
+		t.Error("IP2 should still be allowed after IP1 exhaustion")
+	}
+}
+
+func TestMultiLimiter_IPCheckedFirst(t *testing.T) {
+	ml := newMultiLimiter()
+	tenant := "tenant-1"
+	ip := "192.168.1.1"
+
+	// First exhaust tenant reads (limit is 500)
+	for i := 0; i < 500; i++ {
+		ml.Allow(tenant, ip, categoryRead)
+	}
+
+	// Now exhaust ip reads (limit is 250) - this hits the IP limit first
+	for i := 0; i < 250; i++ {
+		ml.Allow(tenant, ip, categoryRead)
+	}
+
+	// Both exhausted, should be rate limited
+	if ml.Allow(tenant, ip, categoryRead) {
+		t.Error("Should be rate limited after both buckets exhausted")
+	}
+}
+
+func TestMultiLimiter_DeleteZoneStricter(t *testing.T) {
+	ml := newMultiLimiter()
+	tenant := "tenant-1"
+	ip := "192.168.1.1"
+
+	// DeleteZone burst is 5, exhaust it
+	for i := 0; i < 5; i++ {
+		ml.Allow(tenant, ip, categoryDeleteZone)
+	}
+
+	// Should be blocked on DeleteZone
+	if ml.Allow(tenant, ip, categoryDeleteZone) {
+		t.Error("DeleteZone should be rate limited after burst")
+	}
+
+	// But Write should still work (different bucket)
+	if !ml.Allow(tenant, ip, categoryWrite) {
+		t.Error("Write should still be allowed after DeleteZone exhaustion")
+	}
+}
