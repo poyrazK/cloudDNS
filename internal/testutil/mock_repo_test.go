@@ -251,10 +251,34 @@ func TestMockRepo_Health(t *testing.T) {
 	err := m.UpdateRecordHealth(context.Background(), "r1", domain.HealthStatusHealthy, "ok")
 	if err != nil { t.Errorf("UpdateRecordHealth failed") }
 
-	m.On("GetRecordsToProbe", mock.Anything).Return([]domain.Record{{ID: "r1"}}, nil)
-	probes, err := m.GetRecordsToProbe(context.Background())
-	if err != nil || len(probes) != 1 { t.Errorf("GetRecordsToProbe failed") }
+	// Test GetRecordsToProbeStreaming - uses a simple mock iterator
+	mockedIter := &mockRecordIterator{records: []domain.Record{{ID: "r1"}}, index: 0}
+	m.On("GetRecordsToProbeStreaming", mock.Anything).Return(mockedIter, nil)
+	iter, err := m.GetRecordsToProbeStreaming(context.Background())
+	if err != nil || iter == nil { t.Errorf("GetRecordsToProbeStreaming failed") }
 }
+
+// mockRecordIterator is a simple implementation for testing
+type mockRecordIterator struct {
+	records []domain.Record
+	index   int
+}
+
+func (m *mockRecordIterator) Next() bool {
+	m.index++
+	return m.index <= len(m.records)
+}
+
+func (m *mockRecordIterator) Err() error { return nil }
+
+func (m *mockRecordIterator) Record() domain.Record {
+	if m.index > 0 && m.index <= len(m.records) {
+		return m.records[m.index-1]
+	}
+	return domain.Record{}
+}
+
+func (m *mockRecordIterator) Close() error { return nil }
 
 func TestMockRepo_DeleteRecordsForZone(t *testing.T) {
 	m := new(MockRepo)
@@ -281,9 +305,9 @@ func TestMockDNSService(t *testing.T) {
 	recs, err := m.Resolve(ctx, "test.", domain.TypeA, "1.1")
 	if err != nil || len(recs) != 1 { t.Errorf("Resolve failed") }
 
-	m.On("GetRecordsToProbe").Return([]domain.Record{{ID: "r1"}}, nil)
-	probes, err := m.GetRecordsToProbe(ctx)
-	if err != nil || len(probes) != 1 { t.Errorf("GetRecordsToProbe failed") }
+	m.On("GetRecordsToProbeStreaming").Return(&mockRecordIterator{records: []domain.Record{{ID: "r1"}}, index: 0}, nil)
+	iter, err := m.GetRecordsToProbeStreaming(ctx)
+	if err != nil || iter == nil { t.Errorf("GetRecordsToProbeStreaming failed") }
 
 	m.On("UpdateRecordHealth", "r1", domain.HealthStatusHealthy, "ok").Return(nil)
 	err = m.UpdateRecordHealth(ctx, "r1", domain.HealthStatusHealthy, "ok")
