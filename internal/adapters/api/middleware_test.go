@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -165,6 +166,12 @@ func TestRequireRole(t *testing.T) {
 }
 
 func TestClientIP(t *testing.T) {
+	// Set up trusted proxy CIDR for tests
+	originalCIDRs := TrustedProxyCIDRs
+	defer func() { TrustedProxyCIDRs = originalCIDRs }()
+	_, trustedCIDR, _ := net.ParseCIDR("192.168.1.0/24")
+	TrustedProxyCIDRs = []*net.IPNet{trustedCIDR}
+
 	tests := []struct {
 		name     string
 		headers  map[string]string
@@ -172,22 +179,22 @@ func TestClientIP(t *testing.T) {
 		expected string
 	}{
 		{
-			name:     "X-Real-IP preferred",
+			name:     "X-Real-IP from trusted proxy",
 			headers:  map[string]string{"X-Real-IP": "10.0.0.1"},
-			remote:   "192.168.1.1:1234",
+			remote:   "192.168.1.10:1234", // from trusted proxy
 			expected: "10.0.0.1",
 		},
 		{
-			name:     "X-Forwarded-For first value",
+			name:     "X-Forwarded-For from trusted proxy",
 			headers:  map[string]string{"X-Forwarded-For": "10.0.0.1, 10.0.0.2"},
-			remote:   "192.168.1.1:1234",
+			remote:   "192.168.1.10:1234",
 			expected: "10.0.0.1",
 		},
 		{
-			name:     "X-Forwarded-For single value",
-			headers:  map[string]string{"X-Forwarded-For": "10.0.0.1"},
-			remote:   "192.168.1.1:1234",
-			expected: "10.0.0.1",
+			name:     "Headers ignored from untrusted IP",
+			headers:  map[string]string{"X-Real-IP": "10.0.0.1", "X-Forwarded-For": "10.0.0.1"},
+			remote:   "10.0.0.1:1234", // not from trusted proxy
+			expected: "10.0.0.1",    // should use RemoteAddr
 		},
 		{
 			name:     "No headers, fallback to RemoteAddr",
@@ -196,10 +203,10 @@ func TestClientIP(t *testing.T) {
 			expected: "192.168.1.1",
 		},
 		{
-			name:     "Empty X-Real-IP, fallback to RemoteAddr",
+			name:     "Empty X-Real-IP from trusted, fallback to RemoteAddr",
 			headers:  map[string]string{"X-Real-IP": ""},
-			remote:   "192.168.1.1:1234",
-			expected: "192.168.1.1",
+			remote:   "192.168.1.10:1234",
+			expected: "192.168.1.10",
 		},
 	}
 
@@ -230,7 +237,6 @@ func TestRateLimitMiddleware(t *testing.T) {
 
 		ctx := context.WithValue(context.Background(), CtxTenantID, "tenant-test")
 		req := httptest.NewRequest("GET", "/zones", nil).WithContext(ctx)
-		req.Header.Set("X-Real-IP", "10.0.0.1")
 		rr := httptest.NewRecorder()
 		handler.ServeHTTP(rr, req)
 
@@ -239,22 +245,23 @@ func TestRateLimitMiddleware(t *testing.T) {
 		}
 	})
 
-	t.Run("Rate limited when tenant exhausted", func(t *testing.T) {
+	t.Run("Rate limited when both limits exhausted", func(t *testing.T) {
 		ml := newMultiLimiter()
 		middleware := RateLimitMiddleware(ml, categoryRead)
-		clientIP := "10.0.0.2"
+		// Use unique IP not from any trusted proxy
+		clientIPValue := "10.0.0.99"
 
 		// Exhaust tenant reads (500 burst) and IP reads (250 burst)
 		for i := 0; i < 500; i++ {
-			ml.Allow("tenant-test", clientIP, categoryRead)
+			ml.Allow("tenant-test", clientIPValue, categoryRead)
 		}
 		for i := 0; i < 250; i++ {
-			ml.Allow("tenant-test", clientIP, categoryRead)
+			ml.Allow("tenant-test", clientIPValue, categoryRead)
 		}
 
 		ctx := context.WithValue(context.Background(), CtxTenantID, "tenant-test")
 		req := httptest.NewRequest("GET", "/zones", nil).WithContext(ctx)
-		req.Header.Set("X-Real-IP", clientIP)
+		req.RemoteAddr = clientIPValue + ":1234"
 		rr := httptest.NewRecorder()
 		handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)

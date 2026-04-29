@@ -15,6 +15,47 @@ const (
 	categoryDeleteRecord
 )
 
+// RateLimitConfig holds configuration for rate limiting.
+type RateLimitConfig struct {
+	// Tenant limits
+	TenantReadRate           float64
+	TenantReadBurst          int
+	TenantWriteRate          float64
+	TenantWriteBurst         int
+	TenantDeleteZoneRate     float64
+	TenantDeleteZoneBurst    int
+	TenantDeleteRecordRate   float64
+	TenantDeleteRecordBurst int
+	// IP limits
+	IPReadRate    float64
+	IPReadBurst   int
+	IPWriteRate   float64
+	IPWriteBurst  int
+	// Bounds
+	MaxTenants int
+	MaxIPs     int
+}
+
+// DefaultRateLimitConfig returns the default rate limit configuration.
+func DefaultRateLimitConfig() RateLimitConfig {
+	return RateLimitConfig{
+		TenantReadRate:           1000,
+		TenantReadBurst:          500,
+		TenantWriteRate:          100,
+		TenantWriteBurst:         200,
+		TenantDeleteZoneRate:     10,
+		TenantDeleteZoneBurst:    5,
+		TenantDeleteRecordRate:   50,
+		TenantDeleteRecordBurst:  20,
+		IPReadRate:               500,
+		IPReadBurst:               250,
+		IPWriteRate:              50,
+		IPWriteBurst:             25,
+		MaxTenants:               100000,
+		MaxIPs:                  1000000,
+	}
+}
+
 // tokenBucket implements token bucket algorithm.
 type tokenBucket struct {
 	mu      sync.Mutex
@@ -25,8 +66,9 @@ type tokenBucket struct {
 }
 
 type bucket struct {
-	tokens float64
-	last   time.Time
+	tokens  float64
+	last    time.Time
+	lastSeen time.Time // for deterministic eviction
 }
 
 // newTokenBucket creates a new token bucket limiter.
@@ -44,18 +86,19 @@ func (tb *tokenBucket) Allow(key string) bool {
 	tb.mu.Lock()
 	defer tb.mu.Unlock()
 
+	now := time.Now()
 	b, exists := tb.buckets[key]
 	if !exists {
 		if len(tb.buckets) >= tb.maxKeys {
-			tb.evictIdleBucket()
+			tb.evictOldestBucket()
 		}
-		b = &bucket{tokens: float64(tb.burst), last: time.Now()}
+		b = &bucket{tokens: float64(tb.burst), last: now, lastSeen: now}
 		tb.buckets[key] = b
 	}
 
-	now := time.Now()
 	elapsed := now.Sub(b.last).Seconds()
 	b.last = now
+	b.lastSeen = now
 
 	b.tokens += elapsed * tb.rate
 	if b.tokens > float64(tb.burst) {
@@ -69,41 +112,45 @@ func (tb *tokenBucket) Allow(key string) bool {
 	return false
 }
 
-// evictIdleBucket removes a bucket that hasn't been used recently.
-func (tb *tokenBucket) evictIdleBucket() {
-	now := time.Now()
+// evictOldestBucket removes the bucket with the oldest lastSeen timestamp.
+func (tb *tokenBucket) evictOldestBucket() {
+	oldestID := ""
+	oldestTime := time.Now().Add(time.Hour) // far future
 	for id, b := range tb.buckets {
-		if now.Sub(b.last) > 1*time.Minute {
-			delete(tb.buckets, id)
-			return
+		if b.lastSeen.Before(oldestTime) {
+			oldestTime = b.lastSeen
+			oldestID = id
 		}
 	}
-	// If all are active recently, just evict the first one
-	for id := range tb.buckets {
-		delete(tb.buckets, id)
-		return
+	if oldestID != "" {
+		delete(tb.buckets, oldestID)
 	}
 }
 
 // multiLimiter holds separate limiters per operation category and per IP/tenant.
 type multiLimiter struct {
-	tenantRead     *tokenBucket
-	tenantWrite    *tokenBucket
-	tenantDeleteZone *tokenBucket
+	tenantRead         *tokenBucket
+	tenantWrite        *tokenBucket
+	tenantDeleteZone  *tokenBucket
 	tenantDeleteRecord *tokenBucket
-	ipRead        *tokenBucket
-	ipWrite       *tokenBucket
+	ipRead            *tokenBucket
+	ipWrite           *tokenBucket
 }
 
 // newMultiLimiter creates a multi-limiter with separate buckets per category.
 func newMultiLimiter() *multiLimiter {
+	return newMultiLimiterWithConfig(DefaultRateLimitConfig())
+}
+
+// newMultiLimiterWithConfig creates a multi-limiter with custom configuration.
+func newMultiLimiterWithConfig(cfg RateLimitConfig) *multiLimiter {
 	return &multiLimiter{
-		tenantRead:        newTokenBucket(1000, 500, 100000),
-		tenantWrite:       newTokenBucket(100, 200, 100000),
-		tenantDeleteZone:  newTokenBucket(10, 5, 100000),
-		tenantDeleteRecord: newTokenBucket(50, 20, 100000),
-		ipRead:           newTokenBucket(500, 250, 1000000),
-		ipWrite:          newTokenBucket(50, 25, 1000000),
+		tenantRead:         newTokenBucket(cfg.TenantReadRate, cfg.TenantReadBurst, cfg.MaxTenants),
+		tenantWrite:        newTokenBucket(cfg.TenantWriteRate, cfg.TenantWriteBurst, cfg.MaxTenants),
+		tenantDeleteZone:  newTokenBucket(cfg.TenantDeleteZoneRate, cfg.TenantDeleteZoneBurst, cfg.MaxTenants),
+		tenantDeleteRecord: newTokenBucket(cfg.TenantDeleteRecordRate, cfg.TenantDeleteRecordBurst, cfg.MaxTenants),
+		ipRead:            newTokenBucket(cfg.IPReadRate, cfg.IPReadBurst, cfg.MaxIPs),
+		ipWrite:           newTokenBucket(cfg.IPWriteRate, cfg.IPWriteBurst, cfg.MaxIPs),
 	}
 }
 

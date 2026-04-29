@@ -97,14 +97,71 @@ func TestMultiLimiter_CategoryIsolation(t *testing.T) {
 	tenant := "tenant-1"
 	ip := "192.168.1.1"
 
-	// Exhaust tenant reads
-	for i := 0; i < 500; i++ {
+	// Exhaust IP read bucket (limit is 250) - this is hit first in defense-in-depth
+	for i := 0; i < 250; i++ {
 		ml.Allow(tenant, ip, categoryRead)
 	}
 
-	// Write operations should still be allowed (different bucket)
+	// Write operations should still be allowed (independent bucket: tenantWrite)
 	if !ml.Allow(tenant, ip, categoryWrite) {
-		t.Error("Write should still be allowed after read exhaustion (different bucket)")
+		t.Error("Write should still be allowed after IP read exhaustion (different bucket)")
+	}
+}
+
+func TestMultiLimiter_DeleteZoneBurst(t *testing.T) {
+	ml := newMultiLimiter()
+	tenant := "tenant-1"
+	ip := "192.168.1.1"
+
+	// DeleteZone burst is 5, exhaust it
+	for i := 0; i < 5; i++ {
+		if !ml.Allow(tenant, ip, categoryDeleteZone) {
+			t.Errorf("Should allow burst request %d", i)
+		}
+	}
+
+	// Should be blocked on DeleteZone
+	if ml.Allow(tenant, ip, categoryDeleteZone) {
+		t.Error("DeleteZone should be rate limited after burst")
+	}
+}
+
+func TestMultiLimiter_DeleteRecordBurst(t *testing.T) {
+	ml := newMultiLimiter()
+	tenant := "tenant-1"
+	ip := "192.168.1.1"
+
+	// DeleteRecord burst is 20, exhaust it
+	for i := 0; i < 20; i++ {
+		if !ml.Allow(tenant, ip, categoryDeleteRecord) {
+			t.Errorf("Should allow burst request %d", i)
+		}
+	}
+
+	// Should be blocked on DeleteRecord
+	if ml.Allow(tenant, ip, categoryDeleteRecord) {
+		t.Error("DeleteRecord should be rate limited after burst")
+	}
+}
+
+func TestMultiLimiter_EmptyKeys(t *testing.T) {
+	ml := newMultiLimiter()
+	ip := "192.168.1.1"
+	tenant := "tenant-1"
+
+	// Empty tenant should still work (uses empty string as key)
+	if !ml.Allow("", ip, categoryRead) {
+		t.Error("Empty tenant should be allowed")
+	}
+
+	// Empty IP should still work (uses empty string as key)
+	if !ml.Allow(tenant, "", categoryRead) {
+		t.Error("Empty IP should be allowed")
+	}
+
+	// Both empty should work
+	if !ml.Allow("", "", categoryWrite) {
+		t.Error("Both empty should be allowed")
 	}
 }
 
