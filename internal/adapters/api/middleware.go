@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -18,6 +20,31 @@ type contextKey string
 const CtxTenantID contextKey = "tenant_id"
 // CtxRole is the context key for the role extracted from the API key.
 const CtxRole contextKey = "role"
+
+// TrustedProxyCIDRs contains CIDR ranges for trusted proxies.
+// If set, only requests from these IPs will have X-Real-IP/X-Forwarded-For honored.
+var TrustedProxyCIDRs []*net.IPNet
+
+// isFromTrustedProxy returns true if the remote address is from a trusted proxy.
+func isFromTrustedProxy(remoteAddr string) bool {
+	if len(TrustedProxyCIDRs) == 0 {
+		return false
+	}
+	ip, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		ip = remoteAddr
+	}
+	parsedIP := net.ParseIP(ip)
+	if parsedIP == nil {
+		return false
+	}
+	for _, cidr := range TrustedProxyCIDRs {
+		if cidr.Contains(parsedIP) {
+			return true
+		}
+	}
+	return false
+}
 
 // AuthMiddleware validates API keys and injects tenant context into requests.
 func AuthMiddleware(repo ports.DNSRepository) func(http.Handler) http.Handler {
@@ -89,24 +116,51 @@ func RequireRole(roles ...domain.Role) func(http.Handler) http.Handler {
 	}
 }
 
-// RateLimitMiddleware creates middleware that applies per-tenant rate limiting.
-// Pass a pointer to the tenantLimiter from the Handler.
-func RateLimitMiddleware(limiter *tenantLimiter) func(http.Handler) http.Handler {
+// RateLimitMiddleware creates middleware that applies per-tenant and per-IP rate limiting.
+// Pass a pointer to the multiLimiter from the Handler and the endpoint category.
+func RateLimitMiddleware(ml *multiLimiter, cat endpointCategory) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			tenantID, ok := r.Context().Value(CtxTenantID).(string)
-			if !ok || tenantID == "" {
-				// Let auth middleware handle missing tenant
-				next.ServeHTTP(w, r)
-				return
+			tenantID, _ := r.Context().Value(CtxTenantID).(string)
+			ip := clientIP(r)
+
+			if tenantID == "" {
+				slog.Warn("rate limit: empty tenant ID in context",
+					"ip", ip,
+					"category", cat,
+					"path", r.URL.Path,
+				)
 			}
 
-			if !limiter.Allow(tenantID) {
-				http.Error(w, "Too Many Requests: rate limit exceeded for tenant", http.StatusTooManyRequests)
+			if !ml.Allow(tenantID, ip, cat) {
+				http.Error(w, "Too Many Requests: rate limit exceeded", http.StatusTooManyRequests)
 				return
 			}
 
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// clientIP extracts the client IP address from the request.
+// It only uses X-Real-IP/X-Forwarded-For headers if the request comes from a trusted proxy.
+func clientIP(r *http.Request) string {
+	// Only honor headers from trusted proxies
+	if isFromTrustedProxy(r.RemoteAddr) {
+		if realIP := r.Header.Get("X-Real-IP"); realIP != "" {
+			return realIP
+		}
+		if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
+			if idx := strings.Index(fwd, ","); idx != -1 {
+				fwd = fwd[:idx]
+			}
+			return strings.TrimSpace(fwd)
+		}
+	}
+	// Fall back to remote address
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return ip
 }

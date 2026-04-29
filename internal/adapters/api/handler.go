@@ -15,7 +15,7 @@ import (
 type Handler struct {
 	svc          ports.DNSService
 	repo         ports.DNSRepository
-	tenantLimiter *tenantLimiter
+	multiLimiter *multiLimiter
 	logger       *slog.Logger
 }
 
@@ -27,7 +27,7 @@ func New(svc ports.DNSService, repo ports.DNSRepository, logger *slog.Logger) *H
 	return &Handler{
 		svc:          svc,
 		repo:         repo,
-		tenantLimiter: newTenantLimiter(100, 200, 100000), // 100 writes/sec, burst 200, max 100k tenants
+		multiLimiter: newMultiLimiter(),
 		logger:       logger,
 	}
 }
@@ -41,17 +41,26 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	// Middleware
 	auth := AuthMiddleware(h.repo)
 	admin := RequireRole(domain.RoleAdmin)
-	rateLimit := RateLimitMiddleware(h.tenantLimiter)
+
+	// Rate limiters by category
+	rateLimitRead := RateLimitMiddleware(h.multiLimiter, categoryRead)
+	rateLimitWrite := RateLimitMiddleware(h.multiLimiter, categoryWrite)
+	rateLimitDeleteZone := RateLimitMiddleware(h.multiLimiter, categoryDeleteZone)
+	rateLimitDeleteRecord := RateLimitMiddleware(h.multiLimiter, categoryDeleteRecord)
 
 	// Protected Routes (scoped by tenant_id from auth key)
-	// Write operations are rate-limited per tenant
-	mux.Handle("POST /zones", auth(rateLimit(admin(http.HandlerFunc(h.CreateZone)))))
-	mux.Handle("GET /zones", auth(http.HandlerFunc(h.ListZones)))
-	mux.Handle("GET /zones/{id}/records", auth(http.HandlerFunc(h.ListRecordsForZone)))
-	mux.Handle("DELETE /zones/{id}", auth(rateLimit(admin(http.HandlerFunc(h.DeleteZone)))))
-	mux.Handle("POST /zones/{id}/records", auth(rateLimit(admin(http.HandlerFunc(h.CreateRecord)))))
-	mux.Handle("DELETE /zones/{zone_id}/records/{id}", auth(rateLimit(admin(http.HandlerFunc(h.DeleteRecord)))))
-	mux.Handle("GET /audit-logs", auth(http.HandlerFunc(h.ListAuditLogs)))
+	// Read operations - rate limited
+	mux.Handle("GET /zones", auth(rateLimitRead(http.HandlerFunc(h.ListZones))))
+	mux.Handle("GET /zones/{id}/records", auth(rateLimitRead(http.HandlerFunc(h.ListRecordsForZone))))
+	mux.Handle("GET /audit-logs", auth(rateLimitRead(http.HandlerFunc(h.ListAuditLogs))))
+
+	// Write operations - rate limited per tenant
+	mux.Handle("POST /zones", auth(rateLimitWrite(admin(http.HandlerFunc(h.CreateZone)))))
+	mux.Handle("POST /zones/{id}/records", auth(rateLimitWrite(admin(http.HandlerFunc(h.CreateRecord)))))
+
+	// Delete operations - more restrictive
+	mux.Handle("DELETE /zones/{id}", auth(rateLimitDeleteZone(admin(http.HandlerFunc(h.DeleteZone)))))
+	mux.Handle("DELETE /zones/{zone_id}/records/{id}", auth(rateLimitDeleteRecord(admin(http.HandlerFunc(h.DeleteRecord)))))
 }
 
 // Metrics handles Prometheus metrics scraping requests.
