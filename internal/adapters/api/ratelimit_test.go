@@ -5,68 +5,105 @@ import (
 	"time"
 )
 
-func TestTenantLimiter(t *testing.T) {
-	tl := newTenantLimiter(10, 5, 100) // 10 tokens/sec, burst 5, max 100 tenants
-	tenant := "tenant-123"
+func TestTokenBucket(t *testing.T) {
+	tb := newTokenBucket(10, 5, 100) // 10 tokens/sec, burst 5, max 100 keys
+	key := "test-key"
 
 	// Test initial burst
 	for i := 0; i < 5; i++ {
-		if !tl.Allow(tenant) {
+		if !tb.Allow(key) {
 			t.Errorf("Should allow initial burst: request %d", i)
 		}
 	}
 
 	// Test rate limit after burst exhausted
-	if tl.Allow(tenant) {
+	if tb.Allow(key) {
 		t.Errorf("Should block after burst exhausted")
 	}
 
 	// Wait for refill
 	time.Sleep(200 * time.Millisecond) // Should refill ~2 tokens
-	if !tl.Allow(tenant) {
+	if !tb.Allow(key) {
 		t.Errorf("Should allow request after refill")
 	}
 }
 
-func TestTenantLimiter_Isolation(t *testing.T) {
-	tl := newTenantLimiter(10, 1, 100)
-	t1 := "tenant-1"
-	t2 := "tenant-2"
+func TestTokenBucket_Isolation(t *testing.T) {
+	tb := newTokenBucket(10, 1, 100)
+	k1 := "key-1"
+	k2 := "key-2"
 
-	// tenant-1 exhausts its burst of 1
-	if !tl.Allow(t1) {
-		t.Error("Should allow t1")
+	// key-1 exhausts its burst of 1
+	if !tb.Allow(k1) {
+		t.Error("Should allow k1")
 	}
-	if tl.Allow(t1) {
-		t.Error("Should block t1 after burst")
+	if tb.Allow(k1) {
+		t.Error("Should block k1 after burst")
 	}
 
-	// tenant-2 is independent and has its own burst
-	if !tl.Allow(t2) {
-		t.Error("Should allow t2 (independent from t1)")
+	// key-2 is independent and has its own burst
+	if !tb.Allow(k2) {
+		t.Error("Should allow k2 (independent from k1)")
 	}
 }
 
-func TestTenantLimiter_MaxTenants(t *testing.T) {
-	// Create limiter with max 3 tenants
-	tl := newTenantLimiter(10, 1, 3)
+func TestTokenBucket_MaxKeys(t *testing.T) {
+	// Create limiter with max 3 keys
+	tb := newTokenBucket(10, 1, 3)
 
-	// Add 3 different tenants
+	// Add 3 different keys
 	for i := 0; i < 3; i++ {
-		tenant := "tenant-" + string(rune('A'+i))
-		if !tl.Allow(tenant) {
-			t.Errorf("Should allow tenant %s", tenant)
+		key := "key-" + string(rune('A'+i))
+		if !tb.Allow(key) {
+			t.Errorf("Should allow key %s", key)
 		}
 	}
 
-	// 4th tenant should trigger eviction
-	tl.Allow("tenant-D")
+	// 4th key should trigger eviction
+	tb.Allow("key-D")
 
-	tl.mu.Lock()
-	bucketCount := len(tl.buckets)
-	tl.mu.Unlock()
+	tb.mu.Lock()
+	bucketCount := len(tb.buckets)
+	tb.mu.Unlock()
 
 	if bucketCount != 3 {
 		t.Errorf("Expected 3 buckets after eviction, got %d", bucketCount)
+	}
+}
+
+func TestMultiLimiter_Allow(t *testing.T) {
+	ml := newMultiLimiter()
+	tenant := "tenant-1"
+	ip := "192.168.1.1"
+
+	// Should allow read operations
+	if !ml.Allow(tenant, ip, categoryRead) {
+		t.Error("Should allow read")
+	}
+
+	// Should allow write operations
+	if !ml.Allow(tenant, ip, categoryWrite) {
+		t.Error("Should allow write")
+	}
+
+	// Should allow delete zone (more restrictive but still allows)
+	if !ml.Allow(tenant, ip, categoryDeleteZone) {
+		t.Error("Should allow delete zone")
+	}
+}
+
+func TestMultiLimiter_CategoryIsolation(t *testing.T) {
+	ml := newMultiLimiter()
+	tenant := "tenant-1"
+	ip := "192.168.1.1"
+
+	// Exhaust tenant reads
+	for i := 0; i < 500; i++ {
+		ml.Allow(tenant, ip, categoryRead)
+	}
+
+	// Write operations should still be allowed (different bucket)
+	if !ml.Allow(tenant, ip, categoryWrite) {
+		t.Error("Write should still be allowed after read exhaustion (different bucket)")
 	}
 }
