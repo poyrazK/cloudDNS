@@ -54,10 +54,6 @@ func (m *mockAnycastDNSService) ListAuditLogs(_ context.Context, _ string) ([]do
 	return nil, nil
 }
 
-func (m *mockAnycastDNSService) GetRecordsToProbe(_ context.Context) ([]domain.Record, error) {
-	return nil, nil
-}
-
 func (m *mockAnycastDNSService) GetRecordsToProbeStreaming(_ context.Context) (ports.RecordIterator, error) {
 	return &emptyRecordIterator{}, nil
 }
@@ -156,10 +152,6 @@ type mockMultiBackendService struct {
 
 func (m *mockMultiBackendService) HealthCheck(_ context.Context) map[string]error {
 	return m.status
-}
-
-func (m *mockMultiBackendService) GetRecordsToProbe(_ context.Context) ([]domain.Record, error) {
-	return nil, nil
 }
 
 func (m *mockMultiBackendService) GetRecordsToProbeStreaming(_ context.Context) (ports.RecordIterator, error) {

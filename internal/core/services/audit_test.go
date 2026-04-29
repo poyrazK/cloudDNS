@@ -79,10 +79,6 @@ func (m *auditMockRepo) DeleteAPIKey(ctx context.Context, tenantID string, id st
 	return m.mockRepo.DeleteAPIKey(ctx, tenantID, id)
 }
 
-func (m *auditMockRepo) GetRecordsToProbe(ctx context.Context) ([]domain.Record, error) {
-	return m.mockRepo.GetRecordsToProbe(ctx)
-}
-
 func (m *auditMockRepo) GetRecordsToProbeStreaming(ctx context.Context) (ports.RecordIterator, error) {
 	return m.mockRepo.GetRecordsToProbeStreaming(ctx)
 }

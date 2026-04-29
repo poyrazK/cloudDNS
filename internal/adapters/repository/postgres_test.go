@@ -197,7 +197,7 @@ func TestPostgresRepository_IXFR_And_Updates(t *testing.T) {
 		t.Errorf("Expected 0 records after DeleteRecordsForZone, got %d", len(recs))
 	}
 
-	// 8. Test GetRecordsToProbe
+	// 8. Test GetRecordsToProbeStreaming
 	// Create a record with health check within the zone
 	recHC := domain.Record{
 		ID: "550e8400-e29b-41d4-a716-446655440016", ZoneID: zID, Name: "hc.ixfr.test.",
@@ -207,13 +207,14 @@ func TestPostgresRepository_IXFR_And_Updates(t *testing.T) {
 	if err := repo.CreateRecord(ctx, &recHC); err != nil {
 		t.Fatalf("CreateRecord failed for recHC: %v", err)
 	}
-	probes, err := repo.GetRecordsToProbe(ctx)
+	iter, err := repo.GetRecordsToProbeStreaming(ctx)
 	if err != nil {
-		t.Fatalf("GetRecordsToProbe failed: %v", err)
+		t.Fatalf("GetRecordsToProbeStreaming failed: %v", err)
 	}
+	defer iter.Close()
 	foundHC := false
-	for _, p := range probes {
-		if p.ID == recHC.ID {
+	for iter.Next() {
+		if iter.Record().ID == recHC.ID {
 			foundHC = true
 			break
 		}

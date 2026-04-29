@@ -74,10 +74,6 @@ func (m *mockDNSSECRepo) UpdateRecordHealth(_ context.Context, _ string, _ domai
 	return nil
 }
 
-func (m *mockDNSSECRepo) GetRecordsToProbe(_ context.Context) ([]domain.Record, error) {
-	return nil, nil
-}
-
 func (m *mockDNSSECRepo) GetRecordsToProbeStreaming(_ context.Context) (ports.RecordIterator, error) {
 	return nil, nil
 }

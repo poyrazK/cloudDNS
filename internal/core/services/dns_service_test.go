@@ -257,14 +257,14 @@ func (m *mockRepo) ListAPIKeys(_ context.Context, _ string) ([]domain.APIKey, er
 }
 func (m *mockRepo) DeleteAPIKey(_ context.Context, _ string, _ string) error { return m.err }
 
-func (m *mockRepo) GetRecordsToProbe(_ context.Context) ([]domain.Record, error) {
+func (m *mockRepo) GetRecordsToProbeStreaming(_ context.Context) (ports.RecordIterator, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
-	return []domain.Record{{ID: "probe-1"}}, nil
-}
-
-func (m *mockRepo) GetRecordsToProbeStreaming(_ context.Context) (ports.RecordIterator, error) {
+	if len(m.records) == 0 {
+		// Default to probe record if no records seeded (for backward compat with tests)
+		return &testRecordIterator{records: []domain.Record{{ID: "probe-1"}}}, nil
+	}
 	return &testRecordIterator{records: m.records}, nil
 }
 
@@ -283,10 +283,18 @@ func TestDNSService_ExtraMethods(t *testing.T) {
 		t.Errorf("ListAuditLogs failed: %v", err)
 	}
 
-	// 2. Test GetRecordsToProbe
-	probes, err := svc.GetRecordsToProbe(ctx)
-	if err != nil || len(probes) != 1 {
-		t.Errorf("GetRecordsToProbe failed: %v", err)
+	// 2. Test GetRecordsToProbeStreaming
+	iter, err := svc.GetRecordsToProbeStreaming(ctx)
+	if err != nil {
+		t.Errorf("GetRecordsToProbeStreaming failed: %v", err)
+	}
+	defer iter.Close()
+	count := 0
+	for iter.Next() {
+		count++
+	}
+	if count != 1 {
+		t.Errorf("expected 1 record, got %d", count)
 	}
 
 	// 3. Test UpdateRecordHealth
@@ -307,9 +315,9 @@ func TestDNSService_ExtraMethods(t *testing.T) {
 	if err == nil {
 		t.Error("Expected error for ListAuditLogs")
 	}
-	_, err = svc.GetRecordsToProbe(ctx)
+	_, err = svc.GetRecordsToProbeStreaming(ctx)
 	if err == nil {
-		t.Error("Expected error for GetRecordsToProbe")
+		t.Error("Expected error for GetRecordsToProbeStreaming")
 	}
 	err = svc.UpdateRecordHealth(ctx, "r1", domain.HealthStatusHealthy, "")
 	if err == nil {

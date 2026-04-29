@@ -501,51 +501,6 @@ func (r *PostgresRepository) UpdateRecordHealth(ctx context.Context, recordID st
 	return err
 }
 
-// GetRecordsToProbe implements ports.DNSRepository.
-func (r *PostgresRepository) GetRecordsToProbe(ctx context.Context) ([]domain.Record, error) {
-	query := `SELECT id, zone_id, name, type, content, ttl, priority, weight, port, network, health_check_type, health_check_target 
-	          FROM dns_records 
-	          WHERE health_check_type IN ('HTTP', 'TCP')
-	          AND health_check_target IS NOT NULL AND health_check_target <> ''`
-	rows, err := r.db.QueryContext(ctx, query)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if errClose := rows.Close(); errClose != nil {
-			log.Printf("failed to close rows: %v", errClose)
-		}
-	}()
-
-	var records []domain.Record
-	for rows.Next() {
-		var rec domain.Record
-		var priority, weight, port sql.NullInt32
-		if errScan := rows.Scan(&rec.ID, &rec.ZoneID, &rec.Name, &rec.Type, &rec.Content, &rec.TTL, &priority, &weight, &port, &rec.Network, &rec.HealthCheckType, &rec.HealthCheckTarget); errScan != nil {
-			return nil, errScan
-		}
-		if priority.Valid {
-			p := int(priority.Int32)
-			rec.Priority = &p
-		}
-		if weight.Valid {
-			w := int(weight.Int32)
-			rec.Weight = &w
-		}
-		if port.Valid {
-			p := int(port.Int32)
-			rec.Port = &p
-		}
-		records = append(records, rec)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	return records, nil
-}
-
 // GetRecordsToProbeStreaming implements ports.DNSRepository.
 // It returns a RecordIterator that streams records with health checks configured,
 // ordered by id for consistent pagination across calls.

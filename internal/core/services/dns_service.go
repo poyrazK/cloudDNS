@@ -240,11 +240,6 @@ func (s *dnsService) ListAuditLogs(ctx context.Context, tenantID string) ([]doma
 	return s.repo.GetAuditLogs(ctx, tenantID)
 }
 
-// GetRecordsToProbe fetches all records that have a health check configured.
-func (s *dnsService) GetRecordsToProbe(ctx context.Context) ([]domain.Record, error) {
-	return s.repo.GetRecordsToProbe(ctx)
-}
-
 // GetRecordsToProbeStreaming returns an iterator for records that have health checks configured.
 func (s *dnsService) GetRecordsToProbeStreaming(ctx context.Context) (ports.RecordIterator, error) {
 	return s.repo.GetRecordsToProbeStreaming(ctx)

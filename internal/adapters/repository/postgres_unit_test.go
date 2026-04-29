@@ -323,15 +323,26 @@ func TestPostgresRepository_Unit(t *testing.T) {
 			t.Errorf("UpdateRecordHealth failed: %v", err)
 		}
 
-		// GetRecordsToProbe
-		rows := sqlmock.NewRows([]string{"id", "zone_id", "name", "type", "content", "ttl", "priority", "weight", "port", "network", "health_check_type", "health_check_target"}).
-			AddRow("r1", "z1", "www.test.", "A", "1.2.3.4", 300, nil, nil, nil, nil, "HTTP", "http://target")
-		mock.ExpectQuery(`SELECT .* FROM dns_records WHERE health_check_type IN \('HTTP', 'TCP'\) AND health_check_target IS NOT NULL AND health_check_target <> ''`).
-			WillReturnRows(rows)
+		// GetRecordsToProbeStreaming
+		rowsStreaming := sqlmock.NewRows([]string{"id", "zone_id", "name", "type", "content", "ttl", "priority", "weight", "port", "network", "health_check_type", "health_check_target", "status"}).
+			AddRow("r1", "z1", "www.test.", "A", "1.2.3.4", 300, nil, nil, nil, nil, "HTTP", "http://target", "HEALTHY")
+		mock.ExpectQuery(`SELECT .* FROM dns_records`).WillReturnRows(rowsStreaming)
 
-		recs, err := repo.GetRecordsToProbe(ctx)
-		if err != nil || len(recs) != 1 {
-			t.Errorf("GetRecordsToProbe failed: %v", err)
+		iter, err := repo.GetRecordsToProbeStreaming(ctx)
+		if err != nil {
+			t.Errorf("GetRecordsToProbeStreaming failed: %v", err)
+		}
+		if iter == nil {
+			t.Error("iterator was nil")
+		} else {
+			defer iter.Close()
+			count := 0
+			for iter.Next() {
+				count++
+			}
+			if count != 1 {
+				t.Errorf("expected 1 record, got %d", count)
+			}
 		}
 	})
 
@@ -600,16 +611,6 @@ func TestPostgresRepository_Extra_Unit(t *testing.T) {
 			_, err := repo.ApplyZoneUpdate(ctx, "z1", nil, nil)
 			if err == nil { t.Error("expected error") }
 		})
-	})
-
-	t.Run("GetRecordsToProbe_ScanError", func(t *testing.T) {
-		db, mock, _ := sqlmock.New()
-		defer db.Close()
-		repo := NewPostgresRepository(db)
-		rows := sqlmock.NewRows([]string{"id"}).AddRow(123) // Wrong columns/types
-		mock.ExpectQuery("SELECT .* FROM dns_records").WillReturnRows(rows)
-		_, err := repo.GetRecordsToProbe(ctx)
-		if err == nil { t.Error("expected error") }
 	})
 
 	t.Run("ListAPIKeys_ScanError", func(t *testing.T) {
