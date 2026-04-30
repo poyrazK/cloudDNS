@@ -1407,6 +1407,12 @@ func (s *Server) handleIXFR(ctx context.Context, conn net.Conn, request *packet.
 			}
 		}
 	}
+	// Verify the last chunk reaches currentSerial (rejects truncated chains)
+	if historyValid && len(chunks) > 0 {
+		if chunks[len(chunks)-1].Serial != currentSerial {
+			historyValid = false
+		}
+	}
 
 	if err != nil {
 		s.Logger.Warn("IXFR chain query failed, falling back to AXFR", "zone", zone.Name, "error", err)
