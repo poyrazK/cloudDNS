@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -44,6 +46,93 @@ func isFromTrustedProxy(remoteAddr string) bool {
 		}
 	}
 	return false
+}
+
+// CORSConfig holds CORS settings from environment.
+type CORSConfig struct {
+	AllowedOrigins []string
+	AllowedMethods []string
+	AllowedHeaders []string
+	MaxAge         int
+}
+
+// DefaultCORSConfig creates config from CORS_ALLOWED_ORIGINS env var (comma-separated, or "*" for all).
+func DefaultCORSConfig() *CORSConfig {
+	origins := os.Getenv("CORS_ALLOWED_ORIGINS")
+	if origins == "" {
+		origins = "*"
+	}
+	// Parse and trim each origin, ignoring empty strings
+	rawOrigins := strings.Split(origins, ",")
+	allowed := make([]string, 0, len(rawOrigins))
+	for _, o := range rawOrigins {
+		trimmed := strings.TrimSpace(o)
+		if trimmed != "" {
+			allowed = append(allowed, trimmed)
+		}
+	}
+	return &CORSConfig{
+		AllowedOrigins: allowed,
+		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders: []string{"Authorization", "Content-Type", "X-Real-IP", "X-Forwarded-For"},
+		MaxAge:         86400,
+	}
+}
+
+// isOriginAllowed checks if the origin is allowed.
+func (c *CORSConfig) isOriginAllowed(origin string) bool {
+	for _, allowed := range c.AllowedOrigins {
+		if allowed == "*" || allowed == origin {
+			return true
+		}
+	}
+	return false
+}
+
+// CORSMiddleware returns middleware that adds CORS headers.
+func CORSMiddleware(config *CORSConfig) func(http.Handler) http.Handler {
+	// Check if wildcard is present and if it's the only entry
+	hasWildcard := false
+	for _, allowed := range config.AllowedOrigins {
+		if allowed == "*" {
+			hasWildcard = true
+			break
+		}
+	}
+	isWildcardOnly := len(config.AllowedOrigins) == 1 && config.AllowedOrigins[0] == "*"
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			origin := r.Header.Get("Origin")
+
+			// Set CORS headers for allowed origins
+			if config.isOriginAllowed(origin) {
+				if isWildcardOnly {
+					// Wildcard only: set * and credentials are safe
+					w.Header().Set("Access-Control-Allow-Origin", "*")
+				} else if hasWildcard {
+					// Wildcard mixed with specific origins: use * but NO credentials
+					// (browsers don't allow credentials with wildcard)
+					w.Header().Set("Access-Control-Allow-Origin", "*")
+				} else {
+					// Specific origins only: set exact origin and credentials
+					w.Header().Set("Access-Control-Allow-Origin", origin)
+					w.Header().Set("Access-Control-Allow-Credentials", "true")
+				}
+			}
+
+			// Handle preflight OPTIONS
+			if r.Method == http.MethodOptions {
+				w.Header().Set("Access-Control-Allow-Methods", strings.Join(config.AllowedMethods, ", "))
+				w.Header().Set("Access-Control-Allow-Headers", strings.Join(config.AllowedHeaders, ", "))
+				w.Header().Set("Access-Control-Max-Age", strconv.Itoa(config.MaxAge))
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // AuthMiddleware validates API keys and injects tenant context into requests.

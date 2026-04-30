@@ -1132,10 +1132,24 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 		response.Header.TruncatedMessage = true
 		response.Answers = nil
 		response.Authorities = nil
-		response.Resources = nil
+		// RFC 6891: Preserve OPT records (type 41) when truncating
+		var optRecords []packet.DNSRecord
+		for _, res := range response.Resources {
+			if res.Type == packet.OPT {
+				optRecords = append(optRecords, res)
+			}
+		}
+		response.Resources = optRecords
 		resBuffer.Reset()
 		resBuffer.HasNames = true
 		_ = response.Write(resBuffer)
+		// If still too large (e.g., due to large EDNS options like padding), remove OPT entirely
+		if resBuffer.Position() > maxSize {
+			response.Resources = nil
+			resBuffer.Reset()
+			resBuffer.HasNames = true
+			_ = response.Write(resBuffer)
+		}
 	}
 
 	resData := resBuffer.Buf[:resBuffer.Position()]

@@ -5,11 +5,26 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
 	"github.com/poyrazK/cloudDNS/internal/core/ports"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
+
+const maxBodySize = 1 << 20 // 1MB
+
+// validateContentType checks if Content-Type is application/json.
+// Returns true if empty (backward compat) or exactly "application/json".
+func validateContentType(r *http.Request) bool {
+	contentType := r.Header.Get("Content-Type")
+	if contentType == "" {
+		return true
+	}
+	// Parse media type: split on ";," then trim and lowercase for exact comparison
+	mediaType := strings.TrimSpace(strings.Split(contentType, ";")[0])
+	return strings.ToLower(mediaType) == "application/json"
+}
 
 // Handler handles HTTP requests for zone and record management.
 type Handler struct {
@@ -34,6 +49,10 @@ func New(svc ports.DNSService, repo ports.DNSRepository, logger *slog.Logger) *H
 
 // RegisterRoutes registers the API routes with the provided ServeMux.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
+	// CORS middleware
+	corsConfig := DefaultCORSConfig()
+	cors := CORSMiddleware(corsConfig)
+
 	// Public Routes
 	mux.HandleFunc("GET /health", h.HealthCheck)
 	mux.HandleFunc("GET /metrics", h.Metrics)
@@ -50,17 +69,32 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 
 	// Protected Routes (scoped by tenant_id from auth key)
 	// Read operations - rate limited
-	mux.Handle("GET /zones", auth(rateLimitRead(http.HandlerFunc(h.ListZones))))
-	mux.Handle("GET /zones/{id}/records", auth(rateLimitRead(http.HandlerFunc(h.ListRecordsForZone))))
-	mux.Handle("GET /audit-logs", auth(rateLimitRead(http.HandlerFunc(h.ListAuditLogs))))
+	mux.Handle("GET /zones", cors(auth(rateLimitRead(http.HandlerFunc(h.ListZones)))))
+	mux.Handle("GET /zones/{id}/records", cors(auth(rateLimitRead(http.HandlerFunc(h.ListRecordsForZone)))))
+	mux.Handle("GET /audit-logs", cors(auth(rateLimitRead(http.HandlerFunc(h.ListAuditLogs)))))
+	mux.Handle("OPTIONS /zones", cors(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})))
+	mux.Handle("OPTIONS /zones/{id}/records", cors(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})))
+	mux.Handle("OPTIONS /audit-logs", cors(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})))
 
 	// Write operations - rate limited per tenant
-	mux.Handle("POST /zones", auth(rateLimitWrite(admin(http.HandlerFunc(h.CreateZone)))))
-	mux.Handle("POST /zones/{id}/records", auth(rateLimitWrite(admin(http.HandlerFunc(h.CreateRecord)))))
+	mux.Handle("POST /zones", cors(auth(rateLimitWrite(admin(http.HandlerFunc(h.CreateZone))))))
+	mux.Handle("POST /zones/{id}/records", cors(auth(rateLimitWrite(admin(http.HandlerFunc(h.CreateRecord))))))
 
 	// Delete operations - more restrictive
-	mux.Handle("DELETE /zones/{id}", auth(rateLimitDeleteZone(admin(http.HandlerFunc(h.DeleteZone)))))
-	mux.Handle("DELETE /zones/{zone_id}/records/{id}", auth(rateLimitDeleteRecord(admin(http.HandlerFunc(h.DeleteRecord)))))
+	mux.Handle("DELETE /zones/{id}", cors(auth(rateLimitDeleteZone(admin(http.HandlerFunc(h.DeleteZone))))))
+	mux.Handle("DELETE /zones/{zone_id}/records/{id}", cors(auth(rateLimitDeleteRecord(admin(http.HandlerFunc(h.DeleteRecord))))))
+	mux.Handle("OPTIONS /zones/{id}", cors(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})))
+	mux.Handle("OPTIONS /zones/{zone_id}/records/{id}", cors(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})))
 }
 
 // Metrics handles Prometheus metrics scraping requests.
@@ -125,7 +159,11 @@ func (h *Handler) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
 // CreateZone handles POST /zones requests.
 func (h *Handler) CreateZone(w http.ResponseWriter, r *http.Request) {
 	var zone domain.Zone
-	if err := json.NewDecoder(r.Body).Decode(&zone); err != nil {
+	if !validateContentType(r) {
+		http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
+		return
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodySize)).Decode(&zone); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -212,7 +250,11 @@ func (h *Handler) ListRecordsForZone(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) CreateRecord(w http.ResponseWriter, r *http.Request) {
 	zoneID := r.PathValue("id")
 	var record domain.Record
-	if err := json.NewDecoder(r.Body).Decode(&record); err != nil {
+	if !validateContentType(r) {
+		http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
+		return
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodySize)).Decode(&record); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
