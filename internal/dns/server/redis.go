@@ -64,9 +64,9 @@ func (r *RedisCache) Set(ctx context.Context, key string, data []byte, ttl time.
 	r.client.Set(ctx, "dns:"+key, data, ttl)
 }
 
-// RemainingTTL returns the remaining TTL for a cached key in Redis.
+// remainingTTL returns the remaining TTL for a cached key in Redis.
 // Returns 0 if the key does not exist or has no TTL.
-func (r *RedisCache) RemainingTTL(ctx context.Context, key string) time.Duration {
+func (r *RedisCache) remainingTTL(ctx context.Context, key string) time.Duration {
 	return r.client.TTL(ctx, "dns:"+key).Val()
 }
 
