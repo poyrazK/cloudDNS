@@ -670,9 +670,20 @@ func (r *PostgresRepository) RecordZoneChange(ctx context.Context, change *domai
 
 // ListZoneChanges implements ports.DNSRepository.
 func (r *PostgresRepository) ListZoneChanges(ctx context.Context, zoneID string, fromSerial uint32) ([]domain.ZoneChange, error) {
-	query := `SELECT id, zone_id, serial, action, name, type, content, ttl, priority, weight, port, created_at 
-	          FROM dns_zone_changes WHERE zone_id = $1 AND serial > $2 ORDER BY serial ASC, created_at ASC`
-	rows, errQuery := r.db.QueryContext(ctx, query, zoneID, fromSerial)
+	// When fromSerial is max uint32, any new change must have wrapped to serial 0.
+	// The > comparison can't find serial 0 after max uint32, so we fetch all and filter in GetIXFRChain.
+	var query string
+	var args []interface{}
+	if fromSerial == math.MaxUint32 {
+		query = `SELECT id, zone_id, serial, action, name, type, content, ttl, priority, weight, port, created_at
+		         FROM dns_zone_changes WHERE zone_id = $1 ORDER BY serial ASC, created_at ASC`
+		args = []interface{}{zoneID}
+	} else {
+		query = `SELECT id, zone_id, serial, action, name, type, content, ttl, priority, weight, port, created_at
+		         FROM dns_zone_changes WHERE zone_id = $1 AND serial > $2 ORDER BY serial ASC, created_at ASC`
+		args = []interface{}{zoneID, fromSerial}
+	}
+	rows, errQuery := r.db.QueryContext(ctx, query, args...)
 	if errQuery != nil {
 		return nil, errQuery
 	}
@@ -713,8 +724,14 @@ func (r *PostgresRepository) ListZoneChanges(ctx context.Context, zoneID string,
 
 // GetIXFRChain implements ports.DNSRepository.
 func (r *PostgresRepository) GetIXFRChain(ctx context.Context, zoneID string, fromSerial uint32, toSerial uint32) ([]domain.IXFRChunk, error) {
+	// Detect serial wrap (RFC 1982): fromSerial > toSerial means the master's serial
+	// has wrapped past 2^32-1 back to 0. When fromSerial == toSerial, no changes needed.
 	if fromSerial >= toSerial {
-		return nil, nil // No changes needed
+		if fromSerial == toSerial {
+			return nil, nil // No changes needed
+		}
+		// Wrap detected: fromSerial > toSerial
+		// ListZoneChanges will fetch all changes, we filter to wrapped serials below
 	}
 
 	changes, err := r.ListZoneChanges(ctx, zoneID, fromSerial)
@@ -727,6 +744,8 @@ func (r *PostgresRepository) GetIXFRChain(ctx context.Context, zoneID string, fr
 	var serials []uint32
 
 	for _, c := range changes {
+		// Skip serials > toSerial in both normal and wrap cases
+		// In wrap case, we've already determined there ARE changes (unlike the early return)
 		if c.Serial > toSerial {
 			continue
 		}
