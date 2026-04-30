@@ -533,24 +533,32 @@ func TestValidateChain_TwoZoneChain(t *testing.T) {
 	validator := NewDNSSECValidator(nil)
 
 	// Create keys for two zones
-	comDNSKEY, _ := makeTestDNSKEY(t)
+	comDNSKEY, comPrivKey := makeTestDNSKEY(t)
 	comDNSKEY.Name = "com."
 
 	exampleDNSKEY, _ := makeTestDNSKEY(t)
 	exampleDNSKEY.Name = "example.com."
 
-	// Compute DS for example.com using com's DNSKEY
+	// Compute DS from example.com's DNSKEY (DS is derived from child zone)
 	ds, err := exampleDNSKEY.ComputeDS(2) // SHA-256
 	if err != nil {
 		t.Fatalf("Failed to compute DS: %v", err)
 	}
 
+	// Sign DS with com's key (parent zone signs child's DS)
+	now := uint32(1000)
+	rrsig, err := packet.SignRRSet([]packet.DNSRecord{ds}, comPrivKey, packet.AlgorithmECDSAP256, "com.", comDNSKEY.ComputeKeyTag(), now-60, now+3600)
+	if err != nil {
+		t.Fatalf("Failed to sign DS: %v", err)
+	}
+
 	// Chain: example.com -> com
 	chain := []ChainLink{
 		{
-			Zone:    "example.com.",
-			DNSKEYs: []packet.DNSRecord{exampleDNSKEY},
-			DS:      ds,
+			Zone:     "example.com.",
+			DNSKEYs:  []packet.DNSRecord{exampleDNSKEY},
+			DS:       ds,
+			RRSIGsDS: []packet.DNSRecord{rrsig},
 		},
 		{
 			Zone:    "com.",
@@ -559,7 +567,7 @@ func TestValidateChain_TwoZoneChain(t *testing.T) {
 		},
 	}
 
-	err = validator.ValidateChain(chain, uint32(1000))
+	err = validator.ValidateChain(chain, now)
 	if err != nil {
 		t.Errorf("Expected valid two-zone chain, got error: %v", err)
 	}
@@ -567,7 +575,7 @@ func TestValidateChain_TwoZoneChain(t *testing.T) {
 
 func TestValidateChain_WithTrustAnchor(t *testing.T) {
 	// Create root anchor
-	rootDNSKEY, _ := makeTestDNSKEY(t)
+	rootDNSKEY, rootPrivKey := makeTestDNSKEY(t)
 	rootDNSKEY.Name = "."
 
 	trustAnchors := map[string]packet.DNSRecord{
@@ -576,33 +584,42 @@ func TestValidateChain_WithTrustAnchor(t *testing.T) {
 	validator := NewDNSSECValidator(trustAnchors)
 
 	// Create DNSKEYs for com and example
-	comDNSKEY, _ := makeTestDNSKEY(t)
+	comDNSKEY, comPrivKey := makeTestDNSKEY(t)
 	comDNSKEY.Name = "com."
 
 	exampleDNSKEY, _ := makeTestDNSKEY(t)
 	exampleDNSKEY.Name = "example.com."
 
-	// example.com DS signed by com's key
+	// Compute DS records from child zone's DNSKEY
 	exampleDS, _ := exampleDNSKEY.ComputeDS(2)
-
-	// com DS signed by root's key
 	comDS, _ := comDNSKEY.ComputeDS(2)
+
+	// Sign DS records with parent zone's key
+	now := uint32(1000)
+
+	// example.com's DS signed by com's key
+	exampleRRSIG, _ := packet.SignRRSet([]packet.DNSRecord{exampleDS}, comPrivKey, packet.AlgorithmECDSAP256, "com.", comDNSKEY.ComputeKeyTag(), now-60, now+3600)
+
+	// com's DS signed by root's key
+	comRRSIG, _ := packet.SignRRSet([]packet.DNSRecord{comDS}, rootPrivKey, packet.AlgorithmECDSAP256, ".", rootDNSKEY.ComputeKeyTag(), now-60, now+3600)
 
 	// Chain: example.com -> com -> root (trust anchor)
 	chain := []ChainLink{
 		{
-			Zone:    "example.com.",
-			DNSKEYs: []packet.DNSRecord{exampleDNSKEY},
-			DS:      exampleDS,
+			Zone:     "example.com.",
+			DNSKEYs:  []packet.DNSRecord{exampleDNSKEY},
+			DS:       exampleDS,
+			RRSIGsDS: []packet.DNSRecord{exampleRRSIG},
 		},
 		{
-			Zone:    "com.",
-			DNSKEYs: []packet.DNSRecord{comDNSKEY},
-			DS:      comDS,
+			Zone:     "com.",
+			DNSKEYs:  []packet.DNSRecord{comDNSKEY},
+			DS:       comDS,
+			RRSIGsDS: []packet.DNSRecord{comRRSIG},
 		},
 	}
 
-	err := validator.ValidateChain(chain, uint32(1000))
+	err := validator.ValidateChain(chain, now)
 	if err != nil {
 		t.Errorf("Expected valid chain with trust anchor, got error: %v", err)
 	}
@@ -629,6 +646,112 @@ func TestValidateChain_DNSKEYMismatch(t *testing.T) {
 	err := validator.ValidateChain(chain, uint32(1000))
 	if err == nil {
 		t.Error("Expected error when DNSKEY doesn't match DS")
+	}
+}
+
+func TestValidateChain_InvalidRRSIGDSSignature(t *testing.T) {
+	validator := NewDNSSECValidator(nil)
+
+	// Create key for com zone
+	comDNSKEY, comPrivKey := makeTestDNSKEY(t)
+	comDNSKEY.Name = "com."
+
+	// Create different key for example.com
+	exampleDNSKEY, _ := makeTestDNSKEY(t)
+	exampleDNSKEY.Name = "example.com."
+
+	// Compute DS for example.com using com's DNSKEY
+	ds, err := exampleDNSKEY.ComputeDS(2) // SHA-256
+	if err != nil {
+		t.Fatalf("Failed to compute DS: %v", err)
+	}
+
+	// Sign the DS with com's key (correct)
+	now := uint32(1000)
+	rrsig, err := packet.SignRRSet([]packet.DNSRecord{ds}, comPrivKey, packet.AlgorithmECDSAP256, "com.", comDNSKEY.ComputeKeyTag(), now-60, now+3600)
+	if err != nil {
+		t.Fatalf("Failed to sign DS: %v", err)
+	}
+
+	// Chain: example.com -> com
+	chain := []ChainLink{
+		{
+			Zone:     "example.com.",
+			DNSKEYs:  []packet.DNSRecord{exampleDNSKEY},
+			DS:       ds,
+			RRSIGsDS: []packet.DNSRecord{rrsig},
+		},
+		{
+			Zone:    "com.",
+			DNSKEYs: []packet.DNSRecord{comDNSKEY},
+			DS:      packet.DNSRecord{},
+		},
+	}
+
+	// Valid signature should pass
+	err = validator.ValidateChain(chain, now)
+	if err != nil {
+		t.Errorf("Expected valid chain with correct RRSIG_DS, got error: %v", err)
+	}
+
+	// Corrupt the signature to make it invalid
+	chain[0].RRSIGsDS[0].Signature[0] ^= 0xFF
+	err = validator.ValidateChain(chain, now)
+	if err == nil {
+		t.Error("Expected error when RRSIG_DS signature is invalid")
+	}
+}
+
+func TestValidateChain_InvalidRRSIGDSSignature_GarbageSig(t *testing.T) {
+	validator := NewDNSSECValidator(nil)
+
+	// Create key for com zone
+	comDNSKEY, _ := makeTestDNSKEY(t)
+	comDNSKEY.Name = "com."
+
+	// Create key for example.com
+	exampleDNSKEY, _ := makeTestDNSKEY(t)
+	exampleDNSKEY.Name = "example.com."
+
+	// Compute DS from example.com's DNSKEY (DS is derived from child zone)
+	ds, err := exampleDNSKEY.ComputeDS(2) // SHA-256
+	if err != nil {
+		t.Fatalf("Failed to compute DS: %v", err)
+	}
+
+	// Create a valid RRSIG but with garbage signature (won't match)
+	garbageSig := make([]byte, 64)
+	rrsig := packet.DNSRecord{
+		Type:         packet.RRSIG,
+		TypeCovered:  uint16(packet.DS),
+		Algorithm:    comDNSKEY.Algorithm,
+		KeyTag:       comDNSKEY.ComputeKeyTag(),
+		SignerName:   "com.",
+		Expiration:   uint32(2000),
+		Inception:    uint32(500),
+		OrigTTL:      300,
+		Labels:       2,
+		Signature:    garbageSig, // Invalid signature
+	}
+
+	// Chain: example.com -> com (with DS and RRSIGsDS with invalid signature)
+	chain := []ChainLink{
+		{
+			Zone:     "example.com.",
+			DNSKEYs:  []packet.DNSRecord{exampleDNSKEY},
+			DS:       ds,
+			RRSIGsDS: []packet.DNSRecord{rrsig},
+		},
+		{
+			Zone:    "com.",
+			DNSKEYs: []packet.DNSRecord{comDNSKEY},
+			DS:      packet.DNSRecord{},
+		},
+	}
+
+	err = validator.ValidateChain(chain, uint32(1000))
+	if err == nil {
+		t.Error("Expected error when RRSIG_DS signature is invalid")
 	}
 }
 
