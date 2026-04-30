@@ -72,13 +72,13 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /zones", cors(auth(rateLimitRead(http.HandlerFunc(h.ListZones)))))
 	mux.Handle("GET /zones/{id}/records", cors(auth(rateLimitRead(http.HandlerFunc(h.ListRecordsForZone)))))
 	mux.Handle("GET /audit-logs", cors(auth(rateLimitRead(http.HandlerFunc(h.ListAuditLogs)))))
-	mux.Handle("OPTIONS /zones", cors(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("OPTIONS /zones", cors(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})))
-	mux.Handle("OPTIONS /zones/{id}/records", cors(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("OPTIONS /zones/{id}/records", cors(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})))
-	mux.Handle("OPTIONS /audit-logs", cors(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("OPTIONS /audit-logs", cors(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})))
 
@@ -89,10 +89,10 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	// Delete operations - more restrictive
 	mux.Handle("DELETE /zones/{id}", cors(auth(rateLimitDeleteZone(admin(http.HandlerFunc(h.DeleteZone))))))
 	mux.Handle("DELETE /zones/{zone_id}/records/{id}", cors(auth(rateLimitDeleteRecord(admin(http.HandlerFunc(h.DeleteRecord))))))
-	mux.Handle("OPTIONS /zones/{id}", cors(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("OPTIONS /zones/{id}", cors(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})))
-	mux.Handle("OPTIONS /zones/{zone_id}/records/{id}", cors(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("OPTIONS /zones/{zone_id}/records/{id}", cors(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})))
 }
