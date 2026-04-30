@@ -4,11 +4,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -101,7 +101,7 @@ func CORSMiddleware(config *CORSConfig) func(http.Handler) http.Handler {
 			if r.Method == http.MethodOptions {
 				w.Header().Set("Access-Control-Allow-Methods", strings.Join(config.AllowedMethods, ", "))
 				w.Header().Set("Access-Control-Allow-Headers", strings.Join(config.AllowedHeaders, ", "))
-				w.Header().Set("Access-Control-Max-Age", fmt.Sprintf("%d", config.MaxAge))
+				w.Header().Set("Access-Control-Max-Age", strconv.Itoa(config.MaxAge))
 				w.WriteHeader(http.StatusNoContent)
 				return
 			}
