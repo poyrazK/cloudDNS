@@ -254,18 +254,28 @@ func (s *dnsService) UpdateRecordHealth(ctx context.Context, recordID string, st
 func (s *dnsService) HealthCheck(ctx context.Context) map[string]error {
 	res := make(map[string]error)
 
-	// Check if we have enough time to perform pings (at least 15s)
-	// This prevents Kubernetes probes from timing out the whole request
-	// if the node is under heavy CPU pressure.
+	// Determine appropriate timeout for health check pings.
+	// If a deadline was provided, use the remaining time (but at least 100ms).
+	// This allows health checks to work even with tight deadlines.
+	pingTimeout := 15 * time.Second
 	if deadline, ok := ctx.Deadline(); ok {
-		if time.Until(deadline) < 15*time.Second {
-			s.logger.Warn("skipping health check pings due to tight deadline")
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			// Deadline already passed - skip health checks
+			s.logger.Warn("health check skipped: deadline already passed")
 			return res
+		}
+		// Use min of 15s or remaining time, but at least 100ms
+		if remaining < pingTimeout {
+			if remaining < 100*time.Millisecond {
+				s.logger.Warn("health check skipped: insufficient time remaining")
+				return res
+			}
+			pingTimeout = remaining
 		}
 	}
 
-	// Use a much longer sub-context for pings to accommodate extremely slow performance
-	pingCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	pingCtx, cancel := context.WithTimeout(ctx, pingTimeout)
 	defer cancel()
 
 	if s.repo != nil {
