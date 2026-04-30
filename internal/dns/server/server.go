@@ -1385,10 +1385,23 @@ func (s *Server) handleIXFR(ctx context.Context, conn net.Conn, request *packet.
 	chunks, err := s.Repo.GetIXFRChain(ctx, zone.ID, clientSerial, currentSerial)
 
 	// RFC 1995: Verify full IXFR chain continuity
-	historyValid := len(chunks) > 0 && chunks[0].Serial == clientSerial+1
+	// Note: clientSerial+1 wraps to 0 when clientSerial is max uint32.
+	// In that case, we can only validate if chunks starts at 0 (which is valid after wrap).
+	historyValid := false
+	if len(chunks) > 0 {
+		if clientSerial == math.MaxUint32 {
+			// Overflow case: client is at max uint32, first chunk must be at 0
+			// Sequential check below will validate the chain
+			historyValid = chunks[0].Serial == 0
+		} else {
+			historyValid = chunks[0].Serial == clientSerial+1
+		}
+	}
 	if historyValid {
 		for i := 1; i < len(chunks); i++ {
-			if chunks[i].Serial != chunks[i-1].Serial+1 {
+			// Use uint32 wrap-around aware comparison for sequential serials
+			expectedSerial := chunks[i-1].Serial + 1
+			if chunks[i].Serial != expectedSerial {
 				historyValid = false
 				break
 			}
