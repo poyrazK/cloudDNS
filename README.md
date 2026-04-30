@@ -36,6 +36,7 @@ cloudDNS is a high-performance, authoritative, and recursive DNS server built fr
 *   **Incremental Zone Transfer (IXFR - RFC 1995)**: Efficient replication that transfers only changes, not the entire zone.
 *   **DNS NOTIFY (RFC 1996)**: Real-time notification to secondary servers upon zone changes.
 *   **DNS over HTTPS (DoH - RFC 8484)**: Secure DNS queries via HTTP/2, supporting both `GET` (base64url) and `POST` (binary).
+*   **DNS over QUIC (DoQ - RFC 9250)**: Low-latency DNS over QUIC with 0-RTT connection establishment.
 *   **EDNS(0) & Truncation (RFC 6891)**: Extended payload support with automatic TCP fallback.
 *   **TSIG (RFC 2845)**: HMAC-authenticated transactions for secure updates and transfers.
 *   **CHAOS Class Support**: Node identity resolution (`id.server.`, `hostname.bind.`) for NSID-ready deployments.
