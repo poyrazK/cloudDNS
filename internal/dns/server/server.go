@@ -61,7 +61,15 @@ func fnv32(key string) uint32 {
 }
 
 func (t *cacheLockTable) lockKey(key string) *cacheLockShard {
-	return &t[fnv32(key)%cacheLockShardCount]
+	shard := &t[fnv32(key)%cacheLockShardCount]
+	for i := 0; i < 1000; i++ {
+		if shard.mu.TryLock() {
+			return shard
+		}
+		runtime.Gosched()
+	}
+	shard.mu.Lock()
+	return shard
 }
 
 // Server is the core DNS server that handles incoming queries,
