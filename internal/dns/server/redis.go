@@ -48,7 +48,7 @@ func (r *RedisCache) GetWithTTL(ctx context.Context, key string) ([]byte, time.D
 	getPipe := pipe.Get(ctx, "dns:"+key)
 	ttlPipe := pipe.TTL(ctx, "dns:"+key)
 	_, err := pipe.Exec(ctx)
-	if err != nil && err != redis.Nil {
+	if err != nil && !errors.Is(err, redis.Nil) {
 		return nil, 0, false
 	}
 	val, err := getPipe.Bytes()
