@@ -730,13 +730,12 @@ func (r *PostgresRepository) GetIXFRChain(ctx context.Context, zoneID string, fr
 		return nil, nil // No changes needed
 	}
 	if fromSerial > toSerial {
-		if fromSerial == math.MaxUint32 && toSerial == 0 {
-			// True wrap: master's serial has wrapped past 2^32-1 back to 0
-			// ListZoneChanges will fetch all changes, we filter to wrapped serials below
-		} else {
+		if fromSerial != math.MaxUint32 || toSerial != 0 {
 			// Invalid: client serial greater than master serial (not a valid wrap)
 			return nil, fmt.Errorf("invalid IXFR request: client serial %d > master serial %d", fromSerial, toSerial)
 		}
+		// True wrap: fromSerial=max_uint32 and toSerial=0
+		// ListZoneChanges will fetch all changes, we filter to wrapped serials below
 	}
 
 	changes, err := r.ListZoneChanges(ctx, zoneID, fromSerial)
