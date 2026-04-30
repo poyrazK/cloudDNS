@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"time"
@@ -32,7 +33,9 @@ func (s *Server) handleDoQListener(listener *quic.Listener) {
 
 // handleDoQConnection handles a QUIC session and its streams.
 func (s *Server) handleDoQConnection(conn *quic.Conn) {
-	defer conn.CloseWithError(0, "")
+	defer func() {
+		_ = conn.CloseWithError(0, "")
+	}()
 
 	for {
 		stream, err := conn.AcceptStream(context.Background())
@@ -42,8 +45,10 @@ func (s *Server) handleDoQConnection(conn *quic.Conn) {
 
 		s.wg.Add(1)
 		go func() {
-			defer stream.Close()
-			defer s.wg.Done()
+			defer func() {
+				_ = stream.Close()
+				s.wg.Done()
+			}()
 			s.handleDoQStream(stream)
 		}()
 	}
@@ -60,7 +65,7 @@ func (s *Server) handleDoQStream(stream *quic.Stream) {
 	buf := make([]byte, 65535)
 	n, err := stream.Read(buf)
 	if err != nil {
-		if err != io.EOF && err != io.ErrUnexpectedEOF {
+		if !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
 			// Log unexpected read errors for debugging
 			if s.Logger != nil {
 				s.Logger.Debug("DoQ stream read error", "error", err)
@@ -76,7 +81,7 @@ func (s *Server) handleDoQStream(stream *quic.Stream) {
 	copy(dnsMsg, buf[:n])
 
 	// Process the DNS message - use placeholder IP since QUIC doesn't provide peer addr
-	s.handlePacket(context.Background(), dnsMsg, "127.0.0.1:0", func(resp []byte) error {
+	_ = s.handlePacket(context.Background(), dnsMsg, "127.0.0.1:0", func(resp []byte) error {
 		_, err := stream.Write(resp)
 		return err
 	}, "doq")
