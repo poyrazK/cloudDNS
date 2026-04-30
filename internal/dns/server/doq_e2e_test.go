@@ -118,6 +118,9 @@ func TestDoQ_E2E_MultipleStreams(t *testing.T) {
 		records: []domain.Record{
 			{Name: "multi-doq.test.", Type: domain.TypeA, Content: "1.2.3.4", TTL: 60},
 		},
+		zones: []domain.Zone{
+			{ID: "zone1", Name: "multi-doq.test."},
+		},
 	}
 	srv := NewServer("127.0.0.1:0", repo, nil)
 	srv.TLSConfig = generateTLSConfig()
@@ -240,6 +243,7 @@ func TestDoQ_E2E_ConnectionClose(t *testing.T) {
 	srv.DoQAddr = GetFreeAddr()
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	go func() {
 		_ = srv.Run(ctx)
 	}()

@@ -61,6 +61,10 @@ func (s *Server) handleDoQStream(stream *quic.Stream) {
 	n, err := stream.Read(buf)
 	if err != nil {
 		if err != io.EOF && err != io.ErrUnexpectedEOF {
+			// Log unexpected read errors for debugging
+			if s.Logger != nil {
+				s.Logger.Debug("DoQ stream read error", "error", err)
+			}
 			return
 		}
 	}
@@ -81,10 +85,8 @@ func (s *Server) handleDoQStream(stream *quic.Stream) {
 // setupDoQListener creates a QUIC listener for DNS-over-QUIC.
 func (s *Server) setupDoQListener(addr string) (*quic.Listener, error) {
 	quicConfig := &quic.Config{
-		// Require handshaking to complete for 0-RTT early data acceptance.
-		// 0-RTT has privacy implications but improves latency for known entities.
 		KeepAlivePeriod: 10 * time.Second,
-		MaxIdleTimeout: 30 * time.Second,
+		MaxIdleTimeout:  30 * time.Second,
 	}
 
 	tlsConfig := s.TLSConfig
