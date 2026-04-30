@@ -3,7 +3,6 @@ package api
 
 import (
 	"encoding/json"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -73,6 +72,15 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /zones", cors(auth(rateLimitRead(http.HandlerFunc(h.ListZones)))))
 	mux.Handle("GET /zones/{id}/records", cors(auth(rateLimitRead(http.HandlerFunc(h.ListRecordsForZone)))))
 	mux.Handle("GET /audit-logs", cors(auth(rateLimitRead(http.HandlerFunc(h.ListAuditLogs)))))
+	mux.Handle("OPTIONS /zones", cors(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})))
+	mux.Handle("OPTIONS /zones/{id}/records", cors(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})))
+	mux.Handle("OPTIONS /audit-logs", cors(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})))
 
 	// Write operations - rate limited per tenant
 	mux.Handle("POST /zones", cors(auth(rateLimitWrite(admin(http.HandlerFunc(h.CreateZone))))))
@@ -81,6 +89,12 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	// Delete operations - more restrictive
 	mux.Handle("DELETE /zones/{id}", cors(auth(rateLimitDeleteZone(admin(http.HandlerFunc(h.DeleteZone))))))
 	mux.Handle("DELETE /zones/{zone_id}/records/{id}", cors(auth(rateLimitDeleteRecord(admin(http.HandlerFunc(h.DeleteRecord))))))
+	mux.Handle("OPTIONS /zones/{id}", cors(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})))
+	mux.Handle("OPTIONS /zones/{zone_id}/records/{id}", cors(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})))
 }
 
 // Metrics handles Prometheus metrics scraping requests.
@@ -149,7 +163,7 @@ func (h *Handler) CreateZone(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
 		return
 	}
-	if err := json.NewDecoder(io.LimitReader(r.Body, maxBodySize)).Decode(&zone); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodySize)).Decode(&zone); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -240,7 +254,7 @@ func (h *Handler) CreateRecord(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
 		return
 	}
-	if err := json.NewDecoder(io.LimitReader(r.Body, maxBodySize)).Decode(&record); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodySize)).Decode(&record); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}

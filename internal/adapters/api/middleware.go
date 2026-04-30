@@ -91,17 +91,32 @@ func (c *CORSConfig) isOriginAllowed(origin string) bool {
 
 // CORSMiddleware returns middleware that adds CORS headers.
 func CORSMiddleware(config *CORSConfig) func(http.Handler) http.Handler {
+	// Check if wildcard is present and if it's the only entry
+	hasWildcard := false
+	for _, allowed := range config.AllowedOrigins {
+		if allowed == "*" {
+			hasWildcard = true
+			break
+		}
+	}
+	isWildcardOnly := len(config.AllowedOrigins) == 1 && config.AllowedOrigins[0] == "*"
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			origin := r.Header.Get("Origin")
 
 			// Set CORS headers for allowed origins
 			if config.isOriginAllowed(origin) {
-				if len(config.AllowedOrigins) == 1 && config.AllowedOrigins[0] == "*" {
+				if isWildcardOnly {
+					// Wildcard only: set * and credentials are safe
+					w.Header().Set("Access-Control-Allow-Origin", "*")
+				} else if hasWildcard {
+					// Wildcard mixed with specific origins: use * but NO credentials
+					// (browsers don't allow credentials with wildcard)
 					w.Header().Set("Access-Control-Allow-Origin", "*")
 				} else {
+					// Specific origins only: set exact origin and credentials
 					w.Header().Set("Access-Control-Allow-Origin", origin)
-					// Credentials header required for specific origins (not wildcard)
 					w.Header().Set("Access-Control-Allow-Credentials", "true")
 				}
 			}
