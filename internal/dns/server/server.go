@@ -11,6 +11,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"log/slog"
 	"math"
@@ -37,6 +38,31 @@ import (
 
 // ClassCHAOS is the DNS class for server identity and metadata.
 const ClassCHAOS = 3
+
+// cacheLockShardCount is the number of shards for per-key cache locks.
+// Using sharded locking avoids unbounded map growth while providing per-key granularity.
+const cacheLockShardCount = 256
+
+type cacheLockShard struct {
+	mu sync.Mutex
+}
+
+func (s *cacheLockShard) Lock()   { s.mu.Lock() }
+func (s *cacheLockShard) Unlock() { s.mu.Unlock() }
+
+type cacheLockTable [cacheLockShardCount]cacheLockShard
+
+var globalCacheLocks cacheLockTable
+
+func fnv32(key string) uint32 {
+	h := fnv.New32a()
+	h.Write([]byte(key)) // #nosec G104
+	return h.Sum32()
+}
+
+func (t *cacheLockTable) lockKey(key string) *cacheLockShard {
+	return &t[fnv32(key)%cacheLockShardCount]
+}
 
 // Server is the core DNS server that handles incoming queries,
 // zone transfers (AXFR/IXFR), updates (RFC 2136), and NOTIFY (RFC 1996).
@@ -846,7 +872,10 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 	}
 	cacheKey := fmt.Sprintf("%s:%d", strings.ToLower(q.Name), q.QType)
 
-	// L1/L2 Check
+	// L1/L2 Check — acquire per-key lock to close TOCTOU race window
+	lock := globalCacheLocks.lockKey(cacheKey)
+	lock.Lock()
+
 	if cachedData, found := s.Cache.Get(cacheKey); found {
 		metrics.CacheOperations.WithLabelValues("l1", "hit").Inc()
 		metrics.QueriesTotal.WithLabelValues(qTypeLabel, "0", protocol).Inc()
@@ -856,6 +885,7 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 			cachedData[0] = byte(request.Header.ID >> 8)
 			cachedData[1] = byte(request.Header.ID & 0xFF)
 		}
+		lock.Unlock()
 		return sendFn(cachedData)
 	}
 	metrics.CacheOperations.WithLabelValues("l1", "miss").Inc()
@@ -870,11 +900,21 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 				cachedData[0] = byte(request.Header.ID >> 8)
 				cachedData[1] = byte(request.Header.ID & 0xFF)
 			}
-			s.Cache.Set(cacheKey, cachedData, 60*time.Second)
+			// Respect remaining Redis TTL when populating L1, capped at L1 max of 60s
+			remainingTTL := s.Redis.RemainingTTL(ctx, cacheKey)
+			if remainingTTL <= 0 {
+				remainingTTL = 60 * time.Second
+			} else if remainingTTL > 60*time.Second {
+				remainingTTL = 60 * time.Second
+			}
+			s.Cache.Set(cacheKey, cachedData, remainingTTL)
+			lock.Unlock()
 			return sendFn(cachedData)
 		}
 		metrics.CacheOperations.WithLabelValues("l2", "miss").Inc()
 	}
+
+	lock.Unlock()
 
 	// L3 Resolution
 	if s.SimulateDBLatency > 0 {
@@ -1306,6 +1346,9 @@ func (s *Server) handleUpdate(ctx context.Context, request *packet.DNSPacket, ra
 		}
 
 		s.Cache.Flush()
+		if s.Redis != nil {
+			_ = s.Redis.Invalidate(ctx, zone.Name, "")
+		}
 		if !s.DisableAsync {
 			go s.notifySlaves(ctx, zone.Name)
 		}
@@ -1317,6 +1360,9 @@ func (s *Server) handleUpdate(ctx context.Context, request *packet.DNSPacket, ra
 	response.Header.ResCode = packet.RcodeNoError
 	s.Logger.Info("dynamic update processed", "zone", zone.Name)
 	s.Cache.Flush()
+	if s.Redis != nil {
+		_ = s.Redis.Invalidate(ctx, zone.Name, "")
+	}
 
 	if !s.DisableAsync {
 		go s.notifySlaves(ctx, zone.Name)

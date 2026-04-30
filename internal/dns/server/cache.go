@@ -70,7 +70,7 @@ func (c *DNSCache) Get(key string) ([]byte, bool) {
 		return nil, false
 	}
 
-	return item.data, true
+	return append([]byte(nil), item.data...), true
 }
 
 // Set stores a response in the cache with a specific TTL.

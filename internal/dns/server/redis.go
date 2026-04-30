@@ -46,13 +46,21 @@ func (r *RedisCache) Set(ctx context.Context, key string, data []byte, ttl time.
 	r.client.Set(ctx, "dns:"+key, data, ttl)
 }
 
+// RemainingTTL returns the remaining TTL for a cached key in Redis.
+// Returns 0 if the key does not exist or has no TTL.
+func (r *RedisCache) RemainingTTL(ctx context.Context, key string) time.Duration {
+	return r.client.TTL(ctx, "dns:"+key).Val()
+}
+
 // Ping checks Redis connectivity.
 func (r *RedisCache) Ping(ctx context.Context) error {
 	return r.client.Ping(ctx).Err()
 }
 
-// Invalidate publishes an invalidation event to all nodes.
+// Invalidate deletes the key from Redis and publishes an invalidation event to all nodes.
 func (r *RedisCache) Invalidate(ctx context.Context, name string, qType domain.RecordType) error {
+	key := "dns:" + name + ":" + string(qType)
+	r.client.Del(ctx, key)
 	msg := fmt.Sprintf("%s:%s", name, string(qType))
 	return r.client.Publish(ctx, InvalidationChannel, msg).Err()
 }
