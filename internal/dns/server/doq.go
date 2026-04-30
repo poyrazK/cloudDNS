@@ -11,9 +11,9 @@ import (
 )
 
 // handleDoQListener handles incoming QUIC connections for DNS-over-QUIC.
-func (s *Server) handleDoQListener(listener *quic.Listener) {
+func (s *Server) handleDoQListener(ctx context.Context, listener *quic.Listener) {
 	for {
-		conn, err := listener.Accept(context.Background())
+		conn, err := listener.Accept(ctx)
 		if err != nil {
 			select {
 			case <-s.done:
@@ -27,7 +27,7 @@ func (s *Server) handleDoQListener(listener *quic.Listener) {
 		go func(ctx context.Context) {
 			defer s.wg.Done()
 			s.handleDoQConnection(ctx, conn)
-		}(s.lifecycleCtx)
+		}(ctx)
 	}
 }
 
@@ -44,19 +44,19 @@ func (s *Server) handleDoQConnection(ctx context.Context, conn *quic.Conn) {
 		}
 
 		s.wg.Add(1)
-		go func() {
+		go func(ctx context.Context) {
 			defer func() {
 				_ = stream.Close()
 				s.wg.Done()
 			}()
-			s.handleDoQStream(stream)
-		}()
+			s.handleDoQStream(ctx, stream)
+		}(ctx)
 	}
 }
 
 // handleDoQStream handles a single bidirectional QUIC stream.
 // RFC 9250 Section 4.2: DNS messages are sent on streams without any framing.
-func (s *Server) handleDoQStream(stream *quic.Stream) {
+func (s *Server) handleDoQStream(ctx context.Context, stream *quic.Stream) {
 	// Set read deadline to prevent hanging on slow clients
 	_ = stream.SetReadDeadline(time.Now().Add(30 * time.Second))
 	_ = stream.SetWriteDeadline(time.Now().Add(30 * time.Second))
@@ -81,7 +81,7 @@ func (s *Server) handleDoQStream(stream *quic.Stream) {
 	copy(dnsMsg, buf[:n])
 
 	// Process the DNS message - use placeholder IP since QUIC doesn't provide peer addr
-	_ = s.handlePacket(context.Background(), dnsMsg, "127.0.0.1:0", func(resp []byte) error {
+	_ = s.handlePacket(ctx, dnsMsg, "127.0.0.1:0", func(resp []byte) error {
 		_, err := stream.Write(resp)
 		return err
 	}, "doq")
