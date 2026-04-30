@@ -295,32 +295,34 @@ func (v *DNSSECValidator) ValidateChain(chain []ChainLink, now uint32) error {
 
 			// Verify RRSIG_DS signatures using parent zone's DNSKEYs (chain[i+1].DNSKEYs)
 			// The DS record for zone[i] is signed by the parent zone's ZSK
-			if i+1 < len(chain) {
+			if link.DS.Type != 0 && i+1 < len(chain) {
 				parentLink := &chain[i+1]
-				if len(link.RRSIGsDS) > 0 && len(parentLink.DNSKEYs) > 0 {
-					// Find the RRSIG that covers DS (TypeCovered should be DS)
-					var rrsig *packet.DNSRecord
-					for idx := range link.RRSIGsDS {
-						if link.RRSIGsDS[idx].Type == packet.RRSIG && link.RRSIGsDS[idx].TypeCovered == uint16(packet.DS) {
-							rrsig = &link.RRSIGsDS[idx]
-							break
-						}
+				if len(parentLink.DNSKEYs) == 0 {
+					return fmt.Errorf("dnssec: chain link %d: DS present but parent zone has no DNSKEYs", i)
+				}
+				if len(link.RRSIGsDS) == 0 {
+					return fmt.Errorf("dnssec: chain link %d: DS present but no RRSIGsDS provided", i)
+				}
+				var lastErr error
+				foundValid := false
+				for idx := range link.RRSIGsDS {
+					rrsig := &link.RRSIGsDS[idx]
+					if rrsig.Type != packet.RRSIG || rrsig.TypeCovered != uint16(packet.DS) {
+						continue
 					}
-					if rrsig == nil {
-						return fmt.Errorf("dnssec: chain link %d: no RRSIG found for DS", i)
-					}
-
-					// Find matching DNSKEY in parent zone to verify the RRSIG
 					parentDNSKEY := packet.FindMatchingDNSKEY(*rrsig, parentLink.DNSKEYs)
 					if parentDNSKEY == nil {
-						return fmt.Errorf("dnssec: chain link %d: no matching DNSKEY in parent zone for RRSIG_DS", i)
+						continue
 					}
-
-					// Verify the RRSIG_DS signature
 					valid, err := packet.VerifyRRSet([]packet.DNSRecord{link.DS}, *rrsig, *parentDNSKEY, now)
-					if err != nil || !valid {
-						return fmt.Errorf("dnssec: chain link %d: RRSIG_DS signature verification failed: %w", i, err)
+					if err == nil && valid {
+						foundValid = true
+						break
 					}
+					lastErr = err
+				}
+				if !foundValid {
+					return fmt.Errorf("dnssec: chain link %d: no valid RRSIG_DS found: %w", i, lastErr)
 				}
 			}
 		}

@@ -274,10 +274,10 @@ func encodeECDSAPublicKey(pub *ecdsa.PublicKey) []byte {
 // from root trust anchor through TLD to leaf zone.
 func TestDNSSEC_ValidateChain_ThreeZoneChain(t *testing.T) {
 	// Create root anchor
-	rootDNSKEY, _ := makeTestDNSKEYWithName(t, ".")
+	rootDNSKEY, rootPrivKey := makeTestDNSKEYWithName(t, ".")
 
 	// Create keys for com and example
-	comDNSKEY, _ := makeTestDNSKEYWithName(t, "com.")
+	comDNSKEY, comPrivKey := makeTestDNSKEYWithName(t, "com.")
 	exampleDNSKEY, _ := makeTestDNSKEYWithName(t, "example.com.")
 
 	trustAnchors := map[string]packet.DNSRecord{
@@ -289,21 +289,32 @@ func TestDNSSEC_ValidateChain_ThreeZoneChain(t *testing.T) {
 	exampleDS, _ := exampleDNSKEY.ComputeDS(2) // SHA-256
 	comDS, _ := comDNSKEY.ComputeDS(2)
 
+	// Sign DS records with parent zone's key
+	now := uint32(1000)
+
+	// example.com's DS signed by com's key
+	exampleRRSIG, _ := packet.SignRRSet([]packet.DNSRecord{exampleDS}, comPrivKey, packet.AlgorithmECDSAP256, "com.", comDNSKEY.ComputeKeyTag(), now-60, now+3600)
+
+	// com's DS signed by root's key
+	comRRSIG, _ := packet.SignRRSet([]packet.DNSRecord{comDS}, rootPrivKey, packet.AlgorithmECDSAP256, ".", rootDNSKEY.ComputeKeyTag(), now-60, now+3600)
+
 	// Build chain: example.com -> com -> root (trust anchor)
 	chain := []services.ChainLink{
 		{
-			Zone:    "example.com.",
-			DNSKEYs: []packet.DNSRecord{exampleDNSKEY},
-			DS:      exampleDS,
+			Zone:     "example.com.",
+			DNSKEYs:  []packet.DNSRecord{exampleDNSKEY},
+			DS:       exampleDS,
+			RRSIGsDS: []packet.DNSRecord{exampleRRSIG},
 		},
 		{
-			Zone:    "com.",
-			DNSKEYs: []packet.DNSRecord{comDNSKEY},
-			DS:      comDS,
+			Zone:     "com.",
+			DNSKEYs:  []packet.DNSRecord{comDNSKEY},
+			DS:       comDS,
+			RRSIGsDS: []packet.DNSRecord{comRRSIG},
 		},
 	}
 
-	err := validator.ValidateChain(chain, uint32(1000))
+	err := validator.ValidateChain(chain, now)
 	if err != nil {
 		t.Errorf("Expected valid 3-zone chain, got error: %v", err)
 	}

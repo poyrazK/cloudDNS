@@ -533,24 +533,32 @@ func TestValidateChain_TwoZoneChain(t *testing.T) {
 	validator := NewDNSSECValidator(nil)
 
 	// Create keys for two zones
-	comDNSKEY, _ := makeTestDNSKEY(t)
+	comDNSKEY, comPrivKey := makeTestDNSKEY(t)
 	comDNSKEY.Name = "com."
 
 	exampleDNSKEY, _ := makeTestDNSKEY(t)
 	exampleDNSKEY.Name = "example.com."
 
-	// Compute DS for example.com using com's DNSKEY
+	// Compute DS from example.com's DNSKEY (DS is derived from child zone)
 	ds, err := exampleDNSKEY.ComputeDS(2) // SHA-256
 	if err != nil {
 		t.Fatalf("Failed to compute DS: %v", err)
 	}
 
+	// Sign DS with com's key (parent zone signs child's DS)
+	now := uint32(1000)
+	rrsig, err := packet.SignRRSet([]packet.DNSRecord{ds}, comPrivKey, packet.AlgorithmECDSAP256, "com.", comDNSKEY.ComputeKeyTag(), now-60, now+3600)
+	if err != nil {
+		t.Fatalf("Failed to sign DS: %v", err)
+	}
+
 	// Chain: example.com -> com
 	chain := []ChainLink{
 		{
-			Zone:    "example.com.",
-			DNSKEYs: []packet.DNSRecord{exampleDNSKEY},
-			DS:      ds,
+			Zone:     "example.com.",
+			DNSKEYs:  []packet.DNSRecord{exampleDNSKEY},
+			DS:       ds,
+			RRSIGsDS: []packet.DNSRecord{rrsig},
 		},
 		{
 			Zone:    "com.",
@@ -559,7 +567,7 @@ func TestValidateChain_TwoZoneChain(t *testing.T) {
 		},
 	}
 
-	err = validator.ValidateChain(chain, uint32(1000))
+	err = validator.ValidateChain(chain, now)
 	if err != nil {
 		t.Errorf("Expected valid two-zone chain, got error: %v", err)
 	}
@@ -567,7 +575,7 @@ func TestValidateChain_TwoZoneChain(t *testing.T) {
 
 func TestValidateChain_WithTrustAnchor(t *testing.T) {
 	// Create root anchor
-	rootDNSKEY, _ := makeTestDNSKEY(t)
+	rootDNSKEY, rootPrivKey := makeTestDNSKEY(t)
 	rootDNSKEY.Name = "."
 
 	trustAnchors := map[string]packet.DNSRecord{
@@ -576,33 +584,42 @@ func TestValidateChain_WithTrustAnchor(t *testing.T) {
 	validator := NewDNSSECValidator(trustAnchors)
 
 	// Create DNSKEYs for com and example
-	comDNSKEY, _ := makeTestDNSKEY(t)
+	comDNSKEY, comPrivKey := makeTestDNSKEY(t)
 	comDNSKEY.Name = "com."
 
 	exampleDNSKEY, _ := makeTestDNSKEY(t)
 	exampleDNSKEY.Name = "example.com."
 
-	// example.com DS signed by com's key
+	// Compute DS records from child zone's DNSKEY
 	exampleDS, _ := exampleDNSKEY.ComputeDS(2)
-
-	// com DS signed by root's key
 	comDS, _ := comDNSKEY.ComputeDS(2)
+
+	// Sign DS records with parent zone's key
+	now := uint32(1000)
+
+	// example.com's DS signed by com's key
+	exampleRRSIG, _ := packet.SignRRSet([]packet.DNSRecord{exampleDS}, comPrivKey, packet.AlgorithmECDSAP256, "com.", comDNSKEY.ComputeKeyTag(), now-60, now+3600)
+
+	// com's DS signed by root's key
+	comRRSIG, _ := packet.SignRRSet([]packet.DNSRecord{comDS}, rootPrivKey, packet.AlgorithmECDSAP256, ".", rootDNSKEY.ComputeKeyTag(), now-60, now+3600)
 
 	// Chain: example.com -> com -> root (trust anchor)
 	chain := []ChainLink{
 		{
-			Zone:    "example.com.",
-			DNSKEYs: []packet.DNSRecord{exampleDNSKEY},
-			DS:      exampleDS,
+			Zone:     "example.com.",
+			DNSKEYs:  []packet.DNSRecord{exampleDNSKEY},
+			DS:       exampleDS,
+			RRSIGsDS: []packet.DNSRecord{exampleRRSIG},
 		},
 		{
-			Zone:    "com.",
-			DNSKEYs: []packet.DNSRecord{comDNSKEY},
-			DS:      comDS,
+			Zone:     "com.",
+			DNSKEYs:  []packet.DNSRecord{comDNSKEY},
+			DS:       comDS,
+			RRSIGsDS: []packet.DNSRecord{comRRSIG},
 		},
 	}
 
-	err := validator.ValidateChain(chain, uint32(1000))
+	err := validator.ValidateChain(chain, now)
 	if err != nil {
 		t.Errorf("Expected valid chain with trust anchor, got error: %v", err)
 	}
@@ -685,7 +702,7 @@ func TestValidateChain_InvalidRRSIGDSSignature(t *testing.T) {
 	}
 }
 
-func TestValidateChain_MissingRRSIGDS(t *testing.T) {
+func TestValidateChain_InvalidRRSIGDSSignature_GarbageSig(t *testing.T) {
 	validator := NewDNSSECValidator(nil)
 
 	// Create key for com zone
@@ -696,7 +713,7 @@ func TestValidateChain_MissingRRSIGDS(t *testing.T) {
 	exampleDNSKEY, _ := makeTestDNSKEY(t)
 	exampleDNSKEY.Name = "example.com."
 
-	// Compute DS for example.com using com's DNSKEY
+	// Compute DS from example.com's DNSKEY (DS is derived from child zone)
 	ds, err := exampleDNSKEY.ComputeDS(2) // SHA-256
 	if err != nil {
 		t.Fatalf("Failed to compute DS: %v", err)
