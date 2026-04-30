@@ -24,21 +24,21 @@ func (s *Server) handleDoQListener(listener *quic.Listener) {
 		}
 
 		s.wg.Add(1)
-		go func() {
+		go func(ctx context.Context) {
 			defer s.wg.Done()
-			s.handleDoQConnection(conn)
-		}()
+			s.handleDoQConnection(ctx, conn)
+		}(s.lifecycleCtx)
 	}
 }
 
 // handleDoQConnection handles a QUIC session and its streams.
-func (s *Server) handleDoQConnection(conn *quic.Conn) {
+func (s *Server) handleDoQConnection(ctx context.Context, conn *quic.Conn) {
 	defer func() {
 		_ = conn.CloseWithError(0, "")
 	}()
 
 	for {
-		stream, err := conn.AcceptStream(context.Background())
+		stream, err := conn.AcceptStream(ctx)
 		if err != nil {
 			return
 		}
