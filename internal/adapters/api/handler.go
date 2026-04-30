@@ -24,10 +24,7 @@ func validateContentType(r *http.Request) bool {
 	}
 	// Parse media type: split on ";," then trim and lowercase for exact comparison
 	mediaType := strings.TrimSpace(strings.Split(contentType, ";")[0])
-	if strings.ToLower(mediaType) == "application/json" {
-		return true
-	}
-	return false
+	return strings.ToLower(mediaType) == "application/json"
 }
 
 // Handler handles HTTP requests for zone and record management.
