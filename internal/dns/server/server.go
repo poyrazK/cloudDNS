@@ -891,7 +891,7 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 	metrics.CacheOperations.WithLabelValues("l1", "miss").Inc()
 
 	if s.Redis != nil {
-		if cachedData, found := s.Redis.Get(ctx, cacheKey); found {
+		if cachedData, remainingTTL, found := s.Redis.GetWithTTL(ctx, cacheKey); found {
 			metrics.CacheOperations.WithLabelValues("l2", "hit").Inc()
 			metrics.QueriesTotal.WithLabelValues(qTypeLabel, "0", protocol).Inc()
 			metrics.QueryDuration.WithLabelValues("cache_l2").Observe(time.Since(start).Seconds())
@@ -901,7 +901,6 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 				cachedData[1] = byte(request.Header.ID & 0xFF)
 			}
 			// Respect remaining Redis TTL when populating L1, capped at L1 max of 60s
-			remainingTTL := s.Redis.RemainingTTL(ctx, cacheKey)
 			if remainingTTL <= 0 {
 				remainingTTL = 60 * time.Second
 			} else if remainingTTL > 60*time.Second {

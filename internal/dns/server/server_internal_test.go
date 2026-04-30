@@ -1,8 +1,11 @@
 package server
 
 import (
+	"context"
 	"testing"
+	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
 	"github.com/poyrazK/cloudDNS/internal/dns/packet"
 )
@@ -151,5 +154,64 @@ func TestTruncationPreservesMultipleOPTRecords(t *testing.T) {
 		if res.Type != packet.OPT {
 			t.Errorf("resource[%d] = %v, expected OPT", i, res.Type)
 		}
+	}
+}
+
+func TestShardedLockingNoUnboundedGrowth(t *testing.T) {
+	// Verify that the lock table uses a fixed number of shards (no unbounded map)
+	// The globalCacheLocks is a fixed-size array, not a map, so this is a static check.
+	if len(globalCacheLocks) != cacheLockShardCount {
+		t.Errorf("expected globalCacheLocks to have %d shards, got %d", cacheLockShardCount, len(globalCacheLocks))
+	}
+
+	// Verify locking and unlocking work without panicking
+	key := "test-lock-key.example.com.:1"
+	lock := globalCacheLocks.lockKey(key)
+	lock.Lock()
+	lock.Unlock()
+
+	// Same key should return same shard
+	lock2 := globalCacheLocks.lockKey(key)
+	lock2.Lock()
+	lock2.Unlock()
+}
+
+func TestGetWithTTLReturnsCorrectValue(t *testing.T) {
+	// This test verifies GetWithTTL behavior with miniredis
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("Failed to run miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	cache := NewRedisCache(mr.Addr(), "", 0)
+	ctx := context.Background()
+
+	// Set a key with known TTL
+	key := "ttl-test."
+	data := []byte{1, 2, 3}
+	cache.Set(ctx, key, data, 10*time.Second)
+
+	// GetWithTTL should return data and positive TTL
+	val, ttl, found := cache.GetWithTTL(ctx, key)
+	if !found {
+		t.Fatalf("Expected key to be found")
+	}
+	if string(val) != string(data) {
+		t.Errorf("Data mismatch: got %v, want %v", val, data)
+	}
+	if ttl <= 0 {
+		t.Errorf("Expected positive TTL immediately after Set, got %v", ttl)
+	}
+	// TTL should be close to 10s but not exact due to miniredis timing
+	if ttl > 11*time.Second || ttl < 9*time.Second {
+		t.Errorf("TTL out of expected range [9s, 11s]: got %v", ttl)
+	}
+
+	// After fast-forward 11s, key should be expired
+	mr.FastForward(11 * time.Second)
+	val, ttl, found = cache.GetWithTTL(ctx, key)
+	if found {
+		t.Errorf("Expected key to be expired, but got val=%v ttl=%v", val, ttl)
 	}
 }

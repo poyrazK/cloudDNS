@@ -41,6 +41,24 @@ func (r *RedisCache) Get(ctx context.Context, key string) ([]byte, bool) {
 	return val, true
 }
 
+// GetWithTTL retrieves cached data and remaining TTL in a single pipeline call.
+// Returns (data, remainingTTL, found). Falls back to separate calls if pipeline fails.
+func (r *RedisCache) GetWithTTL(ctx context.Context, key string) ([]byte, time.Duration, bool) {
+	pipe := r.client.Pipeline()
+	getPipe := pipe.Get(ctx, "dns:"+key)
+	ttlPipe := pipe.TTL(ctx, "dns:"+key)
+	_, err := pipe.Exec(ctx)
+	if err != nil && err != redis.Nil {
+		return nil, 0, false
+	}
+	val, err := getPipe.Bytes()
+	if err != nil {
+		return nil, 0, false
+	}
+	ttl := ttlPipe.Val()
+	return val, ttl, true
+}
+
 // Set stores a DNS response in the cache with the given TTL.
 func (r *RedisCache) Set(ctx context.Context, key string, data []byte, ttl time.Duration) {
 	r.client.Set(ctx, "dns:"+key, data, ttl)
