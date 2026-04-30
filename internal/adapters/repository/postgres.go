@@ -724,14 +724,19 @@ func (r *PostgresRepository) ListZoneChanges(ctx context.Context, zoneID string,
 
 // GetIXFRChain implements ports.DNSRepository.
 func (r *PostgresRepository) GetIXFRChain(ctx context.Context, zoneID string, fromSerial uint32, toSerial uint32) ([]domain.IXFRChunk, error) {
-	// Detect serial wrap (RFC 1982): fromSerial > toSerial means the master's serial
-	// has wrapped past 2^32-1 back to 0. When fromSerial == toSerial, no changes needed.
-	if fromSerial >= toSerial {
-		if fromSerial == toSerial {
-			return nil, nil // No changes needed
+	// Detect serial wrap (RFC 1982): only true wrap is fromSerial=max_uint32 to toSerial=0.
+	// Other cases where fromSerial > toSerial are invalid client states.
+	if fromSerial == toSerial {
+		return nil, nil // No changes needed
+	}
+	if fromSerial > toSerial {
+		if fromSerial == math.MaxUint32 && toSerial == 0 {
+			// True wrap: master's serial has wrapped past 2^32-1 back to 0
+			// ListZoneChanges will fetch all changes, we filter to wrapped serials below
+		} else {
+			// Invalid: client serial greater than master serial (not a valid wrap)
+			return nil, fmt.Errorf("invalid IXFR request: client serial %d > master serial %d", fromSerial, toSerial)
 		}
-		// Wrap detected: fromSerial > toSerial
-		// ListZoneChanges will fetch all changes, we filter to wrapped serials below
 	}
 
 	changes, err := r.ListZoneChanges(ctx, zoneID, fromSerial)
