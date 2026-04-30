@@ -86,11 +86,15 @@ func CORSMiddleware(config *CORSConfig) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			origin := r.Header.Get("Origin")
 
-			// Set CORS headers for all responses
-			if len(config.AllowedOrigins) == 1 && config.AllowedOrigins[0] == "*" {
-				w.Header().Set("Access-Control-Allow-Origin", "*")
-			} else if origin != "" && config.isOriginAllowed(origin) {
-				w.Header().Set("Access-Control-Allow-Origin", origin)
+			// Set CORS headers for allowed origins
+			if config.isOriginAllowed(origin) {
+				if len(config.AllowedOrigins) == 1 && config.AllowedOrigins[0] == "*" {
+					w.Header().Set("Access-Control-Allow-Origin", "*")
+				} else {
+					w.Header().Set("Access-Control-Allow-Origin", origin)
+					// Credentials header required for specific origins (not wildcard)
+					w.Header().Set("Access-Control-Allow-Credentials", "true")
+				}
 			}
 
 			// Handle preflight OPTIONS

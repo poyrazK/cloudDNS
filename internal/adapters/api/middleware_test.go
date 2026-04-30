@@ -273,3 +273,167 @@ func TestRateLimitMiddleware(t *testing.T) {
 		}
 	})
 }
+
+func TestCORSMiddleware(t *testing.T) {
+	t.Run("AllowAllOrigins", func(t *testing.T) {
+		config := &CORSConfig{
+			AllowedOrigins: []string{"*"},
+			AllowedMethods: []string{"GET", "POST", "OPTIONS"},
+			AllowedHeaders: []string{"Authorization", "Content-Type"},
+			MaxAge:         86400,
+		}
+		middleware := CORSMiddleware(config)
+		handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+
+		req := httptest.NewRequest("GET", "/zones", nil)
+		req.Header.Set("Origin", "https://example.com")
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Errorf("expected 200, got %d", rr.Code)
+		}
+		if rr.Header().Get("Access-Control-Allow-Origin") != "*" {
+			t.Errorf("expected *, got %s", rr.Header().Get("Access-Control-Allow-Origin"))
+		}
+	})
+
+	t.Run("SpecificOrigin", func(t *testing.T) {
+		config := &CORSConfig{
+			AllowedOrigins: []string{"https://example.com", "https://app.example.org"},
+			AllowedMethods: []string{"GET", "POST", "OPTIONS"},
+			AllowedHeaders: []string{"Authorization", "Content-Type"},
+			MaxAge:         86400,
+		}
+		middleware := CORSMiddleware(config)
+		handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+
+		req := httptest.NewRequest("GET", "/zones", nil)
+		req.Header.Set("Origin", "https://example.com")
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Errorf("expected 200, got %d", rr.Code)
+		}
+		if rr.Header().Get("Access-Control-Allow-Origin") != "https://example.com" {
+			t.Errorf("expected https://example.com, got %s", rr.Header().Get("Access-Control-Allow-Origin"))
+		}
+		if rr.Header().Get("Access-Control-Allow-Credentials") != "true" {
+			t.Errorf("expected true, got %s", rr.Header().Get("Access-Control-Allow-Credentials"))
+		}
+	})
+
+	t.Run("DisallowedOrigin", func(t *testing.T) {
+		config := &CORSConfig{
+			AllowedOrigins: []string{"https://allowed.com"},
+			AllowedMethods: []string{"GET", "POST", "OPTIONS"},
+			AllowedHeaders: []string{"Authorization", "Content-Type"},
+			MaxAge:         86400,
+		}
+		middleware := CORSMiddleware(config)
+		handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+
+		req := httptest.NewRequest("GET", "/zones", nil)
+		req.Header.Set("Origin", "https://malicious.com")
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Errorf("expected 200, got %d", rr.Code)
+		}
+		if rr.Header().Get("Access-Control-Allow-Origin") != "" {
+			t.Errorf("expected empty, got %s", rr.Header().Get("Access-Control-Allow-Origin"))
+		}
+	})
+
+	t.Run("NoOrigin", func(t *testing.T) {
+		config := &CORSConfig{
+			AllowedOrigins: []string{"https://example.com"},
+			AllowedMethods: []string{"GET", "POST", "OPTIONS"},
+			AllowedHeaders: []string{"Authorization", "Content-Type"},
+			MaxAge:         86400,
+		}
+		middleware := CORSMiddleware(config)
+		handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+
+		req := httptest.NewRequest("GET", "/zones", nil)
+		// No Origin header set
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Errorf("expected 200, got %d", rr.Code)
+		}
+		// No CORS headers when no origin
+		if rr.Header().Get("Access-Control-Allow-Origin") != "" {
+			t.Errorf("expected empty, got %s", rr.Header().Get("Access-Control-Allow-Origin"))
+		}
+	})
+
+	t.Run("PreflightOptions", func(t *testing.T) {
+		config := &CORSConfig{
+			AllowedOrigins: []string{"https://example.com"},
+			AllowedMethods: []string{"GET", "POST", "DELETE", "OPTIONS"},
+			AllowedHeaders: []string{"Authorization", "Content-Type", "X-Request-ID"},
+			MaxAge:         3600,
+		}
+		middleware := CORSMiddleware(config)
+		handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+
+		req := httptest.NewRequest("OPTIONS", "/zones", nil)
+		req.Header.Set("Origin", "https://example.com")
+		req.Header.Set("Access-Control-Request-Method", "POST")
+		req.Header.Set("Access-Control-Request-Headers", "Authorization, Content-Type")
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusNoContent {
+			t.Errorf("expected 204, got %d", rr.Code)
+		}
+		if rr.Header().Get("Access-Control-Allow-Origin") != "https://example.com" {
+			t.Errorf("expected https://example.com, got %s", rr.Header().Get("Access-Control-Allow-Origin"))
+		}
+		if rr.Header().Get("Access-Control-Allow-Methods") != "GET, POST, DELETE, OPTIONS" {
+			t.Errorf("unexpected Access-Control-Allow-Methods: %s", rr.Header().Get("Access-Control-Allow-Methods"))
+		}
+		if rr.Header().Get("Access-Control-Allow-Headers") != "Authorization, Content-Type, X-Request-ID" {
+			t.Errorf("unexpected Access-Control-Allow-Headers: %s", rr.Header().Get("Access-Control-Allow-Headers"))
+		}
+		if rr.Header().Get("Access-Control-Max-Age") != "3600" {
+			t.Errorf("expected 3600, got %s", rr.Header().Get("Access-Control-Max-Age"))
+		}
+	})
+}
+
+func TestDefaultCORSConfig(t *testing.T) {
+	t.Run("DefaultWildcard", func(t *testing.T) {
+		// This test relies on CORS_ALLOWED_ORIGINS not being set
+		t.Setenv("CORS_ALLOWED_ORIGINS", "")
+		config := DefaultCORSConfig()
+		if len(config.AllowedOrigins) != 1 || config.AllowedOrigins[0] != "*" {
+			t.Errorf("expected [*], got %v", config.AllowedOrigins)
+		}
+		if config.MaxAge != 86400 {
+			t.Errorf("expected 86400, got %d", config.MaxAge)
+		}
+	})
+
+	t.Run("MultipleOrigins", func(t *testing.T) {
+		t.Setenv("CORS_ALLOWED_ORIGINS", "https://a.com,https://b.com,https://c.com")
+		config := DefaultCORSConfig()
+		if len(config.AllowedOrigins) != 3 {
+			t.Errorf("expected 3 origins, got %d", len(config.AllowedOrigins))
+		}
+	})
+}

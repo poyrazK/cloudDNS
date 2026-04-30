@@ -545,3 +545,92 @@ func TestMetrics(t *testing.T) {
 		t.Errorf(status200Err, w.Code)
 	}
 }
+
+func TestCreateZone_InvalidContentType(t *testing.T) {
+	svc := &mockDNSService{}
+	repo := &testutil.MockRepo{}
+	handler := New(svc, repo, slog.Default())
+
+	body := []byte(`{"name": "test.com."}`)
+	req := httptest.NewRequest("POST", zonesPath, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "text/plain")
+	req = withTenant(req, testTenantID)
+	w := httptest.NewRecorder()
+
+	handler.CreateZone(w, req)
+
+	if w.Code != http.StatusUnsupportedMediaType {
+		t.Errorf("Expected status 415, got %d. Body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestCreateRecord_InvalidContentType(t *testing.T) {
+	svc := &mockDNSService{}
+	repo := &testutil.MockRepo{}
+	handler := New(svc, repo, slog.Default())
+
+	body := []byte(`{"name": "www.test.com.", "type": "A", "content": "1.2.3.4"}`)
+	req := httptest.NewRequest("POST", recordsPath, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "text/plain")
+	req = withTenant(req, testTenantID)
+	w := httptest.NewRecorder()
+
+	handler.CreateRecord(w, req)
+
+	if w.Code != http.StatusUnsupportedMediaType {
+		t.Errorf("Expected status 415, got %d. Body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestCreateZone_BodySizeLimit(t *testing.T) {
+	svc := &mockDNSService{}
+	repo := &testutil.MockRepo{}
+	handler := New(svc, repo, slog.Default())
+
+	// Create a payload larger than 1MB
+	largeBody := make([]byte, maxBodySize+100)
+	for i := range largeBody {
+		largeBody[i] = ' '
+	}
+	// Make it valid JSON by wrapping in object
+	largeBody[0] = '{'
+	largeBody[len(largeBody)-1] = '}'
+
+	req := httptest.NewRequest("POST", zonesPath, bytes.NewBuffer(largeBody))
+	req.Header.Set("Content-Type", "application/json")
+	req = withTenant(req, testTenantID)
+	w := httptest.NewRecorder()
+
+	handler.CreateZone(w, req)
+
+	// Should fail due to body size limit (io.EOF from LimitReader exhaustion)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected status 400, got %d. Body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestCreateRecord_BodySizeLimit(t *testing.T) {
+	svc := &mockDNSService{}
+	repo := &testutil.MockRepo{}
+	handler := New(svc, repo, slog.Default())
+
+	// Create a payload larger than 1MB
+	largeBody := make([]byte, maxBodySize+100)
+	for i := range largeBody {
+		largeBody[i] = ' '
+	}
+	largeBody[0] = '{'
+	largeBody[len(largeBody)-1] = '}'
+
+	req := httptest.NewRequest("POST", recordsPath, bytes.NewBuffer(largeBody))
+	req.Header.Set("Content-Type", "application/json")
+	req = withTenant(req, testTenantID)
+	w := httptest.NewRecorder()
+
+	handler.CreateRecord(w, req)
+
+	// Should fail due to body size limit
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected status 400, got %d. Body: %s", w.Code, w.Body.String())
+	}
+}
