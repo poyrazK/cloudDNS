@@ -1143,6 +1143,13 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 		resBuffer.Reset()
 		resBuffer.HasNames = true
 		_ = response.Write(resBuffer)
+		// If still too large (e.g., due to large EDNS options like padding), remove OPT entirely
+		if resBuffer.Position() > maxSize {
+			response.Resources = nil
+			resBuffer.Reset()
+			resBuffer.HasNames = true
+			_ = response.Write(resBuffer)
+		}
 	}
 
 	resData := resBuffer.Buf[:resBuffer.Position()]

@@ -16,13 +16,18 @@ import (
 const maxBodySize = 1 << 20 // 1MB
 
 // validateContentType checks if Content-Type is application/json.
-// Returns true if empty (backward compat) or has JSON prefix.
+// Returns true if empty (backward compat) or exactly "application/json".
 func validateContentType(r *http.Request) bool {
 	contentType := r.Header.Get("Content-Type")
 	if contentType == "" {
 		return true
 	}
-	return strings.HasPrefix(strings.TrimSpace(strings.Split(contentType, ";")[0]), "application/json")
+	// Parse media type: split on ";," then trim and lowercase for exact comparison
+	mediaType := strings.TrimSpace(strings.Split(contentType, ";")[0])
+	if strings.ToLower(mediaType) == "application/json" {
+		return true
+	}
+	return false
 }
 
 // Handler handles HTTP requests for zone and record management.

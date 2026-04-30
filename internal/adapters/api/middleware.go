@@ -62,8 +62,17 @@ func DefaultCORSConfig() *CORSConfig {
 	if origins == "" {
 		origins = "*"
 	}
+	// Parse and trim each origin, ignoring empty strings
+	rawOrigins := strings.Split(origins, ",")
+	allowed := make([]string, 0, len(rawOrigins))
+	for _, o := range rawOrigins {
+		trimmed := strings.TrimSpace(o)
+		if trimmed != "" {
+			allowed = append(allowed, trimmed)
+		}
+	}
 	return &CORSConfig{
-		AllowedOrigins: strings.Split(origins, ","),
+		AllowedOrigins: allowed,
 		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders: []string{"Authorization", "Content-Type", "X-Real-IP", "X-Forwarded-For"},
 		MaxAge:         86400,
