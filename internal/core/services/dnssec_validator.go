@@ -252,15 +252,16 @@ func (v *DNSSECValidator) ValidateDNSKEYChain(dnskeys []packet.DNSRecord, ds, _ 
 
 // ChainLink represents a single step in the DNSSEC validation chain.
 type ChainLink struct {
-	Zone      string           // Zone name (e.g., "example.com.")
+	Zone      string             // Zone name (e.g., "example.com.")
 	DNSKEYs   []packet.DNSRecord // DNSKEYs for this zone
-	DS        packet.DNSRecord  // DS record in parent (empty for trust anchor zone)
+	DS        packet.DNSRecord   // DS record in parent (empty for trust anchor zone)
+	RRSIGsDS  []packet.DNSRecord // RRSIG records signing the DS RRset
 }
 
 // ValidateChain validates the full DNSSEC trust chain from a leaf zone to a trust anchor.
 // It verifies that each zone's DNSKEY is valid according to its DS record,
 // and that DS records are properly signed up the chain to the trust anchor.
-func (v *DNSSECValidator) ValidateChain(chain []ChainLink, _ uint32) error {
+func (v *DNSSECValidator) ValidateChain(chain []ChainLink, now uint32) error {
 	if len(chain) == 0 {
 		return fmt.Errorf("dnssec: empty chain")
 	}
@@ -290,6 +291,37 @@ func (v *DNSSECValidator) ValidateChain(chain []ChainLink, _ uint32) error {
 			// Validate DNSKEY format
 			if valid, err := packet.ValidateDNSKEYFormat(*matchedDNSKEY); !valid || err != nil {
 				return fmt.Errorf("dnssec: chain link %d: invalid dnskey format: %w", i, err)
+			}
+
+			// Verify RRSIG_DS signatures using parent zone's DNSKEYs (chain[i+1].DNSKEYs)
+			// The DS record for zone[i] is signed by the parent zone's ZSK
+			if i+1 < len(chain) {
+				parentLink := &chain[i+1]
+				if len(link.RRSIGsDS) > 0 && len(parentLink.DNSKEYs) > 0 {
+					// Find the RRSIG that covers DS (TypeCovered should be DS)
+					var rrsig *packet.DNSRecord
+					for idx := range link.RRSIGsDS {
+						if link.RRSIGsDS[idx].Type == packet.RRSIG && link.RRSIGsDS[idx].TypeCovered == uint16(packet.DS) {
+							rrsig = &link.RRSIGsDS[idx]
+							break
+						}
+					}
+					if rrsig == nil {
+						return fmt.Errorf("dnssec: chain link %d: no RRSIG found for DS", i)
+					}
+
+					// Find matching DNSKEY in parent zone to verify the RRSIG
+					parentDNSKEY := packet.FindMatchingDNSKEY(*rrsig, parentLink.DNSKEYs)
+					if parentDNSKEY == nil {
+						return fmt.Errorf("dnssec: chain link %d: no matching DNSKEY in parent zone for RRSIG_DS", i)
+					}
+
+					// Verify the RRSIG_DS signature
+					valid, err := packet.VerifyRRSet([]packet.DNSRecord{link.DS}, *rrsig, *parentDNSKEY, now)
+					if err != nil || !valid {
+						return fmt.Errorf("dnssec: chain link %d: RRSIG_DS signature verification failed: %w", i, err)
+					}
+				}
 			}
 		}
 

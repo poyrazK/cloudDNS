@@ -632,6 +632,112 @@ func TestValidateChain_DNSKEYMismatch(t *testing.T) {
 	}
 }
 
+func TestValidateChain_InvalidRRSIGDSSignature(t *testing.T) {
+	validator := NewDNSSECValidator(nil)
+
+	// Create key for com zone
+	comDNSKEY, comPrivKey := makeTestDNSKEY(t)
+	comDNSKEY.Name = "com."
+
+	// Create different key for example.com
+	exampleDNSKEY, _ := makeTestDNSKEY(t)
+	exampleDNSKEY.Name = "example.com."
+
+	// Compute DS for example.com using com's DNSKEY
+	ds, err := exampleDNSKEY.ComputeDS(2) // SHA-256
+	if err != nil {
+		t.Fatalf("Failed to compute DS: %v", err)
+	}
+
+	// Sign the DS with com's key (correct)
+	now := uint32(1000)
+	rrsig, err := packet.SignRRSet([]packet.DNSRecord{ds}, comPrivKey, packet.AlgorithmECDSAP256, "com.", comDNSKEY.ComputeKeyTag(), now-60, now+3600)
+	if err != nil {
+		t.Fatalf("Failed to sign DS: %v", err)
+	}
+
+	// Chain: example.com -> com
+	chain := []ChainLink{
+		{
+			Zone:     "example.com.",
+			DNSKEYs:  []packet.DNSRecord{exampleDNSKEY},
+			DS:       ds,
+			RRSIGsDS: []packet.DNSRecord{rrsig},
+		},
+		{
+			Zone:    "com.",
+			DNSKEYs: []packet.DNSRecord{comDNSKEY},
+			DS:      packet.DNSRecord{},
+		},
+	}
+
+	// Valid signature should pass
+	err = validator.ValidateChain(chain, now)
+	if err != nil {
+		t.Errorf("Expected valid chain with correct RRSIG_DS, got error: %v", err)
+	}
+
+	// Corrupt the signature to make it invalid
+	chain[0].RRSIGsDS[0].Signature[0] ^= 0xFF
+	err = validator.ValidateChain(chain, now)
+	if err == nil {
+		t.Error("Expected error when RRSIG_DS signature is invalid")
+	}
+}
+
+func TestValidateChain_MissingRRSIGDS(t *testing.T) {
+	validator := NewDNSSECValidator(nil)
+
+	// Create key for com zone
+	comDNSKEY, _ := makeTestDNSKEY(t)
+	comDNSKEY.Name = "com."
+
+	// Create key for example.com
+	exampleDNSKEY, _ := makeTestDNSKEY(t)
+	exampleDNSKEY.Name = "example.com."
+
+	// Compute DS for example.com using com's DNSKEY
+	ds, err := exampleDNSKEY.ComputeDS(2) // SHA-256
+	if err != nil {
+		t.Fatalf("Failed to compute DS: %v", err)
+	}
+
+	// Create a valid RRSIG but with garbage signature (won't match)
+	garbageSig := make([]byte, 64)
+	rrsig := packet.DNSRecord{
+		Type:         packet.RRSIG,
+		TypeCovered:  uint16(packet.DS),
+		Algorithm:    comDNSKEY.Algorithm,
+		KeyTag:       comDNSKEY.ComputeKeyTag(),
+		SignerName:   "com.",
+		Expiration:   uint32(2000),
+		Inception:    uint32(500),
+		OrigTTL:      300,
+		Labels:       2,
+		Signature:    garbageSig, // Invalid signature
+	}
+
+	// Chain: example.com -> com (with DS and RRSIGsDS with invalid signature)
+	chain := []ChainLink{
+		{
+			Zone:     "example.com.",
+			DNSKEYs:  []packet.DNSRecord{exampleDNSKEY},
+			DS:       ds,
+			RRSIGsDS: []packet.DNSRecord{rrsig},
+		},
+		{
+			Zone:    "com.",
+			DNSKEYs: []packet.DNSRecord{comDNSKEY},
+			DS:      packet.DNSRecord{},
+		},
+	}
+
+	err = validator.ValidateChain(chain, uint32(1000))
+	if err == nil {
+		t.Error("Expected error when RRSIG_DS signature is invalid")
+	}
+}
+
 func TestValidateChain_TrustAnchorMismatch(t *testing.T) {
 	// Create root anchor
 	rootDNSKEY, _ := makeTestDNSKEY(t)
