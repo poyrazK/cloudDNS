@@ -13,7 +13,7 @@ import (
 // handleDoQListener handles incoming QUIC connections for DNS-over-QUIC.
 func (s *Server) handleDoQListener(ctx context.Context, listener *quic.Listener) {
 	for {
-		conn, err := listener.Accept(context.Background())
+		conn, err := listener.Accept(ctx)
 		if err != nil {
 			select {
 			case <-s.done:
