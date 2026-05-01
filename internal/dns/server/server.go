@@ -516,10 +516,10 @@ func (s *Server) Run(ctx context.Context) error {
 			s.doqListener = quicListener
 			s.Logger.Info("DNS over QUIC (DoQ) starting", "addr", s.DoQAddr)
 			s.wg.Add(1)
-			go func(ctx context.Context) {
+			go func() {
 				defer s.wg.Done()
-				s.handleDoQListener(ctx, quicListener)
-			}(s.lifecycleCtx)
+				s.handleDoQListener(s.lifecycleCtx, quicListener)
+			}()
 		}
 	}
 
