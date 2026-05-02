@@ -913,18 +913,14 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 	lock.Lock()
 
 	var cachedData []byte
-	var fromL2 bool
 
-	if cachedData, found := s.Cache.Get(cacheKey); found {
+	if data, found := s.Cache.GetInto(cacheKey, request.Header.ID); found {
 		metrics.CacheOperations.WithLabelValues("l1", "hit").Inc()
 		metrics.QueriesTotal.WithLabelValues(qTypeLabel, "0", protocol).Inc()
 		metrics.QueryDuration.WithLabelValues("cache_l1").Observe(time.Since(start).Seconds())
-		if len(cachedData) >= 2 {
-			cachedData[0] = byte(request.Header.ID >> 8)
-			cachedData[1] = byte(request.Header.ID & 0xFF)
-		}
+		err := sendFn(data)
 		lock.Unlock()
-		return sendFn(cachedData)
+		return err
 	}
 	metrics.CacheOperations.WithLabelValues("l1", "miss").Inc()
 
@@ -945,13 +941,12 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 			}
 			s.Cache.Set(cacheKey, data, remainingTTL)
 			cachedData = data
-			fromL2 = true
 		}
 	}
 
 	lock.Unlock()
 
-	if fromL2 {
+	if cachedData != nil {
 		return sendFn(cachedData)
 	}
 
