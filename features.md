@@ -29,6 +29,7 @@ Built-in orchestration for global Anycast networks using BGP.
 ## 5. Advanced DNS Standards
 *   **DNSSEC**: Automated Key (KSK/ZSK) management, signing, validation, AD bit support, and RFC 8914 EDE codes. See [docs/dnssec.md](docs/dnssec.md) for details.
 *   **DoH (DNS over HTTPS)**: Privacy-focused resolution over HTTP/2 using both `GET` and `POST`.
+*   **DoQ (DNS over QUIC)**: RFC 9250 compliant low-latency DNS transport over QUIC with 0-RTT support.
 *   **Dynamic Updates (RFC 2136)**: Standardized dynamic record management.
 *   **IXFR (Incremental Zone Transfer)**: RFC 1995 compliant synchronization using transactional delta logging, with intelligent AXFR fallback.
 

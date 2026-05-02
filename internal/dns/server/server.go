@@ -33,6 +33,7 @@ import (
 	"github.com/poyrazK/cloudDNS/internal/dns/master"
 	"github.com/poyrazK/cloudDNS/internal/dns/packet"
 	"github.com/poyrazK/cloudDNS/internal/infrastructure/metrics"
+	"github.com/quic-go/quic-go"
 )
 
 // ClassCHAOS is the DNS class for server identity and metadata.
@@ -65,13 +66,15 @@ type Server struct {
 	NotifyPortOverride int
 	DisableAsync       bool // If true, NOTIFY and UPDATE handlers won't spawn goroutines
 
-	// TLS Config for DoT and DoH
+	// TLS Config for DoT, DoH, and DoQ
 	TLSConfig *tls.Config
+	DoQAddr  string // DNS-over-QUIC listen address (default ":853")
 
 	// Listener handles for graceful shutdown
 	tcpListener net.Listener
 	dotListener  net.Listener
 	dohServer    *http.Server
+	doqListener *quic.Listener
 
 	// lifecycleCtx is a long-lived context for background workers.
 	// cancel cancels the lifecycleCtx.
@@ -336,6 +339,9 @@ func (s *Server) Run(ctx context.Context) error {
 			defer cancel()
 			_ = s.dohServer.Shutdown(shutdownCtx)
 		}
+		if s.doqListener != nil {
+			_ = s.doqListener.Close()
+		}
 	}(ctx)
 
 	// Initialize DNSSECValidator from config if provided
@@ -501,6 +507,26 @@ func (s *Server) Run(ctx context.Context) error {
 				s.Logger.Error("DoH server failed", "error", errDoH)
 			}
 		}()
+	}
+
+	// 6. DoQ Listener (Port 853)
+	if s.DoQAddr != "" {
+		if s.TLSConfig == nil {
+			s.Logger.Error("DNS over QUIC (DoQ) skipped", "reason", "TLS config required but not provided", "addr", s.DoQAddr)
+		} else {
+			quicListener, errDoQ := s.setupDoQListener(s.DoQAddr)
+			if errDoQ != nil {
+				s.Logger.Error("DNS over QUIC (DoQ) listener setup failed", "error", errDoQ, "addr", s.DoQAddr)
+			} else {
+				s.doqListener = quicListener
+				s.Logger.Info("DNS over QUIC (DoQ) starting", "addr", s.DoQAddr)
+				s.wg.Add(1)
+				go func() {
+					defer s.wg.Done()
+					s.handleDoQListener(s.lifecycleCtx, quicListener)
+				}()
+			}
+		}
 	}
 
 	<-ctx.Done()
