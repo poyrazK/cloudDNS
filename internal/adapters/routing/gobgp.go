@@ -295,10 +295,10 @@ func (a *GoBGPAdapter) Stop() error {
 	return nil
 }
 
-// monitorPeer watches for peer disconnection and attempts reconnection with
-// exponential backoff (max 5 minutes). The gobgp library version in use does
-// not expose a direct peer state callback API, so this implementation periodically
-// checks peer health by attempting to re-add the peer.
+// monitorPeer watches for peer disconnection and attempts reconnection.
+// It polls the peer every 30 seconds by attempting to re-add it. On failure,
+// it restarts the BGP server and re-adds the peer. The gobgp library version
+// in use does not expose a direct peer state callback API.
 func (a *GoBGPAdapter) monitorPeer(ctx context.Context) {
 	defer a.wg.Done()
 

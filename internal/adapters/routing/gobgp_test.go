@@ -98,3 +98,41 @@ func TestNewGoBGPAdapter(t *testing.T) {
 		t.Fatal("NewGoBGPAdapter failed")
 	}
 }
+
+func TestGoBGPAdapter_StopWithdrawsActiveRoutes(t *testing.T) {
+	mock := &mockBGPBackend{}
+	adapter := &GoBGPAdapter{
+		bgpServer:      mock,
+		logger:         slog.Default(),
+		announcedVIPs:  make(map[string]bool),
+	}
+
+	ctx := context.Background()
+
+	// Announce two VIPs
+	if err := adapter.Announce(ctx, "1.1.1.1"); err != nil {
+		t.Fatalf("Announce failed: %v", err)
+	}
+	if err := adapter.Announce(ctx, "2.2.2.2"); err != nil {
+		t.Fatalf("Announce failed: %v", err)
+	}
+
+	// Verify VIPs are tracked
+	adapter.announcedMu.Lock()
+	if len(adapter.announcedVIPs) != 2 {
+		t.Errorf("expected 2 announced VIPs, got %d", len(adapter.announcedVIPs))
+	}
+	adapter.announcedMu.Unlock()
+
+	// Stop — should withdraw all active routes
+	if err := adapter.Stop(); err != nil {
+		t.Fatalf("Stop failed: %v", err)
+	}
+
+	// After Stop, map should be cleared
+	adapter.announcedMu.Lock()
+	if len(adapter.announcedVIPs) != 0 {
+		t.Errorf("expected 0 announced VIPs after Stop, got %d", len(adapter.announcedVIPs))
+	}
+	adapter.announcedMu.Unlock()
+}
