@@ -99,6 +99,13 @@ func (s *Server) setupDoQListener(addr string) (*quic.Listener, error) {
 		return nil, fmt.Errorf("TLS config required for DoQ")
 	}
 
+	// Clone TLSConfig to avoid mutating the shared config and ensure "doq" ALPN is present
+	tlsConfig = tlsConfig.Clone()
+	if tlsConfig == nil {
+		return nil, fmt.Errorf("failed to clone TLS config for DoQ")
+	}
+	tlsConfig.NextProtos = append(tlsConfig.NextProtos, "doq")
+
 	listener, err := quic.ListenAddr(addr, tlsConfig, quicConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create DoQ listener: %w", err)

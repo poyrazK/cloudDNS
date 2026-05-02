@@ -510,16 +510,22 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 
 	// 6. DoQ Listener (Port 853)
-	if s.DoQAddr != "" && s.TLSConfig != nil {
-		quicListener, errDoQ := s.setupDoQListener(s.DoQAddr)
-		if errDoQ == nil {
-			s.doqListener = quicListener
-			s.Logger.Info("DNS over QUIC (DoQ) starting", "addr", s.DoQAddr)
-			s.wg.Add(1)
-			go func() {
-				defer s.wg.Done()
-				s.handleDoQListener(s.lifecycleCtx, quicListener)
-			}()
+	if s.DoQAddr != "" {
+		if s.TLSConfig == nil {
+			s.Logger.Error("DNS over QUIC (DoQ) skipped", "reason", "TLS config required but not provided", "addr", s.DoQAddr)
+		} else {
+			quicListener, errDoQ := s.setupDoQListener(s.DoQAddr)
+			if errDoQ != nil {
+				s.Logger.Error("DNS over QUIC (DoQ) listener setup failed", "error", errDoQ, "addr", s.DoQAddr)
+			} else {
+				s.doqListener = quicListener
+				s.Logger.Info("DNS over QUIC (DoQ) starting", "addr", s.DoQAddr)
+				s.wg.Add(1)
+				go func() {
+					defer s.wg.Done()
+					s.handleDoQListener(s.lifecycleCtx, quicListener)
+				}()
+			}
 		}
 	}
 
