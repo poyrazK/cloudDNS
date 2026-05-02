@@ -104,5 +104,10 @@ func (s *Server) setupDoQListener(addr string) (*quic.Listener, error) {
 		return nil, fmt.Errorf("failed to create DoQ listener: %w", err)
 	}
 
+	// Log privacy warning for 0-RTT (documented in ADR 0010)
+	if s.Logger != nil {
+		s.Logger.Warn("DNS-over-QUIC (DoQ) enabled with 0-RTT support - replay attacks possible, not suitable for high-security environments")
+	}
+
 	return listener, nil
 }
