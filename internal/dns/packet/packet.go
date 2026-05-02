@@ -665,9 +665,7 @@ func (r *DNSRecord) Read(buffer *BytePacketBuffer) error {
 			remaining -= (3 + int(paramLen))
 			switch key {
 			case 1: // alpn
-				for _, a := range strings.Split(string(paramData), ",") {
-					r.HTTPSAlpn = append(r.HTTPSAlpn, a)
-				}
+				r.HTTPSAlpn = append(r.HTTPSAlpn, strings.Split(string(paramData), ",")...)
 			case 2: // no-default
 				r.HTTPSNoDefault = true
 			case 3: // port
@@ -970,28 +968,6 @@ func (r *DNSRecord) Write(buffer *BytePacketBuffer) (int, error) {
 			if hasParams {
 				return 0, fmt.Errorf("HTTPS AliasMode (priority 0) must not have SVCB params")
 			}
-		}
-		// Calculate SVCB params size first
-		paramsSize := 0
-		if len(r.HTTPSAlpn) > 0 {
-			// RFC 9460 Section 2.2: multiple ALPNs comma-separated in one param
-			alpnValue := strings.Join(r.HTTPSAlpn, ",")
-			paramsSize += 1 + 2 + len(alpnValue)
-		}
-		if r.HTTPSPort != 0 && r.HTTPSPort != 443 {
-			paramsSize += 1 + 2 + 2 // key(1) + len(2) + port(2)
-		}
-		if len(r.HTTPSEchConfig) > 0 {
-			paramsSize += 1 + 2 + len(r.HTTPSEchConfig) // key(1) + len(2) + value
-		}
-		if len(r.HTTPSIpv4Hint) > 0 {
-			paramsSize += 1 + 2 + (len(r.HTTPSIpv4Hint) * 4) // key(1) + len(2) + ips
-		}
-		if len(r.HTTPSIpv6Hint) > 0 {
-			paramsSize += 1 + 2 + (len(r.HTTPSIpv6Hint) * 16) // key(1) + len(2) + ips
-		}
-		if r.HTTPSNoDefault {
-			paramsSize += 1 + 2 + 0 // key(1) + len(2) + no value
 		}
 		// Write placeholder for RDLENGTH
 		lenPos := buffer.Position()
