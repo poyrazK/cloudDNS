@@ -785,6 +785,62 @@ func TestValidateChain_TrustAnchorMismatch(t *testing.T) {
 	}
 }
 
+// TestValidateWithTrustAnchor_PublicKeyMismatch tests that ValidateWithTrustAnchor
+// rejects a DNSKEY whose keytag and algorithm match the trust anchor but whose
+// public key bytes differ (the public key comparison was added in PR #128).
+func TestValidateWithTrustAnchor_PublicKeyMismatch(t *testing.T) {
+	// Create trust anchor
+	anchorDNSKEY, _ := makeTestDNSKEY(t)
+
+	trustAnchors := map[string]packet.DNSRecord{
+		"example.com.": anchorDNSKEY,
+	}
+	validator := NewDNSSECValidator(trustAnchors)
+
+	// Create a second key with same algorithm but different key material
+	differentDNSKEY, _ := makeTestDNSKEY(t)
+
+	// Verify they have same algorithm (13) but different public key
+	if differentDNSKEY.Algorithm != anchorDNSKEY.Algorithm {
+		t.Fatal("Test setup: keys should have same algorithm")
+	}
+	if string(differentDNSKEY.PublicKey) == string(anchorDNSKEY.PublicKey) {
+		t.Fatal("Test setup: keys should have different public key bytes")
+	}
+
+	// Build a simple rrset for validation
+	rrset := []packet.DNSRecord{
+		{Name: "example.com.", Type: packet.A, Data: []byte{1, 2, 3, 4}},
+	}
+
+	// We need a valid RRSIG and DNSKEY that match
+	// For this test, create a RRSIG with the differentDNSKEY's keytag
+	keyTag := differentDNSKEY.ComputeKeyTag()
+	rrsig := packet.DNSRecord{
+		Type:        packet.RRSIG,
+		TypeCovered: uint16(packet.A),
+		Algorithm:   13,
+		Labels:      1,
+		OrigTTL:     300,
+		Expiration:  uint32(2000000000),
+		Inception:   uint32(1000000000),
+		KeyTag:      keyTag,
+		SignerName:  "example.com.",
+		Signature:   []byte("dummy"),
+	}
+
+	dnskeys := []packet.DNSRecord{differentDNSKEY}
+	rrsigs := []packet.DNSRecord{rrsig}
+
+	result := validator.ValidateWithTrustAnchor("example.com.", rrset, rrsigs, dnskeys, uint32(1500000000))
+	if result.Valid {
+		t.Error("Expected validation to fail when DNSKEY matches anchor keytag+algorithm but not public key")
+	}
+	if result.EDE == nil || result.EDE.Code != EDECodeTrustAnchorUnknown {
+		t.Errorf("Expected EDE code TrustAnchorUnknown, got: %v", result.EDE)
+	}
+}
+
 func TestEDE_String(t *testing.T) {
 	tests := []struct {
 		ede    EDE
