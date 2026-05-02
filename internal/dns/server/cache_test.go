@@ -99,6 +99,34 @@ func TestCacheInvalidate(t *testing.T) {
 	}
 }
 
+func TestCacheGetReturnsCopyNotReference(t *testing.T) {
+	done := make(chan struct{})
+	t.Cleanup(func() { close(done) })
+	cache := NewDNSCache(done, nil)
+	key := "copy-test.com:1"
+	originalData := []byte{1, 2, 3, 4}
+	cache.Set(key, originalData, 1*time.Hour)
+
+	// Get the data from cache
+	res, found := cache.Get(key)
+	if !found {
+		t.Fatalf("Expected to find key %s", key)
+	}
+
+	// Mutate the returned slice
+	res[0] = 0xFF
+	res[1] = 0xFF
+
+	// Get again — internal data must be unchanged
+	res2, found := cache.Get(key)
+	if !found {
+		t.Fatalf("Expected to find key %s on second call", key)
+	}
+	if res2[0] != 1 || res2[1] != 2 {
+		t.Errorf("Internal cache data was mutated — Get() returned a reference, not a copy")
+	}
+}
+
 func TestCachePing(t *testing.T) {
 	done := make(chan struct{})
 	t.Cleanup(func() { close(done) })

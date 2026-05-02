@@ -41,6 +41,23 @@ func (r *RedisCache) Get(ctx context.Context, key string) ([]byte, bool) {
 	return val, true
 }
 
+// GetWithTTL retrieves cached data and remaining TTL in a single pipeline call.
+func (r *RedisCache) GetWithTTL(ctx context.Context, key string) ([]byte, time.Duration, bool) {
+	pipe := r.client.Pipeline()
+	getPipe := pipe.Get(ctx, "dns:"+key)
+	ttlPipe := pipe.TTL(ctx, "dns:"+key)
+	_, err := pipe.Exec(ctx)
+	if err != nil && !errors.Is(err, redis.Nil) {
+		return nil, 0, false
+	}
+	val, err := getPipe.Bytes()
+	if err != nil {
+		return nil, 0, false
+	}
+	ttl := ttlPipe.Val()
+	return val, ttl, true
+}
+
 // Set stores a DNS response in the cache with the given TTL.
 func (r *RedisCache) Set(ctx context.Context, key string, data []byte, ttl time.Duration) {
 	r.client.Set(ctx, "dns:"+key, data, ttl)
@@ -51,8 +68,10 @@ func (r *RedisCache) Ping(ctx context.Context) error {
 	return r.client.Ping(ctx).Err()
 }
 
-// Invalidate publishes an invalidation event to all nodes.
+// Invalidate deletes the key from Redis and publishes an invalidation event to all nodes.
 func (r *RedisCache) Invalidate(ctx context.Context, name string, qType domain.RecordType) error {
+	key := "dns:" + name + ":" + string(qType)
+	r.client.Del(ctx, key)
 	msg := fmt.Sprintf("%s:%s", name, string(qType))
 	return r.client.Publish(ctx, InvalidationChannel, msg).Err()
 }
@@ -63,14 +82,12 @@ func (r *RedisCache) Subscribe(ctx context.Context) *redis.PubSub {
 }
 
 // PushToDLQ pushes a failed invalidation message to the dead letter queue.
-// The message is stored with a timestamp prefix for ordering.
 func (r *RedisCache) PushToDLQ(ctx context.Context, msg string) error {
 	dlqEntry := fmt.Sprintf("%d:%s", time.Now().UnixNano(), msg)
 	return r.client.LPush(ctx, DLQChannel, dlqEntry).Err()
 }
 
 // PopFromDLQ pops a message from the dead letter queue with blocking.
-// Returns ("", nil) if timeout is reached before a message is available.
 func (r *RedisCache) PopFromDLQ(ctx context.Context, timeout time.Duration) (string, error) {
 	result, err := r.client.BRPop(ctx, timeout, DLQChannel).Result()
 	if err != nil {
@@ -79,11 +96,9 @@ func (r *RedisCache) PopFromDLQ(ctx context.Context, timeout time.Duration) (str
 		}
 		return "", err
 	}
-	// result[0] is the key, result[1] is the value
 	if len(result) < 2 {
 		return "", nil
 	}
-	// Strip timestamp prefix (find first colon)
 	if idx := strings.Index(result[1], ":"); idx >= 0 {
 		return result[1][idx+1:], nil
 	}

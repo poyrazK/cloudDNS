@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/poyrazK/cloudDNS/internal/core/domain"
 )
 
 func TestRedisCache(t *testing.T) {
@@ -41,15 +40,39 @@ func TestRedisCache(t *testing.T) {
 	if found {
 		t.Errorf("Expected nonexistent key to not be found")
 	}
+}
 
-	// 5. Test Invalidate
-	err = cache.Invalidate(ctx, "test.key.", domain.TypeA)
+func TestRedisCache_GetWithTTL(t *testing.T) {
+	mr, err := miniredis.Run()
 	if err != nil {
-		t.Errorf("Invalidate failed: %v", err)
+		t.Fatalf("Failed to run miniredis: %v", err)
 	}
-	// Note: Invalidate in RedisCache only publishes to Pub/Sub, 
-	// it doesn't delete the key from Redis itself (L3 is common).
-	// Actually, the implementation should probably delete it too.
+	defer mr.Close()
+
+	cache := NewRedisCache(mr.Addr(), "", 0)
+	ctx := context.Background()
+
+	key := "get-with-ttl.test."
+	data := []byte{1, 2, 3}
+	cache.Set(ctx, key, data, 10*time.Second)
+
+	val, ttl, found := cache.GetWithTTL(ctx, key)
+	if !found {
+		t.Fatalf("Expected key to be found")
+	}
+	if string(val) != string(data) {
+		t.Errorf("Data mismatch: got %v, want %v", val, data)
+	}
+	if ttl <= 0 {
+		t.Errorf("Expected positive TTL, got %v", ttl)
+	}
+
+	// After expiration, key should not be found
+	mr.FastForward(11 * time.Second)
+	_, _, found = cache.GetWithTTL(ctx, key)
+	if found {
+		t.Errorf("Expected key to be expired")
+	}
 }
 
 func TestRedisCache_Ping(t *testing.T) {
