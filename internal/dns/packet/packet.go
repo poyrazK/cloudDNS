@@ -4,6 +4,7 @@ package packet
 import (
 	"fmt"
 	"net"
+	"strings"
 
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
 )
@@ -664,7 +665,9 @@ func (r *DNSRecord) Read(buffer *BytePacketBuffer) error {
 			remaining -= (3 + int(paramLen))
 			switch key {
 			case 1: // alpn
-				r.HTTPSAlpn = append(r.HTTPSAlpn, string(paramData))
+				for _, a := range strings.Split(string(paramData), ",") {
+					r.HTTPSAlpn = append(r.HTTPSAlpn, a)
+				}
 			case 2: // no-default
 				r.HTTPSNoDefault = true
 			case 3: // port
@@ -674,16 +677,18 @@ func (r *DNSRecord) Read(buffer *BytePacketBuffer) error {
 			case 5: // echconfig
 				r.HTTPSEchConfig = paramData
 			case 6: // ipv4hint
-				if len(paramData)%4 == 0 {
-					for i := 0; i < len(paramData); i += 4 {
-						r.HTTPSIpv4Hint = append(r.HTTPSIpv4Hint, net.IP(paramData[i:i+4]))
-					}
+				if len(paramData)%4 != 0 {
+					return fmt.Errorf("HTTPS ipv4hint: length %d not multiple of 4", len(paramData))
+				}
+				for i := 0; i < len(paramData); i += 4 {
+					r.HTTPSIpv4Hint = append(r.HTTPSIpv4Hint, net.IP(paramData[i:i+4]))
 				}
 			case 7: // ipv6hint
-				if len(paramData)%16 == 0 {
-					for i := 0; i < len(paramData); i += 16 {
-						r.HTTPSIpv6Hint = append(r.HTTPSIpv6Hint, net.IP(paramData[i:i+16]))
-					}
+				if len(paramData)%16 != 0 {
+					return fmt.Errorf("HTTPS ipv6hint: length %d not multiple of 16", len(paramData))
+				}
+				for i := 0; i < len(paramData); i += 16 {
+					r.HTTPSIpv6Hint = append(r.HTTPSIpv6Hint, net.IP(paramData[i:i+16]))
 				}
 			}
 		}
@@ -959,10 +964,19 @@ func (r *DNSRecord) Write(buffer *BytePacketBuffer) (int, error) {
 		if err := buffer.Writeu16(uint16(currPos - (lenPos + 2))); err != nil { return 0, err } // #nosec G115
 		if err := buffer.Seek(currPos); err != nil { return 0, err }
 	case HTTPS:
+		// AliasMode (priority 0) must not have SVCB params per RFC 9460
+		if r.HTTPSPriority == 0 {
+			hasParams := len(r.HTTPSAlpn) > 0 || (r.HTTPSPort != 0 && r.HTTPSPort != 443) || len(r.HTTPSEchConfig) > 0 || len(r.HTTPSIpv4Hint) > 0 || len(r.HTTPSIpv6Hint) > 0 || r.HTTPSNoDefault
+			if hasParams {
+				return 0, fmt.Errorf("HTTPS AliasMode (priority 0) must not have SVCB params")
+			}
+		}
 		// Calculate SVCB params size first
 		paramsSize := 0
-		for _, alpn := range r.HTTPSAlpn {
-			paramsSize += 1 + 2 + len(alpn) // key(1) + len(2) + value
+		if len(r.HTTPSAlpn) > 0 {
+			// RFC 9460 Section 2.2: multiple ALPNs comma-separated in one param
+			alpnValue := strings.Join(r.HTTPSAlpn, ",")
+			paramsSize += 1 + 2 + len(alpnValue)
 		}
 		if r.HTTPSPort != 0 && r.HTTPSPort != 443 {
 			paramsSize += 1 + 2 + 2 // key(1) + len(2) + port(2)
@@ -987,11 +1001,13 @@ func (r *DNSRecord) Write(buffer *BytePacketBuffer) (int, error) {
 		// Write Target (length-prefixed)
 		if err := buffer.WriteName(r.HTTPSTarget); err != nil { return 0, err }
 		// Write SVCB params
-		for _, alpn := range r.HTTPSAlpn {
+		// RFC 9460 Section 2.2: multiple ALPNs comma-separated in one param
+		if len(r.HTTPSAlpn) > 0 {
 			if err := buffer.Write(1); err != nil { return 0, err }
-			if err := buffer.Writeu16(uint16(len(alpn))); err != nil { return 0, err }
-			for i := 0; i < len(alpn); i++ {
-				if err := buffer.Write(alpn[i]); err != nil { return 0, err }
+			alpnValue := strings.Join(r.HTTPSAlpn, ",")
+			if err := buffer.Writeu16(uint16(len(alpnValue))); err != nil { return 0, err }
+			for i := 0; i < len(alpnValue); i++ {
+				if err := buffer.Write(alpnValue[i]); err != nil { return 0, err }
 			}
 		}
 		if r.HTTPSPort != 0 && r.HTTPSPort != 443 {

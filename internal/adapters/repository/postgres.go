@@ -1111,6 +1111,7 @@ func ConvertPacketRecordToDomain(pRec packet.DNSRecord, zoneID string) (domain.R
 			port := int(pRec.HTTPSPort)
 			rec.HTTPSPort = &port
 		}
+		rec.HTTPSNoDefault = pRec.HTTPSNoDefault
 	default:
 		return rec, fmt.Errorf("unsupported record type for conversion: %d", pRec.Type)
 	}
@@ -1486,6 +1487,7 @@ func ConvertDomainToPacketRecord(rec domain.Record) (packet.DNSRecord, error) {
 			}
 			pRec.HTTPSPort = uint16(p) // #nosec G115
 		}
+		pRec.HTTPSNoDefault = rec.HTTPSNoDefault
 
 	default:
 		return pRec, fmt.Errorf("unsupported record type: %s", rec.Type)

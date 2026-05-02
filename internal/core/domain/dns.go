@@ -98,6 +98,7 @@ type Record struct {
 	HTTPSIpv4Hint  string `json:"https_ipv4_hint,omitempty"` // comma-separated IPv4
 	HTTPSIpv6Hint  string `json:"https_ipv6_hint,omitempty"` // comma-separated IPv6
 	HTTPSPort      *int   `json:"https_port,omitempty"`       // default 443
+	HTTPSNoDefault bool   `json:"https_no_default,omitempty"` // RFC 9460: don't fall back to HTTP
 }
 
 // UpdateAction defines the type of change to apply in an atomic update.
