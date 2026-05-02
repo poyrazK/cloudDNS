@@ -28,6 +28,8 @@ const (
 	TypeSRV RecordType = "SRV"
 	// TypeCAA represents a certification authority authorization record (RFC 6844).
 	TypeCAA RecordType = "CAA"
+	// TypeHTTPS represents an HTTPS record (RFC 9460).
+	TypeHTTPS RecordType = "HTTPS"
 )
 
 // HealthCheckType represents the method used to verify endpoint health.
@@ -87,6 +89,15 @@ type Record struct {
 	HealthCheckType   HealthCheckType `json:"health_check_type,omitempty"`
 	HealthCheckTarget string          `json:"health_check_target,omitempty"`
 	HealthStatus      HealthStatus    `json:"health_status,omitempty"`
+
+	// HTTPS record (RFC 9460) fields
+	HTTPSPriority *int   `json:"https_priority,omitempty"` // 0=AliasMode, >0=ServiceMode
+	HTTPSHost     string `json:"https_host,omitempty"`     // Target domain
+	HTTPSAlpn     string `json:"https_alpn,omitempty"`     // comma-separated ALPNs
+	HTTPSEchConfig string `json:"https_ech_config,omitempty"` // base64-encoded ECH config
+	HTTPSIpv4Hint  string `json:"https_ipv4_hint,omitempty"` // comma-separated IPv4
+	HTTPSIpv6Hint  string `json:"https_ipv6_hint,omitempty"` // comma-separated IPv6
+	HTTPSPort      *int   `json:"https_port,omitempty"`       // default 443
 }
 
 // UpdateAction defines the type of change to apply in an atomic update.

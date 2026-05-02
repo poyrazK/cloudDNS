@@ -74,6 +74,8 @@ const (
 	TSIG       QueryType = 250
 	// CAA represents a certification authority authorization record (RFC 6844).
 	CAA        QueryType = 257
+	// HTTPS represents an HTTPS record (RFC 9460).
+	HTTPS      QueryType = 65
 )
 
 // EDNS0 Option Codes
@@ -137,6 +139,7 @@ func RecordTypeToQueryType(t domain.RecordType) QueryType {
 	case domain.TypePTR: return PTR
 	case domain.TypeSRV: return SRV
 	case domain.TypeCAA: return CAA
+	case domain.TypeHTTPS: return HTTPS
 	default: return UNKNOWN
 	}
 }
@@ -165,6 +168,7 @@ func (t QueryType) String() string {
 	case TSIG: return "TSIG"
 	case PTR: return "PTR"
 	case CAA: return "CAA"
+	case HTTPS: return "HTTPS"
 	default: return fmt.Sprintf("TYPE%d", t)
 	}
 }
@@ -423,6 +427,15 @@ type DNSRecord struct {
 	CAAFlag  uint8
 	CAATag   string
 	CAAValue string
+	// HTTPS (RFC 9460)
+	HTTPSPriority    uint16
+	HTTPSTarget      string
+	HTTPSAlpn        []string
+	HTTPSEchConfig   []byte
+	HTTPSIpv4Hint    []net.IP
+	HTTPSIpv6Hint    []net.IP
+	HTTPSPort        uint16
+	HTTPSNoDefault   bool
 }
 
 // AddEDE adds an Extended DNS Error (RFC 8914) option to an OPT record.
@@ -628,6 +641,51 @@ func (r *DNSRecord) Read(buffer *BytePacketBuffer) error {
 			if errReadVal != nil { return errReadVal }
 			r.CAAValue = string(valData)
 			if errStep2 := buffer.Step(valLen); errStep2 != nil { return errStep2 }
+		}
+	case HTTPS:
+		if r.HTTPSPriority, err = buffer.Readu16(); err != nil { return err }
+		if r.HTTPSTarget, err = buffer.ReadName(); err != nil { return err }
+		// Parse SVCB TLV parameters until end of data
+		remaining := int(dataLen) - (buffer.Position() - startPos)
+		for remaining > 0 {
+			if remaining < 3 {
+				return fmt.Errorf("HTTPS SVCB param: key+len requires 3 bytes, got %d", remaining)
+			}
+			key, errReadKey := buffer.Read()
+			if errReadKey != nil { return errReadKey }
+			paramLen, errReadLen := buffer.Readu16()
+			if errReadLen != nil { return errReadLen }
+			if int(paramLen) > remaining-3 {
+				return fmt.Errorf("HTTPS SVCB param key %d: length %d exceeds remaining %d", key, paramLen, remaining-3)
+			}
+			paramData, errReadParam := buffer.ReadRange(buffer.Position(), int(paramLen))
+			if errReadParam != nil { return errReadParam }
+			if errStep := buffer.Step(int(paramLen)); errStep != nil { return errStep }
+			remaining -= (3 + int(paramLen))
+			switch key {
+			case 1: // alpn
+				r.HTTPSAlpn = append(r.HTTPSAlpn, string(paramData))
+			case 2: // no-default
+				r.HTTPSNoDefault = true
+			case 3: // port
+				if len(paramData) >= 2 {
+					r.HTTPSPort = uint16(paramData[0])<<8 | uint16(paramData[1]) // #nosec G115
+				}
+			case 5: // echconfig
+				r.HTTPSEchConfig = paramData
+			case 6: // ipv4hint
+				if len(paramData)%4 == 0 {
+					for i := 0; i < len(paramData); i += 4 {
+						r.HTTPSIpv4Hint = append(r.HTTPSIpv4Hint, net.IP(paramData[i:i+4]))
+					}
+				}
+			case 7: // ipv6hint
+				if len(paramData)%16 == 0 {
+					for i := 0; i < len(paramData); i += 16 {
+						r.HTTPSIpv6Hint = append(r.HTTPSIpv6Hint, net.IP(paramData[i:i+16]))
+					}
+				}
+			}
 		}
 	case OPT:
 		r.UDPPayloadSize = r.Class
@@ -896,6 +954,81 @@ func (r *DNSRecord) Write(buffer *BytePacketBuffer) (int, error) {
 		for i := 0; i < len(r.CAAValue); i++ {
 			if err := buffer.Write(r.CAAValue[i]); err != nil { return 0, err }
 		}
+		currPos := buffer.Position()
+		if err := buffer.Seek(lenPos); err != nil { return 0, err }
+		if err := buffer.Writeu16(uint16(currPos - (lenPos + 2))); err != nil { return 0, err } // #nosec G115
+		if err := buffer.Seek(currPos); err != nil { return 0, err }
+	case HTTPS:
+		// Calculate SVCB params size first
+		paramsSize := 0
+		for _, alpn := range r.HTTPSAlpn {
+			paramsSize += 1 + 2 + len(alpn) // key(1) + len(2) + value
+		}
+		if r.HTTPSPort != 0 && r.HTTPSPort != 443 {
+			paramsSize += 1 + 2 + 2 // key(1) + len(2) + port(2)
+		}
+		if len(r.HTTPSEchConfig) > 0 {
+			paramsSize += 1 + 2 + len(r.HTTPSEchConfig) // key(1) + len(2) + value
+		}
+		if len(r.HTTPSIpv4Hint) > 0 {
+			paramsSize += 1 + 2 + (len(r.HTTPSIpv4Hint) * 4) // key(1) + len(2) + ips
+		}
+		if len(r.HTTPSIpv6Hint) > 0 {
+			paramsSize += 1 + 2 + (len(r.HTTPSIpv6Hint) * 16) // key(1) + len(2) + ips
+		}
+		if r.HTTPSNoDefault {
+			paramsSize += 1 + 2 + 0 // key(1) + len(2) + no value
+		}
+		// Write placeholder for RDLENGTH
+		lenPos := buffer.Position()
+		if err := buffer.Writeu16(0); err != nil { return 0, err }
+		// Write Priority
+		if err := buffer.Writeu16(r.HTTPSPriority); err != nil { return 0, err }
+		// Write Target (length-prefixed)
+		if err := buffer.WriteName(r.HTTPSTarget); err != nil { return 0, err }
+		// Write SVCB params
+		for _, alpn := range r.HTTPSAlpn {
+			if err := buffer.Write(1); err != nil { return 0, err }
+			if err := buffer.Writeu16(uint16(len(alpn))); err != nil { return 0, err }
+			for i := 0; i < len(alpn); i++ {
+				if err := buffer.Write(alpn[i]); err != nil { return 0, err }
+			}
+		}
+		if r.HTTPSPort != 0 && r.HTTPSPort != 443 {
+			if err := buffer.Write(3); err != nil { return 0, err }
+			if err := buffer.Writeu16(2); err != nil { return 0, err }
+			if err := buffer.Writeu16(r.HTTPSPort); err != nil { return 0, err }
+		}
+		if len(r.HTTPSEchConfig) > 0 {
+			if err := buffer.Write(5); err != nil { return 0, err }
+			if err := buffer.Writeu16(uint16(len(r.HTTPSEchConfig))); err != nil { return 0, err }
+			for i := 0; i < len(r.HTTPSEchConfig); i++ {
+				if err := buffer.Write(r.HTTPSEchConfig[i]); err != nil { return 0, err }
+			}
+		}
+		if len(r.HTTPSIpv4Hint) > 0 {
+			if err := buffer.Write(6); err != nil { return 0, err }
+			if err := buffer.Writeu16(uint16(len(r.HTTPSIpv4Hint) * 4)); err != nil { return 0, err }
+			for _, ip := range r.HTTPSIpv4Hint {
+				for _, b := range ip.To4() {
+					if err := buffer.Write(b); err != nil { return 0, err }
+				}
+			}
+		}
+		if len(r.HTTPSIpv6Hint) > 0 {
+			if err := buffer.Write(7); err != nil { return 0, err }
+			if err := buffer.Writeu16(uint16(len(r.HTTPSIpv6Hint) * 16)); err != nil { return 0, err }
+			for _, ip := range r.HTTPSIpv6Hint {
+				for _, b := range ip.To16() {
+					if err := buffer.Write(b); err != nil { return 0, err }
+				}
+			}
+		}
+		if r.HTTPSNoDefault {
+			if err := buffer.Write(2); err != nil { return 0, err }
+			if err := buffer.Writeu16(0); err != nil { return 0, err }
+		}
+		// Rewrite RDLENGTH
 		currPos := buffer.Position()
 		if err := buffer.Seek(lenPos); err != nil { return 0, err }
 		if err := buffer.Writeu16(uint16(currPos - (lenPos + 2))); err != nil { return 0, err } // #nosec G115
