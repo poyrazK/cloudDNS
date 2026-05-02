@@ -1982,7 +1982,7 @@ func TestValidateDNSKEYFormat_ED25519(t *testing.T) {
 
 	dnskey := DNSRecord{
 		Name:      "example.com.",
-		Type:      DNSKEY, // 48
+		Type:      DNSKEY,
 		Flags:     257,
 		Protocol:  3,
 		Algorithm: AlgorithmED25519,
