@@ -1080,6 +1080,37 @@ func ConvertPacketRecordToDomain(pRec packet.DNSRecord, zoneID string) (domain.R
 	case packet.CAA:
 		rec.Type = domain.TypeCAA
 		rec.Content = fmt.Sprintf("%d %s \"%s\"", pRec.CAAFlag, pRec.CAATag, pRec.CAAValue)
+	case packet.HTTPS:
+		rec.Type = domain.TypeHTTPS
+		if pRec.HTTPSPriority > 0 {
+			p := int(pRec.HTTPSPriority)
+			rec.HTTPSPriority = &p
+		}
+		rec.HTTPSHost = strings.TrimSuffix(pRec.HTTPSTarget, ".")
+		if len(pRec.HTTPSAlpn) > 0 {
+			rec.HTTPSAlpn = strings.Join(pRec.HTTPSAlpn, ",")
+		}
+		if len(pRec.HTTPSEchConfig) > 0 {
+			rec.HTTPSEchConfig = base64.StdEncoding.EncodeToString(pRec.HTTPSEchConfig)
+		}
+		if len(pRec.HTTPSIpv4Hint) > 0 {
+			var ips []string
+			for _, ip := range pRec.HTTPSIpv4Hint {
+				ips = append(ips, ip.String())
+			}
+			rec.HTTPSIpv4Hint = strings.Join(ips, ",")
+		}
+		if len(pRec.HTTPSIpv6Hint) > 0 {
+			var ips []string
+			for _, ip := range pRec.HTTPSIpv6Hint {
+				ips = append(ips, ip.String())
+			}
+			rec.HTTPSIpv6Hint = strings.Join(ips, ",")
+		}
+		if pRec.HTTPSPort != 0 && pRec.HTTPSPort != 443 {
+			port := int(pRec.HTTPSPort)
+			rec.HTTPSPort = &port
+		}
 	default:
 		return rec, fmt.Errorf("unsupported record type for conversion: %d", pRec.Type)
 	}
@@ -1407,6 +1438,53 @@ func ConvertDomainToPacketRecord(rec domain.Record) (packet.DNSRecord, error) {
 			}
 			pRec.CAATag = matches[2]
 			pRec.CAAValue = unescapeCAAValue(matches[3])
+		}
+	case domain.TypeHTTPS:
+		pRec.Type = packet.HTTPS
+		if rec.HTTPSPriority != nil {
+			p := *rec.HTTPSPriority
+			if p < 0 {
+				p = 0
+			}
+			if p > 65535 {
+				p = 65535
+			}
+			pRec.HTTPSPriority = uint16(p) // #nosec G115
+		}
+		pRec.HTTPSTarget = rec.HTTPSHost
+		if !strings.HasSuffix(pRec.HTTPSTarget, ".") {
+			pRec.HTTPSTarget += "."
+		}
+		if rec.HTTPSAlpn != "" {
+			pRec.HTTPSAlpn = strings.Split(rec.HTTPSAlpn, ",")
+		}
+		if rec.HTTPSEchConfig != "" {
+			if decoded, err := base64.StdEncoding.DecodeString(rec.HTTPSEchConfig); err == nil {
+				pRec.HTTPSEchConfig = decoded
+			}
+		}
+		if rec.HTTPSIpv4Hint != "" {
+			for _, ipStr := range strings.Split(rec.HTTPSIpv4Hint, ",") {
+				ipStr = strings.TrimSpace(ipStr)
+				if ip := net.ParseIP(ipStr); ip != nil {
+					pRec.HTTPSIpv4Hint = append(pRec.HTTPSIpv4Hint, ip)
+				}
+			}
+		}
+		if rec.HTTPSIpv6Hint != "" {
+			for _, ipStr := range strings.Split(rec.HTTPSIpv6Hint, ",") {
+				ipStr = strings.TrimSpace(ipStr)
+				if ip := net.ParseIP(ipStr); ip != nil {
+					pRec.HTTPSIpv6Hint = append(pRec.HTTPSIpv6Hint, ip)
+				}
+			}
+		}
+		if rec.HTTPSPort != nil {
+			p := *rec.HTTPSPort
+			if p < 0 || p > 65535 {
+				p = 443
+			}
+			pRec.HTTPSPort = uint16(p) // #nosec G115
 		}
 
 	default:
