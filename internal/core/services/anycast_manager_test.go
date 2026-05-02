@@ -69,7 +69,8 @@ func TestAnycastManager_Lifecycle(t *testing.T) {
 	vip := "1.1.1.1"
 	iface := "lo"
 
-	mgr := NewAnycastManager(dnsSvc, routing, vipMgr, vip, iface, nil)
+	// Debounce set to 0 for immediate transition in tests
+	mgr := NewAnycastManager(dnsSvc, routing, vipMgr, vip, iface, nil, 0)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -105,12 +106,12 @@ func TestAnycastManager_Errors(t *testing.T) {
 	dnsSvc := &mockAnycastDNSService{healthy: true}
 	routing := &testutil.MockRoutingEngine{}
 	vipMgr := &testutil.MockVIPManager{}
-	mgr := NewAnycastManager(dnsSvc, routing, vipMgr, "1.1.1.1", "lo", nil)
+	mgr := NewAnycastManager(dnsSvc, routing, vipMgr, "1.1.1.1", "lo", nil, 0)
 	ctx := context.Background()
 
 	// 1. Fail Bind
 	vipMgr.FailBind = true
-	mgr.announce(ctx)
+	mgr.announceLocked(ctx)
 	if mgr.isAnnounced.Load() {
 		t.Errorf("isAnnounced should be false if bind fails")
 	}
@@ -118,13 +119,13 @@ func TestAnycastManager_Errors(t *testing.T) {
 	// 2. Fail Announce
 	vipMgr.FailBind = false
 	routing.FailAnnounce = true
-	mgr.announce(ctx)
+	mgr.announceLocked(ctx)
 	if mgr.isAnnounced.Load() {
 		t.Errorf("isAnnounced should be false if routing announce fails")
 	}
 
 	// 3. Withdraw when already withdrawn
-	mgr.withdraw(ctx)
+	mgr.withdrawLocked(ctx)
 }
 
 func TestAnycastManager_MultiBackend(t *testing.T) {
@@ -137,7 +138,7 @@ func TestAnycastManager_MultiBackend(t *testing.T) {
 	}
 	routing := &testutil.MockRoutingEngine{}
 	vipMgr := &testutil.MockVIPManager{}
-	mgr := NewAnycastManager(dnsSvc, routing, vipMgr, "1.1.1.1", "lo", nil)
+	mgr := NewAnycastManager(dnsSvc, routing, vipMgr, "1.1.1.1", "lo", nil, 0)
 
 	mgr.TriggerCheck(context.Background())
 	if routing.Announced {
@@ -167,7 +168,7 @@ func TestAnycastManager_StartStop(t *testing.T) {
 	routing := &testutil.MockRoutingEngine{}
 	vipMgr := &testutil.MockVIPManager{}
 
-	mgr := NewAnycastManager(dnsSvc, routing, vipMgr, "1.1.1.1", "lo", nil)
+	mgr := NewAnycastManager(dnsSvc, routing, vipMgr, "1.1.1.1", "lo", nil, 0)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -180,11 +181,11 @@ func TestAnycastManager_CoverageBoost(t *testing.T) {
 	dnsSvc := &mockAnycastDNSService{healthy: true}
 	routing := &testutil.MockRoutingEngine{}
 	vipMgr := &testutil.MockVIPManager{}
-	mgr := NewAnycastManager(dnsSvc, routing, vipMgr, "1.1.1.1", "lo", nil)
+	mgr := NewAnycastManager(dnsSvc, routing, vipMgr, "1.1.1.1", "lo", nil, 0)
 	ctx := context.Background()
 
 	// 1. Withdraw when NOT announced
-	mgr.withdraw(ctx)
+	mgr.withdrawLocked(ctx)
 	if mgr.isAnnounced.Load() {
 		t.Errorf("Should not be announced")
 	}
@@ -198,7 +199,7 @@ func TestAnycastManager_CoverageBoost(t *testing.T) {
 
 	// 3. Trigger check with no backends (edge case)
 	dnsSvc2 := &mockMultiBackendService{status: map[string]error{}}
-	mgr2 := NewAnycastManager(dnsSvc2, routing, vipMgr, "1.1.1.1", "lo", nil)
+	mgr2 := NewAnycastManager(dnsSvc2, routing, vipMgr, "1.1.1.1", "lo", nil, 0)
 	mgr2.TriggerCheck(ctx)
 	if !mgr2.isAnnounced.Load() {
 		t.Errorf("Empty health map should be considered healthy")
@@ -207,7 +208,7 @@ func TestAnycastManager_CoverageBoost(t *testing.T) {
 	// 4. Withdraw error path
 	routing.FailWithdraw = true
 	mgr.isAnnounced.Store(true)
-	mgr.withdraw(ctx)
+	mgr.withdrawLocked(ctx)
 	if !mgr.isAnnounced.Load() {
 		t.Errorf("Should remain announced if withdrawal fails")
 	}
@@ -217,7 +218,7 @@ func TestAnycastManager_StartWithdrawError(t *testing.T) {
 	dnsSvc := &mockAnycastDNSService{healthy: true}
 	routing := &testutil.MockRoutingEngine{FailWithdraw: true}
 	vipMgr := &testutil.MockVIPManager{}
-	mgr := NewAnycastManager(dnsSvc, routing, vipMgr, "1.1.1.1", "lo", nil)
+	mgr := NewAnycastManager(dnsSvc, routing, vipMgr, "1.1.1.1", "lo", nil, 0)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Trigger shutdown immediately

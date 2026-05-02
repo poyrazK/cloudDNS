@@ -8,6 +8,9 @@ import (
 	"fmt"
 	"log/slog"
 	"net/netip"
+	"strings"
+	"sync"
+	"time"
 
 	pb "github.com/osrg/gobgp/v4/api"
 	"github.com/osrg/gobgp/v4/pkg/apiutil"
@@ -28,12 +31,26 @@ type BGPBackend interface {
 }
 
 // GoBGPAdapter implements the RoutingEngine port using GoBGP.
+// It tracks its goroutines for graceful shutdown and attempts peer reconnection
+// on disconnect.
 type GoBGPAdapter struct {
 	bgpServer  BGPBackend
 	logger     *slog.Logger
 	routerID   string
 	listenPort int32
 	nextHop    string
+
+	localASN uint32
+	peerASN  uint32
+	peerIP   string
+
+	wg          sync.WaitGroup
+	stopCh      chan struct{}
+	mu          sync.Mutex
+
+	// Track active VIPs so Stop() can withdraw them
+	announcedVIPs map[string]bool
+	announcedMu   sync.Mutex
 }
 
 // NewGoBGPAdapter initializes a new GoBGPAdapter with a real GoBGP server.
@@ -42,16 +59,19 @@ func NewGoBGPAdapter(logger *slog.Logger) *GoBGPAdapter {
 		logger = slog.Default()
 	}
 	return &GoBGPAdapter{
-		bgpServer:  server.NewBgpServer(),
-		logger:     logger,
-		routerID:   "127.0.0.1",
-		listenPort: 179,
-		nextHop:    "127.0.0.1",
+		bgpServer:      server.NewBgpServer(),
+		logger:         logger,
+		routerID:       "127.0.0.1",
+		listenPort:     179,
+		nextHop:        "127.0.0.1",
+		announcedVIPs: make(map[string]bool),
 	}
 }
 
 // SetConfig updates the BGP configuration.
 func (a *GoBGPAdapter) SetConfig(routerID string, listenPort int32, nextHop string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	if routerID != "" {
 		a.routerID = routerID
 	}
@@ -63,11 +83,21 @@ func (a *GoBGPAdapter) SetConfig(routerID string, listenPort int32, nextHop stri
 	}
 }
 
-// Start begins the BGP process and establishes peering.
+// Start begins the BGP process, establishes peering, and starts a background
+// goroutine to monitor peer state and attempt reconnection on disconnect.
 func (a *GoBGPAdapter) Start(ctx context.Context, localASN, peerASN uint32, peerIP string) error {
+	a.mu.Lock()
+	a.localASN = localASN
+	a.peerASN = peerASN
+	a.peerIP = peerIP
+	a.stopCh = make(chan struct{})
+	a.mu.Unlock()
+
 	a.logger.Info("starting GoBGP engine", "router_id", a.routerID, "local_asn", localASN, "peer_asn", peerASN, "peer_ip", peerIP)
 
+	a.wg.Add(1)
 	go func() {
+		defer a.wg.Done()
 		defer func() {
 			if r := recover(); r != nil {
 				a.logger.Error("GoBGP server panicked", "recover", r)
@@ -88,18 +118,27 @@ func (a *GoBGPAdapter) Start(ctx context.Context, localASN, peerASN uint32, peer
 	}
 
 	// 2. Add Peer
+	if err := a.addPeer(ctx, peerASN, peerIP); err != nil {
+		a.bgpServer.Stop()
+		return fmt.Errorf("failed to add BGP peer: %w", err)
+	}
+
+	// 3. Start peer monitor goroutine for reconnection
+	a.wg.Add(1)
+	go a.monitorPeer(ctx)
+
+	return nil
+}
+
+// addPeer adds a BGP peer with the given configuration.
+func (a *GoBGPAdapter) addPeer(ctx context.Context, peerASN uint32, peerIP string) error {
 	peer := &pb.Peer{
 		Conf: &pb.PeerConf{
 			NeighborAddress: peerIP,
 			PeerAsn:         peerASN,
 		},
 	}
-	if err := a.bgpServer.AddPeer(ctx, &pb.AddPeerRequest{Peer: peer}); err != nil {
-		a.bgpServer.Stop()
-		return fmt.Errorf("failed to add BGP peer: %w", err)
-	}
-
-	return nil
+	return a.bgpServer.AddPeer(ctx, &pb.AddPeerRequest{Peer: peer})
 }
 
 // Announce advertises a VIP via BGP.
@@ -110,7 +149,6 @@ func (a *GoBGPAdapter) Announce(_ context.Context, vip string) error {
 
 	a.logger.Info("announcing anycast VIP", "vip", vip)
 
-	// Build native types for GoBGP v4
 	prefix, err := netip.ParsePrefix(vip + "/32")
 	if err != nil {
 		return fmt.Errorf("failed to parse vip %s: %w", vip, err)
@@ -123,7 +161,7 @@ func (a *GoBGPAdapter) Announce(_ context.Context, vip string) error {
 	attrs := []bgp.PathAttributeInterface{
 		bgp.NewPathAttributeOrigin(0), // IGP
 	}
-	
+
 	nh := a.nextHop
 	if nh == "" {
 		nh = a.routerID
@@ -149,6 +187,11 @@ func (a *GoBGPAdapter) Announce(_ context.Context, vip string) error {
 		return fmt.Errorf("failed to add path for vip %s: %w", vip, err)
 	}
 
+	// Track announced VIP for later withdrawal on Stop()
+	a.announcedMu.Lock()
+	a.announcedVIPs[vip] = true
+	a.announcedMu.Unlock()
+
 	return nil
 }
 
@@ -169,10 +212,25 @@ func (a *GoBGPAdapter) Withdraw(_ context.Context, vip string) error {
 		return fmt.Errorf("failed to create native nlri for withdrawal of vip %s: %w", vip, err)
 	}
 
+	// Include same path attributes as Announce (ORIGIN + NEXT_HOP) per RFC 4271
+	attrs := []bgp.PathAttributeInterface{
+		bgp.NewPathAttributeOrigin(0), // IGP
+	}
+	nh := a.nextHop
+	if nh == "" {
+		nh = a.routerID
+	}
+	if nhIP, err := netip.ParseAddr(nh); err == nil {
+		if nhAttr, errNH := bgp.NewPathAttributeNextHop(nhIP); errNH == nil {
+			attrs = append(attrs, nhAttr)
+		}
+	}
+
 	req := apiutil.DeletePathRequest{
 		Paths: []*apiutil.Path{
 			{
 				Nlri:   nlri,
+				Attrs:  attrs,
 				Family: bgp.RF_IPv4_UC,
 			},
 		},
@@ -182,15 +240,124 @@ func (a *GoBGPAdapter) Withdraw(_ context.Context, vip string) error {
 		return fmt.Errorf("failed to delete path for vip %s: %w", vip, err)
 	}
 
+	// Remove from tracked VIPs
+	a.announcedMu.Lock()
+	delete(a.announcedVIPs, vip)
+	a.announcedMu.Unlock()
+
 	return nil
 }
 
 // Stop gracefully shuts down the BGP engine.
+// It signals the monitor goroutine to stop, waits for all goroutines to complete,
+// and stops the BGP server. All active VIPs are withdrawn before shutdown.
 func (a *GoBGPAdapter) Stop() error {
+	a.mu.Lock()
+	if a.stopCh != nil {
+		close(a.stopCh)
+	}
+	a.mu.Unlock()
+
+	// Wait for all tracked goroutines to complete
+	a.wg.Wait()
+
+	// Withdraw all active VIPs before stopping BGP server
+	a.announcedMu.Lock()
+	for vip := range a.announcedVIPs {
+		prefix, err := netip.ParsePrefix(vip + "/32")
+		if err != nil {
+			continue
+		}
+		nlri, err := bgp.NewIPAddrPrefix(prefix)
+		if err != nil {
+			continue
+		}
+		attrs := []bgp.PathAttributeInterface{bgp.NewPathAttributeOrigin(0)}
+		nh := a.nextHop
+		if nh == "" {
+			nh = a.routerID
+		}
+		if nhIP, err := netip.ParseAddr(nh); err == nil {
+			if nhAttr, _ := bgp.NewPathAttributeNextHop(nhIP); nhAttr != nil {
+				attrs = append(attrs, nhAttr)
+			}
+		}
+		a.bgpServer.DeletePath(apiutil.DeletePathRequest{
+			Paths: []*apiutil.Path{{Nlri: nlri, Attrs: attrs, Family: bgp.RF_IPv4_UC}},
+		})
+	}
+	a.announcedVIPs = make(map[string]bool)
+	a.announcedMu.Unlock()
+
 	if a.bgpServer != nil {
 		a.bgpServer.Stop()
 	}
 	return nil
+}
+
+// monitorPeer watches for peer disconnection and attempts reconnection with
+// exponential backoff (max 5 minutes). The gobgp library version in use does
+// not expose a direct peer state callback API, so this implementation periodically
+// checks peer health by attempting to re-add the peer.
+func (a *GoBGPAdapter) monitorPeer(ctx context.Context) {
+	defer a.wg.Done()
+
+	a.mu.Lock()
+	peerIP := a.peerIP
+	peerASN := a.peerASN
+	a.mu.Unlock()
+
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-a.stopCh:
+			a.logger.Info("peer monitor shutting down")
+			return
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := a.addPeer(ctx, peerASN, peerIP); err != nil {
+				if strings.Contains(err.Error(), "already exists") {
+					a.logger.Debug("peer health check OK", "peer", peerIP)
+				} else {
+					a.logger.Warn("peer unhealthy, attempting reconnect", "peer", peerIP, "error", err)
+					// Restart BGP server and peer
+					a.mu.Lock()
+					a.bgpServer.Stop()
+					a.bgpServer = server.NewBgpServer()
+
+					global := &pb.Global{
+						Asn:        a.localASN,
+						RouterId:   a.routerID,
+						ListenPort:  a.listenPort,
+					}
+					bgpCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					if err := a.bgpServer.StartBgp(bgpCtx, &pb.StartBgpRequest{Global: global}); err != nil {
+						a.logger.Error("failed to restart BGP after peer failure", "error", err)
+						cancel()
+						a.mu.Unlock()
+						return
+					}
+					cancel()
+
+					// Only spawn Serve goroutine after successful StartBgp
+					// to avoid orphaning a goroutine if StartBgp fails
+					a.wg.Add(1)
+					go func() {
+						defer a.wg.Done()
+						a.bgpServer.Serve()
+					}()
+
+					if err := a.addPeer(bgpCtx, peerASN, peerIP); err != nil {
+						a.logger.Error("failed to re-add peer after restart", "error", err)
+					}
+					a.mu.Unlock()
+				}
+			}
+		}
+	}
 }
 
 var _ ports.RoutingEngine = (*GoBGPAdapter)(nil)

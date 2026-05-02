@@ -19,7 +19,7 @@ func TestSystem_AnycastHealthToBGP(t *testing.T) {
 	vip := "1.1.1.1"
 	iface := "lo"
 	
-	mgr := services.NewAnycastManager(dnsSvc, routing, vipMgr, vip, iface, nil)
+	mgr := services.NewAnycastManager(dnsSvc, routing, vipMgr, vip, iface, nil, 0)
 	
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

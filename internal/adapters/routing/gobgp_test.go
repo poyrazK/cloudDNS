@@ -47,8 +47,9 @@ func (m *mockBGPBackend) DeletePath(_ apiutil.DeletePathRequest) error {
 func TestGoBGPAdapter_Mocked(t *testing.T) {
 	mock := &mockBGPBackend{}
 	adapter := &GoBGPAdapter{
-		bgpServer: mock,
-		logger:    slog.Default(),
+		bgpServer:      mock,
+		logger:         slog.Default(),
+		announcedVIPs:  make(map[string]bool),
 	}
 
 	ctx := context.Background()

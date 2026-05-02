@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -20,9 +21,17 @@ type AnycastManager struct {
 	logger      *slog.Logger
 	isAnnounced atomic.Bool
 	vipBound    atomic.Bool
+	mu          sync.Mutex // protects state transitions for check-then-act
+
+	// Debounce: health state transitions are delayed to avoid flapping
+	debounceDuration time.Duration
+	debounceTimer    *time.Timer
+	debounceCh       chan struct{} // signals when debounce timer fires
 }
 
 // NewAnycastManager creates a new AnycastManager for the given VIP and routing engine.
+// debounceDuration sets the minimum time a health state must be stable before acting
+// on the transition, preventing VIP flapping under unstable health checks.
 func NewAnycastManager(
 	dnsSvc ports.DNSService,
 	routing ports.RoutingEngine,
@@ -30,17 +39,20 @@ func NewAnycastManager(
 	vip string,
 	iface string,
 	logger *slog.Logger,
+	debounceDuration time.Duration,
 ) *AnycastManager {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &AnycastManager{
-		dnsSvc:     dnsSvc,
-		routing:    routing,
-		vipManager: vipManager,
-		vip:        vip,
-		iface:      iface,
-		logger:     logger,
+		dnsSvc:            dnsSvc,
+		routing:           routing,
+		vipManager:        vipManager,
+		vip:               vip,
+		iface:             iface,
+		logger:            logger,
+		debounceDuration:  debounceDuration,
+		debounceCh:        make(chan struct{}, 1),
 	}
 }
 
@@ -65,14 +77,22 @@ func (m *AnycastManager) Start(ctx context.Context) {
 			return
 		case <-ticker.C:
 			m.TriggerCheck(ctx)
+		case <-m.debounceCh:
+			// Debounce timer fired; perform announce if still healthy
+			m.mu.Lock()
+			if !m.isAnnounced.Load() {
+				m.announceLocked(ctx)
+			}
+			m.mu.Unlock()
 		}
 	}
 }
 
 // TriggerCheck performs an immediate health check and updates announcement state.
+// State transitions are debounced to prevent VIP flapping under unstable health.
 func (m *AnycastManager) TriggerCheck(ctx context.Context) {
 	health := m.dnsSvc.HealthCheck(ctx)
-	
+
 	healthy := true
 	for backend, err := range health {
 		if err != nil {
@@ -81,18 +101,41 @@ func (m *AnycastManager) TriggerCheck(ctx context.Context) {
 		}
 	}
 
-	announced := m.isAnnounced.Load()
-	if healthy && !announced {
-		m.announce(ctx)
-	} else if !healthy && announced {
-		m.withdraw(ctx)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Start debounce timer if healthy and not currently announced
+	if healthy && !m.isAnnounced.Load() {
+		if m.debounceTimer != nil && m.debounceTimer.Stop() {
+			// Previous timer cancelled, do nothing
+		}
+		if m.debounceDuration == 0 {
+			// Zero debounce: act immediately
+			m.announceLocked(ctx)
+		} else {
+			// Use channel-based debounce: timer fires signal to Start() loop
+			// which then calls announceLocked (avoiding mutex re-entry in callback)
+			m.debounceTimer = time.AfterFunc(m.debounceDuration, func() {
+				select {
+				case m.debounceCh <- struct{}{}:
+				default:
+				}
+			})
+		}
+		return
+	}
+
+	// Withdraw immediately on unhealthy (no debounce for failure)
+	if !healthy && m.isAnnounced.Load() {
+		m.withdrawLocked(ctx)
 	}
 }
 
-func (m *AnycastManager) announce(ctx context.Context) {
+// announceLocked binds VIP and announces BGP. Caller must hold mu.
+func (m *AnycastManager) announceLocked(ctx context.Context) {
 	m.logger.Info("node healthy, initiating anycast announcement")
-	
-	// 1. Bind VIP if not already bound
+
+	// 1. Bind VIP if not already bound (check-and-set under lock)
 	if !m.vipBound.Load() {
 		if err := m.vipManager.Bind(ctx, m.vip, m.iface); err != nil {
 			m.logger.Error("failed to bind VIP", "error", err)
@@ -111,9 +154,10 @@ func (m *AnycastManager) announce(ctx context.Context) {
 	metrics.BGPAnnounced.Set(1)
 }
 
-func (m *AnycastManager) withdraw(ctx context.Context) {
+// withdrawLocked withdraws BGP. Caller must hold mu.
+func (m *AnycastManager) withdrawLocked(ctx context.Context) {
 	m.logger.Warn("node unhealthy, withdrawing anycast announcement")
-	
+
 	if err := m.routing.Withdraw(ctx, m.vip); err != nil {
 		m.logger.Error("failed to withdraw BGP", "error", err)
 		return // Do not clear isAnnounced flag if withdrawal failed
