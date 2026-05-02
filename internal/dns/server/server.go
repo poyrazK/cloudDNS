@@ -262,9 +262,17 @@ func (s *Server) startInvalidationListener(ctx context.Context) {
 			s.Logger.Info("stopping global cache invalidation listener")
 			return
 		case msg := <-ch:
-			// msg.Payload format is "name:type"
+			// msg.Payload format is "name:type" for record-level, or just "name" for zone-level
 			s.Logger.Debug("received cache invalidation event", "key", msg.Payload)
 
+			// Zone-level invalidation: flush entire L1 cache
+			if !strings.Contains(msg.Payload, ":") {
+				s.Logger.Debug("zone-level cache invalidation, flushing L1", "zone", msg.Payload)
+				s.Cache.Flush()
+				continue
+			}
+
+			// Record-level invalidation
 			// Standardize key for L1 cache lookup (lowercase name)
 			parts := strings.SplitN(msg.Payload, ":", 2)
 			if len(parts) != 2 {
