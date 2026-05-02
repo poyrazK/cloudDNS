@@ -53,7 +53,7 @@ func (c *DNSCache) getShard(key string) *cacheShard {
 	return c.shards[h.Sum32()%shardCount]
 }
 
-// Get retrieves a response from the cache. It returns (nil, false) if the key is missing 
+// Get retrieves a response from the cache. It returns (nil, false) if the key is missing
 // or has already expired.
 func (c *DNSCache) Get(key string) ([]byte, bool) {
 	shard := c.getShard(key)
@@ -73,6 +73,31 @@ func (c *DNSCache) Get(key string) ([]byte, bool) {
 	out := make([]byte, len(item.data))
 	copy(out, item.data)
 	return out, true
+}
+
+// GetInto returns the cached data with the transaction ID injected into it.
+// Caller must hold the per-key lock for the duration of send to prevent
+// concurrent mutation of the shared cache entry.
+// The returned slice is the shared cache entry — do not retain after send.
+func (c *DNSCache) GetInto(key string, txID uint16) ([]byte, bool) {
+	shard := c.getShard(key)
+	shard.mu.RLock()
+	defer shard.mu.RUnlock()
+
+	item, found := shard.items[key]
+	if !found {
+		return nil, false
+	}
+
+	if time.Now().After(item.expiresAt) {
+		return nil, false
+	}
+
+	if len(item.data) >= 2 {
+		item.data[0] = byte(txID >> 8)
+		item.data[1] = byte(txID & 0xFF)
+	}
+	return item.data, true
 }
 
 // Set stores a response in the cache with a specific TTL.
