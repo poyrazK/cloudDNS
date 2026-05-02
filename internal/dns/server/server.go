@@ -913,7 +913,6 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 	lock.Lock()
 
 	var cachedData []byte
-	var fromL2 bool
 
 	if data, found := s.Cache.GetInto(cacheKey, request.Header.ID); found {
 		metrics.CacheOperations.WithLabelValues("l1", "hit").Inc()
@@ -942,13 +941,12 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 			}
 			s.Cache.Set(cacheKey, data, remainingTTL)
 			cachedData = data
-			fromL2 = true
 		}
 	}
 
 	lock.Unlock()
 
-	if fromL2 {
+	if cachedData != nil {
 		return sendFn(cachedData)
 	}
 
