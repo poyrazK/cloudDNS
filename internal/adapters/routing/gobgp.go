@@ -282,9 +282,11 @@ func (a *GoBGPAdapter) Stop() error {
 				attrs = append(attrs, nhAttr)
 			}
 		}
-		a.bgpServer.DeletePath(apiutil.DeletePathRequest{
+		if err := a.bgpServer.DeletePath(apiutil.DeletePathRequest{
 			Paths: []*apiutil.Path{{Nlri: nlri, Attrs: attrs, Family: bgp.RF_IPv4_UC}},
-		})
+		}); err != nil {
+			a.logger.Warn("failed to withdraw VIP during shutdown", "vip", vip, "error", err)
+		}
 	}
 	a.announcedVIPs = make(map[string]bool)
 	a.announcedMu.Unlock()
@@ -333,7 +335,7 @@ func (a *GoBGPAdapter) monitorPeer(ctx context.Context) {
 						RouterId:   a.routerID,
 						ListenPort:  a.listenPort,
 					}
-					bgpCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					bgpCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 					if err := a.bgpServer.StartBgp(bgpCtx, &pb.StartBgpRequest{Global: global}); err != nil {
 						a.logger.Error("failed to restart BGP after peer failure", "error", err)
 						cancel()

@@ -106,8 +106,8 @@ func (m *AnycastManager) TriggerCheck(ctx context.Context) {
 
 	// Start debounce timer if healthy and not currently announced
 	if healthy && !m.isAnnounced.Load() {
-		if m.debounceTimer != nil && m.debounceTimer.Stop() {
-			// Previous timer cancelled, do nothing
+		if m.debounceTimer != nil {
+			m.debounceTimer.Stop()
 		}
 		if m.debounceDuration == 0 {
 			// Zero debounce: act immediately
