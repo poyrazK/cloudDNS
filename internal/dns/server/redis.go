@@ -69,10 +69,16 @@ func (r *RedisCache) Ping(ctx context.Context) error {
 }
 
 // Invalidate deletes the key from Redis and publishes an invalidation event to all nodes.
+// When qType is empty, publishes a zone-level invalidation (zone name only, no type suffix).
 func (r *RedisCache) Invalidate(ctx context.Context, name string, qType domain.RecordType) error {
 	key := "dns:" + name + ":" + string(qType)
 	r.client.Del(ctx, key)
-	msg := fmt.Sprintf("%s:%s", name, string(qType))
+	var msg string
+	if qType == "" {
+		msg = name
+	} else {
+		msg = fmt.Sprintf("%s:%s", name, string(qType))
+	}
 	return r.client.Publish(ctx, InvalidationChannel, msg).Err()
 }
 
@@ -82,12 +88,14 @@ func (r *RedisCache) Subscribe(ctx context.Context) *redis.PubSub {
 }
 
 // PushToDLQ pushes a failed invalidation message to the dead letter queue.
+// The message is stored with a timestamp prefix for ordering.
 func (r *RedisCache) PushToDLQ(ctx context.Context, msg string) error {
 	dlqEntry := fmt.Sprintf("%d:%s", time.Now().UnixNano(), msg)
 	return r.client.LPush(ctx, DLQChannel, dlqEntry).Err()
 }
 
 // PopFromDLQ pops a message from the dead letter queue with blocking.
+// Returns ("", nil) if timeout is reached before a message is available.
 func (r *RedisCache) PopFromDLQ(ctx context.Context, timeout time.Duration) (string, error) {
 	result, err := r.client.BRPop(ctx, timeout, DLQChannel).Result()
 	if err != nil {

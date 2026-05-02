@@ -334,7 +334,8 @@ func (v *DNSSECValidator) ValidateChain(chain []ChainLink, now uint32) error {
 				dnskey := &link.DNSKEYs[j]
 				if dnskey.Type == packet.DNSKEY &&
 					dnskey.ComputeKeyTag() == anchor.ComputeKeyTag() &&
-					dnskey.Algorithm == anchor.Algorithm {
+					dnskey.Algorithm == anchor.Algorithm &&
+					string(dnskey.PublicKey) == string(anchor.PublicKey) {
 					found = true
 					break
 				}
@@ -363,7 +364,8 @@ func (v *DNSSECValidator) ValidateWithTrustAnchor(zone string, rrset, rrsigs, dn
 		if dnskeys[i].Type == packet.DNSKEY {
 			// Check if this DNSKEY matches the trust anchor
 			if dnskeys[i].ComputeKeyTag() == anchor.ComputeKeyTag() &&
-				dnskeys[i].Algorithm == anchor.Algorithm {
+				dnskeys[i].Algorithm == anchor.Algorithm &&
+				string(dnskeys[i].PublicKey) == string(anchor.PublicKey) {
 				trustDNSKEY = &dnskeys[i]
 				break
 			}

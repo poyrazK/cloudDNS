@@ -161,10 +161,16 @@ func (s *DNSSECService) SignRRSet(ctx context.Context, zoneName string, zoneID s
 			return nil, err
 		}
 
-		// Calculate key tag
+		// Calculate key tag and set flags based on key type
+		// KSK (Key Signing Key) has the SEP bit set (Flags = 257)
+		// ZSK (Zone Signing Key) has Flags = 256
+		flags := uint16(256) // Default ZSK
+		if key.KeyType == "KSK" {
+			flags = 257
+		}
 		tempKeyRec := packet.DNSRecord{
 			Type:      packet.DNSKEY,
-			Flags:     256, // ZSK
+			Flags:     flags,
 			Algorithm: 13,
 			PublicKey: key.PublicKey,
 		}

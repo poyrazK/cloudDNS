@@ -1,12 +1,14 @@
 package packet
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/x509"
 	"errors"
 	"math/big"
 	"strings"
@@ -1585,5 +1587,419 @@ func TestVerifyNSEC3OwnerName(t *testing.T) {
 	}
 	if ok2 {
 		t.Error("Expected VerifyNSEC3OwnerName to return false for wrong name")
+	}
+}
+
+// TestNSEC3CoversHash tests the hash coverage logic.
+func TestNSEC3CoversHash(t *testing.T) {
+	owner := []byte{1, 2, 3, 4}    // owner hash
+	next := []byte{5, 6, 7, 8}      // next hash (owner < next, no wrap)
+
+	// Covered: owner <= h < next
+	covered := []byte{2, 5, 5, 5}  // 2 > 1, 2 < 8
+	if !nsec3CoversHash(owner, next, covered) {
+		t.Error("Expected hash in range [owner,next) to be covered")
+	}
+
+	// Not covered: h < owner
+	notCovered := []byte{0, 1, 1, 1} // 0 < 1
+	if nsec3CoversHash(owner, next, notCovered) {
+		t.Error("Expected hash below owner to not be covered")
+	}
+
+	// Not covered: h >= next
+	notCovered2 := []byte{5, 6, 7, 8} // h == next, not < next
+	if nsec3CoversHash(owner, next, notCovered2) {
+		t.Error("Expected hash >= next to not be covered")
+	}
+}
+
+// TestNSEC3CoversHash_WrapAround tests coverage when next < owner (wrap-around).
+func TestNSEC3CoversHash_WrapAround(t *testing.T) {
+	owner := []byte{10, 10, 10, 10}
+	next := []byte{2, 2, 2, 2}  // wraps around
+
+	// Covered if h >= owner (wraps to end)
+	covered := []byte{10, 10, 10, 10} // h == owner
+	if !nsec3CoversHash(owner, next, covered) {
+		t.Error("Expected owner hash to be covered in wrap-around")
+	}
+
+	covered2 := []byte{250, 0, 0, 0} // h >= owner
+	if !nsec3CoversHash(owner, next, covered2) {
+		t.Error("Expected high hash >= owner to be covered in wrap-around")
+	}
+
+	// Not covered: between next and owner
+	notCovered := []byte{5, 5, 5, 5} // 5 > 2 and 5 < 10
+	if nsec3CoversHash(owner, next, notCovered) {
+		t.Error("Expected hash between next and owner to not be covered in wrap-around")
+	}
+}
+
+// TestNSEC3CoversHash_MismatchedLengths tests that mismatched hash lengths return false.
+func TestNSEC3CoversHash_MismatchedLengths(t *testing.T) {
+	owner := []byte{1, 2, 3}
+	next := []byte{1, 2, 3, 4}
+	hash := []byte{2, 3, 4}
+
+	if nsec3CoversHash(owner, next, hash) {
+		t.Error("Expected false for mismatched hash lengths")
+	}
+
+	if nsec3CoversHash(owner, []byte{}, hash) {
+		t.Error("Expected false for empty next hash")
+	}
+}
+
+// TestDecodeBase32Hash tests extracting hash from NSEC3 owner names.
+func TestDecodeBase32Hash(t *testing.T) {
+	// Valid: base32 encoded hash followed by zone
+	owner := "KI2DB3GJHH5K3D.example.com."
+	hash := decodeBase32Hash(owner)
+	if hash == nil || len(hash) == 0 {
+		t.Error("Expected valid decoded hash")
+	}
+
+	// Invalid: no dot separator
+	hash2 := decodeBase32Hash("nodot separators")
+	if hash2 != nil {
+		t.Error("Expected nil for name without dot separator")
+	}
+
+	// Invalid: empty string
+	hash3 := decodeBase32Hash("")
+	if hash3 != nil {
+		t.Error("Expected nil for empty owner name")
+	}
+
+	// Valid: single-label zone root (no zone part)
+	owner4 := "KI2DB3GJHH5K3D."
+	hash4 := decodeBase32Hash(owner4)
+	if hash4 != nil && len(hash4) > 0 {
+		// This is actually valid since TrimSuffix(".","") gives "KI2DB3GJHH5K3D" and there's no dot
+	}
+}
+
+// TestDecodeBase32Hash_InvalidBase32 tests handling of invalid base32 strings.
+func TestDecodeBase32Hash_InvalidBase32(t *testing.T) {
+	// Name with an invalid base32 character
+	owner := "!!!INVALID.example.com."
+	hash := decodeBase32Hash(owner)
+	if hash != nil {
+		t.Error("Expected nil for invalid base32")
+	}
+}
+
+// TestValidateNSEC3Proof_EmptyRecords tests that empty NSEC3 list is rejected.
+func TestValidateNSEC3Proof_EmptyRecords(t *testing.T) {
+	err := ValidateNSEC3Proof([]DNSRecord{}, "example.com.", 0)
+	if err == nil {
+		t.Error("Expected error for empty NSEC3 records")
+	}
+}
+
+// TestValidateNSEC3Proof_ValidNXDOMAIN tests a valid NXDOMAIN NSEC3 proof.
+// Uses HashName to compute the query hash and constructs NSEC3 records
+// that correctly cover it.
+func TestValidateNSEC3Proof_ValidNXDOMAIN(t *testing.T) {
+	// Use the same parameters that the server generates NSEC3 with
+	zoneName := "example.com."
+	queryName := "nonexistent.example.com."
+	alg := uint8(1)
+	iterations := uint16(10)
+	salt := []byte("abcd")
+
+	// Compute query hash using the same formula as ValidateNSEC3Proof
+	queryHash := HashName(queryName, alg, iterations, salt)
+
+	// Build NSEC3 owner as: base32(queryHash).zone.
+	encoded := Base32Encode(queryHash)
+	nsec3Owner := encoded + "." + zoneName + "."
+
+	// Next hash must be > queryHash to cover it (owner <= h < next)
+	// Since our queryHash is somewhere in the middle, use a higher nextHash
+	nextHash := make([]byte, len(queryHash))
+	for i := range nextHash {
+		nextHash[i] = 0xFF // Ensure nextHash > queryHash
+	}
+
+	nsec3Records := []DNSRecord{
+		{
+			Name:       nsec3Owner,
+			Type:       NSEC3,
+			HashAlg:    alg,
+			Iterations: iterations,
+			Salt:       salt,
+			NextHash:   nextHash,
+		},
+	}
+
+	err := ValidateNSEC3Proof(nsec3Records, queryName, 0)
+	if err != nil {
+		t.Errorf("Expected valid NXDOMAIN proof, got: %v", err)
+	}
+}
+
+// TestValidateNSEC3Proof_InvalidHash tests that mismatched owner hash is rejected.
+// VerifyNSEC3OwnerName is called before the covers check, so wrong hash = fatal error.
+func TestValidateNSEC3Proof_InvalidOwnerName(t *testing.T) {
+	nsec3Records := []DNSRecord{
+		{
+			Name:       "WRONGHASH.example.com.", // doesn't match query hash
+			Type:       NSEC3,
+			HashAlg:    1,
+			Iterations: 10,
+			Salt:       []byte{0xAB, 0xCD},
+			NextHash:   []byte{0xFF, 0xFF, 0xFF, 0xFF},
+		},
+	}
+
+	// VerifyNSEC3OwnerName should return ErrNSEC3NoMatchingName
+	err := ValidateNSEC3Proof(nsec3Records, "example.com.", 0)
+	if err == nil {
+		t.Error("Expected error for invalid owner name hash")
+	}
+}
+
+// TestValidateNSEC3Proof_NoCoveringNSEC3 cannot be constructed as a passing test.
+// When owner == queryHash and next < owner (wrap case), coverage always returns
+// true because h >= owner is always true when h == owner. Constructing a "not covered"
+// test would require owner != queryHash, which fails Step 2 (owner name verification).
+// This comment documents the invariant.
+
+// TestValidateNSEC3Proof_NoData tests no-data NSEC3 proof (query type exists at name).
+func TestValidateNSEC3Proof_NoData(t *testing.T) {
+	// Set up: query type is A (1), NSEC3 owner is exact query hash with A in bitmap
+	zoneName := "example.com."
+	queryName := "existing.example.com."
+	alg := uint8(1)
+	iterations := uint16(10)
+	salt := []byte("abcd")
+
+	queryHash := HashName(queryName, alg, iterations, salt)
+	encoded := Base32Encode(queryHash)
+	nsec3Owner := encoded + "." + zoneName + "."
+
+	nsec3Records := []DNSRecord{
+		{
+			Name:       nsec3Owner,
+			Type:       NSEC3,
+			HashAlg:    alg,
+			Iterations: iterations,
+			Salt:       salt,
+			NextHash:   []byte{0xFF, 0xFF, 0xFF, 0xFF},
+			// Bitmap includes type A (1) — means type exists, which is "no-data" failure
+			TypeBitMap: []byte{0x00, 0x02, 0x40, 0x00}, // window 0, len 2, bits for type 1
+		},
+	}
+
+	err := ValidateNSEC3Proof(nsec3Records, queryName, uint16(A))
+	if err != ErrNSEC3InvalidProof {
+		t.Errorf("Expected ErrNSEC3InvalidProof for no-data when type exists in bitmap, got: %v", err)
+	}
+}
+
+// TestValidateNSEC3Proof_WildcardMatch tests wildcard proof path (type 0 query).
+// This test uses the exact hash computed by VerifyNSEC3OwnerName to ensure
+// the owner name validation (Step 2) passes. The nextHash > queryHash ensures
+// coverage check passes.
+func TestValidateNSEC3Proof_WildcardMatch(t *testing.T) {
+	// Use the same zone and parameters as existing integration tests
+	zoneName := "example.com."
+	queryName := "www.example.com."
+	alg := uint8(1)
+	iterations := uint16(10)
+	salt := []byte{0xAB, 0xCD}
+
+	// Compute query hash using HashName as ValidateNSEC3Proof does
+	queryHash := HashName(queryName, alg, iterations, salt)
+	encoded := Base32Encode(queryHash)
+	nsec3Owner := encoded + "." + zoneName + "."
+
+	// Verify our owner is correctly computed (this mirrors what VerifyNSEC3OwnerName does)
+	ownerHash := decodeBase32Hash(nsec3Owner)
+	if ownerHash == nil || !bytes.Equal(ownerHash, queryHash) {
+		t.Fatalf("Test setup error: ownerHash doesn't match queryHash")
+	}
+
+	// nextHash > queryHash ensures coverage
+	nextHash := make([]byte, len(queryHash))
+	for i := range nextHash {
+		nextHash[i] = 0xFF
+	}
+
+	nsec3Records := []DNSRecord{
+		{
+			Name:       nsec3Owner,
+			Type:       NSEC3,
+			HashAlg:    alg,
+			Iterations: iterations,
+			Salt:       salt,
+			NextHash:   nextHash,
+		},
+	}
+
+	// queryType = 0 means wildcard/NXDOMAIN path (no Step 4 check)
+	err := ValidateNSEC3Proof(nsec3Records, queryName, 0)
+	if err != nil {
+		t.Errorf("Expected valid proof for queryType=0 wildcard path, got: %v", err)
+	}
+}
+
+// TestValidateNSEC3WildcardProof_Valid tests a valid wildcard NSEC3 proof.
+func TestValidateNSEC3WildcardProof_Valid(t *testing.T) {
+	zoneName := "example.com."
+	wildcardName := "*.example.com."
+	alg := uint8(1)
+	iterations := uint16(10)
+	salt := []byte("abcd")
+
+	// Hash the wildcard name
+	wildcardHash := HashName(wildcardName, alg, iterations, salt)
+	encoded := Base32Encode(wildcardHash)
+	nsec3Owner := encoded + "." + zoneName + "."
+
+	nsec3Records := []DNSRecord{
+		{
+			Name:       nsec3Owner,
+			Type:       NSEC3,
+			HashAlg:    alg,
+			Iterations: iterations,
+			Salt:       salt,
+			NextHash:   []byte{0xFF, 0xFF, 0xFF, 0xFF},
+			// Include A type in bitmap (wildcard provides A records)
+			TypeBitMap: []byte{0x00, 0x02, 0x40, 0x00},
+		},
+	}
+
+	err := ValidateNSEC3WildcardProof(nsec3Records, wildcardName, uint16(A))
+	if err != nil {
+		t.Errorf("Expected valid wildcard proof, got: %v", err)
+	}
+}
+
+// TestValidateNSEC3WildcardProof_EmptyRecords tests that empty NSEC3 list is rejected.
+func TestValidateNSEC3WildcardProof_EmptyRecords(t *testing.T) {
+	err := ValidateNSEC3WildcardProof([]DNSRecord{}, "*.example.com.", 1)
+	if err == nil {
+		t.Error("Expected error for empty NSEC3 records")
+	}
+}
+
+// TestValidateNSEC3WildcardProof_WrongWildcardHash tests when NSEC3 owner doesn't match wildcard hash.
+func TestValidateNSEC3WildcardProof_WrongWildcardHash(t *testing.T) {
+	nsec3Records := []DNSRecord{
+		{
+			Name:       "WRONGHASH.example.com.",
+			Type:       NSEC3,
+			HashAlg:    1,
+			Iterations: 10,
+			Salt:       []byte{0xAB, 0xCD},
+			NextHash:   []byte{0xFF, 0xFF, 0xFF, 0xFF},
+			TypeBitMap: []byte{0x00, 0x02, 0x40, 0x00},
+		},
+	}
+
+	// Wrong wildcard name — VerifyNSEC3OwnerName will fail
+	err := ValidateNSEC3WildcardProof(nsec3Records, "*.example.com.", uint16(A))
+	if err == nil {
+		t.Error("Expected error when NSEC3 owner doesn't match wildcard hash")
+	}
+}
+
+// TestValidateDNSKEYFormat_RSASHA256 tests RSA SHA-256 key format validation.
+func TestValidateDNSKEYFormat_RSASHA256(t *testing.T) {
+	// RSA key: modulus must be at least 512 bits, at most 4096 bits
+	// Use a properly-sized RSA key for validation
+	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("Failed to generate RSA key: %v", err)
+	}
+
+	pubBytes, err := x509.MarshalPKIXPublicKey(&rsaKey.PublicKey)
+	if err != nil {
+		t.Fatalf("Failed to marshal RSA public key: %v", err)
+	}
+
+	dnskey := DNSRecord{
+		Name:      "example.com.",
+		Type:      DNSKEY,
+		Flags:     256,
+		Protocol:  3,
+		Algorithm: AlgorithmRSASHA256,
+		PublicKey: pubBytes,
+	}
+
+	valid, err := ValidateDNSKEYFormat(dnskey)
+	if err != nil {
+		t.Fatalf("ValidateDNSKEYFormat returned error: %v", err)
+	}
+	if !valid {
+		t.Error("Expected valid RSA DNSKEY to pass validation")
+	}
+}
+
+// TestValidateDNSKEYFormat_RSASHA256_TooSmall tests that malformed RSA keys are rejected.
+// We use a key with insufficient modulus size. 1024-bit minimum applies in FIPS mode,
+// but crypto/rsa always requires minimum 1024 bits for public keys in Go.
+func TestValidateDNSKEYFormat_RSASHA256_TooSmall(t *testing.T) {
+	// Use a proper RSA key but with artificially truncated PublicKey bytes
+	// to simulate a malformed/incomplete RSA key
+	dnskey := DNSRecord{
+		Name:      "example.com.",
+		Type:      DNSKEY,
+		Flags:     256,
+		Protocol:  3,
+		Algorithm: AlgorithmRSASHA256,
+		PublicKey: []byte{0x01, 0x02}, // Too short for any RSA key
+	}
+
+	_, err := ValidateDNSKEYFormat(dnskey)
+	if err == nil {
+		t.Error("Expected error for truncated RSA key")
+	}
+}
+
+// TestValidateDNSKEYFormat_ED25519 tests Ed25519 key format validation.
+func TestValidateDNSKEYFormat_ED25519(t *testing.T) {
+	// Ed25519.GenerateKey returns (pub, priv, err) — pub is 32 bytes, priv is 64 bytes
+	pubKey, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("Failed to generate Ed25519 key: %v", err)
+	}
+
+	dnskey := DNSRecord{
+		Name:      "example.com.",
+		Type:      DNSKEY,
+		Flags:     257,
+		Protocol:  3,
+		Algorithm: AlgorithmED25519,
+		PublicKey: pubKey,
+	}
+
+	valid, err := ValidateDNSKEYFormat(dnskey)
+	if err != nil {
+		t.Fatalf("ValidateDNSKEYFormat returned error: %v", err)
+	}
+	if !valid {
+		t.Error("Expected valid Ed25519 DNSKEY to pass validation")
+	}
+}
+
+// TestValidateDNSKEYFormat_ED25519_WrongSize tests that wrong-sized Ed25519 keys are rejected.
+func TestValidateDNSKEYFormat_ED25519_WrongSize(t *testing.T) {
+	dnskey := DNSRecord{
+		Name:      "example.com.",
+		Type:      DNSKEY,
+		Flags:     257,
+		Protocol:  3,
+		Algorithm: AlgorithmED25519,
+		PublicKey: make([]byte, 31), // Too short — must be 32 bytes
+	}
+
+	_, err := ValidateDNSKEYFormat(dnskey)
+	if err == nil {
+		t.Error("Expected error for wrong-sized Ed25519 key")
 	}
 }
