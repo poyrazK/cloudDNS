@@ -206,7 +206,7 @@ func run(ctx context.Context) error {
 		nextHop := os.Getenv("BGP_NEXT_HOP")
 		routingAdapter.SetConfig(routerID, 179, nextHop)
 
-		anycastMgr = services.NewAnycastManager(dnsSvc, routingAdapter, vipAdapter, vip, iface, logger)
+		anycastMgr = services.NewAnycastManager(dnsSvc, routingAdapter, vipAdapter, vip, iface, logger, 5*time.Second)
 
 		errChan := make(chan error, 1)
 		go func() {
