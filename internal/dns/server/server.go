@@ -61,15 +61,7 @@ func fnv32(key string) uint32 {
 }
 
 func (t *cacheLockTable) lockKey(key string) *cacheLockShard {
-	shard := &t[fnv32(key)%cacheLockShardCount]
-	for i := 0; i < 1000; i++ {
-		if shard.mu.TryLock() {
-			return shard
-		}
-		runtime.Gosched()
-	}
-	shard.mu.Lock()
-	return shard
+	return &t[fnv32(key)%cacheLockShardCount]
 }
 
 // Server is the core DNS server that handles incoming queries,
@@ -880,15 +872,19 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 	}
 	cacheKey := fmt.Sprintf("%s:%d", strings.ToLower(q.Name), q.QType)
 
-	// L1/L2 Check — acquire per-key lock to close TOCTOU race window
+	// L1/L2 Check — acquire per-key lock only for atomic check-and-populate.
+	// Lock is NOT held during L3 resolution to avoid serializing concurrent requests
+	// that map to the same shard but have different cache keys.
 	lock := globalCacheLocks.lockKey(cacheKey)
 	lock.Lock()
+
+	var cachedData []byte
+	var fromL2 bool
 
 	if cachedData, found := s.Cache.Get(cacheKey); found {
 		metrics.CacheOperations.WithLabelValues("l1", "hit").Inc()
 		metrics.QueriesTotal.WithLabelValues(qTypeLabel, "0", protocol).Inc()
 		metrics.QueryDuration.WithLabelValues("cache_l1").Observe(time.Since(start).Seconds())
-		// Rewrite Transaction ID
 		if len(cachedData) >= 2 {
 			cachedData[0] = byte(request.Header.ID >> 8)
 			cachedData[1] = byte(request.Header.ID & 0xFF)
@@ -899,29 +895,31 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 	metrics.CacheOperations.WithLabelValues("l1", "miss").Inc()
 
 	if s.Redis != nil {
-		if cachedData, remainingTTL, found := s.Redis.GetWithTTL(ctx, cacheKey); found {
+		if data, remainingTTL, found := s.Redis.GetWithTTL(ctx, cacheKey); found {
 			metrics.CacheOperations.WithLabelValues("l2", "hit").Inc()
 			metrics.QueriesTotal.WithLabelValues(qTypeLabel, "0", protocol).Inc()
 			metrics.QueryDuration.WithLabelValues("cache_l2").Observe(time.Since(start).Seconds())
-			// Rewrite Transaction ID
-			if len(cachedData) >= 2 {
-				cachedData[0] = byte(request.Header.ID >> 8)
-				cachedData[1] = byte(request.Header.ID & 0xFF)
+			// Rewrite Transaction ID (data is a copy from Redis, safe to mutate)
+			if len(data) >= 2 {
+				data[0] = byte(request.Header.ID >> 8)
+				data[1] = byte(request.Header.ID & 0xFF)
 			}
-			// Respect remaining Redis TTL when populating L1, capped at L1 max of 60s
 			if remainingTTL <= 0 {
 				remainingTTL = 60 * time.Second
 			} else if remainingTTL > 60*time.Second {
 				remainingTTL = 60 * time.Second
 			}
-			s.Cache.Set(cacheKey, cachedData, remainingTTL)
-			lock.Unlock()
-			return sendFn(cachedData)
+			s.Cache.Set(cacheKey, data, remainingTTL)
+			cachedData = data
+			fromL2 = true
 		}
-		metrics.CacheOperations.WithLabelValues("l2", "miss").Inc()
 	}
 
 	lock.Unlock()
+
+	if fromL2 {
+		return sendFn(cachedData)
+	}
 
 	// L3 Resolution
 	if s.SimulateDBLatency > 0 {
