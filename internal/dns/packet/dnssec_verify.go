@@ -521,7 +521,7 @@ func VerifyDNSKEYMatchesDS(dnskey DNSRecord, ds DNSRecord) (bool, error) {
 }
 
 // ValidateDNSKEYFormat verifies that a DNSKEY has valid structure.
-// It checks the key tag is non-zero and the public key is parseable.
+// It checks the key tag is non-zero and the public key is parseable for the algorithm.
 // Note: This does NOT perform cryptographic self-signature verification.
 // For full self-signature validation, use VerifyRRSet with the DNSKEY RRset and its RRSIG.
 func ValidateDNSKEYFormat(dnskey DNSRecord) (bool, error) {
@@ -529,8 +529,17 @@ func ValidateDNSKEYFormat(dnskey DNSRecord) (bool, error) {
 		return false, ErrInvalidDNSKEY
 	}
 
-	// Check that we can extract a valid public key
-	_, err := extractECDSAPublicKey(dnskey)
+	var err error
+	switch dnskey.Algorithm {
+	case AlgorithmECDSAP256:
+		_, err = extractECDSAPublicKey(dnskey)
+	case AlgorithmRSASHA256:
+		_, err = extractRSAPublicKey(dnskey)
+	case AlgorithmED25519:
+		_, err = extractED25519PublicKey(dnskey)
+	default:
+		err = ErrUnsupportedAlgorithm
+	}
 	if err != nil {
 		return false, err
 	}
@@ -743,9 +752,9 @@ func ValidateNSEC3Proof(nsec3Records []DNSRecord, queryName string, queryType ui
 
 	// Step 2: Verify owner names are valid hashes
 	for _, nsec3 := range nsec3Records {
-		_, _ = VerifyNSEC3OwnerName(nsec3, queryName)
-		// Errors here are non-fatal - we continue to chain validation
-		// which is the definitive check for NXDOMAIN/no-data proofs
+		if _, err := VerifyNSEC3OwnerName(nsec3, queryName); err != nil {
+			return err // Fatal — owner name hash mismatch invalidates the proof
+		}
 	}
 
 	// Step 3: For NXDOMAIN, we need closest-encloser proof
