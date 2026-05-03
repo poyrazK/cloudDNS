@@ -19,6 +19,7 @@ type RecordIterator interface {
 // DNSRepository defines the interface for DNS data persistence.
 type DNSRepository interface {
 	GetRecords(ctx context.Context, name string, qType domain.RecordType, clientIP string) ([]domain.Record, error)
+	GetRecordsByNames(ctx context.Context, names []string, qType domain.RecordType, clientIP string) (map[string][]domain.Record, error)
 	GetIPsForName(ctx context.Context, name string, clientIP string) ([]string, error)
 	GetZone(ctx context.Context, name string) (*domain.Zone, error)
 	GetZoneLongestMatch(ctx context.Context, qName string) (*domain.Zone, error)
