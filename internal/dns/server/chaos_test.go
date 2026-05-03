@@ -27,6 +27,7 @@ func TestChaos_SimulateDBLatency(t *testing.T) {
 	mockRepo.On("GetRecords", mock.Anything, mock.Anything, mock.Anything).Return([]domain.Record{
 		{Name: "example.com.", Type: domain.TypeA, Content: "1.2.3.4", TTL: 300},
 	}, nil)
+	mockRepo.On("GetRecordsByNames", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(map[string][]domain.Record{}, nil)
 
 	req := packet.NewDNSPacket()
 	req.Header.ID = 1234
