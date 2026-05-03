@@ -128,6 +128,25 @@ func (m *mockServerRepo) GetRecords(_ context.Context, name string, qType domain
 	return res, nil
 }
 
+func (m *mockServerRepo) GetRecordsByNames(_ context.Context, names []string, qType domain.RecordType, clientIP string) (map[string][]domain.Record, error) {
+	if m.failGetRecords {
+		return nil, errors.New("get records failed")
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	result := make(map[string][]domain.Record)
+	for _, name := range names {
+		qName := strings.TrimSuffix(strings.ToLower(name), ".")
+		for _, r := range m.records {
+			rName := strings.TrimSuffix(strings.ToLower(r.Name), ".")
+			if rName == qName && (qType == "" || strings.EqualFold(string(r.Type), string(qType))) {
+				result[name] = append(result[name], r)
+			}
+		}
+	}
+	return result, nil
+}
+
 func (m *mockServerRepo) GetIPsForName(_ context.Context, name string, clientIP string) ([]string, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

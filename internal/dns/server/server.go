@@ -1143,14 +1143,26 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 	} else if zone != nil {
 		// 4. Populate Authority Section (NS records)
 		nsRecords, _ := s.Repo.GetRecords(ctx, zone.Name, domain.TypeNS, clientIP)
+
+		// Collect all NS host targets for batch glue lookup
+		nsTargets := make([]string, 0, len(nsRecords))
+		for _, rec := range nsRecords {
+			pRec, errConv := repository.ConvertDomainToPacketRecord(rec)
+			if errConv == nil {
+				nsTargets = append(nsTargets, pRec.Host)
+			}
+		}
+
+		// Batch fetch all glue A records in ONE query
+		allGlue, _ := s.Repo.GetRecordsByNames(ctx, nsTargets, domain.TypeA, clientIP)
+
 		for _, rec := range nsRecords {
 			pRec, errConv := repository.ConvertDomainToPacketRecord(rec)
 			if errConv == nil {
 				response.Authorities = append(response.Authorities, pRec)
 
 				// 5. Populate Additional Section (Glue records)
-				glueRecords, _ := s.Repo.GetRecords(ctx, pRec.Host, domain.TypeA, clientIP)
-				for _, gRec := range glueRecords {
+				for _, gRec := range allGlue[pRec.Host] {
 					gpRec, errGlue := repository.ConvertDomainToPacketRecord(gRec)
 					if errGlue == nil {
 						response.Resources = append(response.Resources, gpRec)
