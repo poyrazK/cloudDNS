@@ -132,10 +132,28 @@ func run(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		// Sane pool settings for Cloud SQL f1-micro (limited RAM and ~25 connections max)
-		db.SetMaxOpenConns(20)
-		db.SetMaxIdleConns(10)
-		db.SetConnMaxLifetime(5 * time.Minute)
+		// Pool settings configurable via env vars with sane defaults for Cloud SQL f1-micro
+		maxOpenConns := 20
+		if v := os.Getenv("DATABASE_MAX_OPEN_CONNS"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				maxOpenConns = n
+			}
+		}
+		maxIdleConns := 10
+		if v := os.Getenv("DATABASE_MAX_IDLE_CONNS"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+				maxIdleConns = n
+			}
+		}
+		connMaxLifetime := 5 * time.Minute
+		if v := os.Getenv("DATABASE_CONN_MAX_LIFETIME_MINUTES"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				connMaxLifetime = time.Duration(n) * time.Minute
+			}
+		}
+		db.SetMaxOpenConns(maxOpenConns)
+		db.SetMaxIdleConns(maxIdleConns)
+		db.SetConnMaxLifetime(connMaxLifetime)
 
 		defer func() { _ = db.Close() }()
 		repo = repository.NewPostgresRepository(db)
@@ -313,6 +331,21 @@ func run(ctx context.Context) error {
 	if routingAdapter != nil {
 		if err := routingAdapter.Stop(); err != nil {
 			logger.Error("BGP speaker stop failed", "error", err)
+		}
+	}
+
+	if redisCache != nil {
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- redisCache.Close()
+		}()
+		select {
+		case err := <-errCh:
+			if err != nil {
+				logger.Error("redis shutdown failed", "error", err)
+			}
+		case <-shutdownCtx.Done():
+			logger.Warn("redis close timed out during shutdown")
 		}
 	}
 

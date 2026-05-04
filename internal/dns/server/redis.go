@@ -117,3 +117,8 @@ func (r *RedisCache) PopFromDLQ(ctx context.Context, timeout time.Duration) (str
 func (r *RedisCache) DLQLen(ctx context.Context) (int64, error) {
 	return r.client.LLen(ctx, DLQChannel).Result()
 }
+
+// Close shuts down the Redis client connection.
+func (r *RedisCache) Close() error {
+	return r.client.Close()
+}
