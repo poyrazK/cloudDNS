@@ -170,7 +170,12 @@ func (r *PostgresRepository) GetRecordsByNames(ctx context.Context, names []stri
 		if hStatus.Valid {
 			rec.HealthStatus = domain.HealthStatus(hStatus.String)
 		}
-		result[rec.Name] = append(result[rec.Name], rec)
+		// Normalize key with trailing dot to match ConvertDomainToPacketRecord behavior
+		key := rec.Name
+		if !strings.HasSuffix(key, ".") {
+			key += "."
+		}
+		result[key] = append(result[key], rec)
 	}
 
 	return result, rows.Err()
