@@ -287,6 +287,40 @@ func TestPostgresRepositoryIntegration(t *testing.T) {
 		t.Errorf("GetRecords failed: %v, count: %d", errRecs, len(recs))
 	}
 
+	// 5.1 Test GetRecordsByNames - Empty names
+	empty, errEmpty := repo.GetRecordsByNames(ctx, []string{}, domain.TypeA, tDNS8)
+	if errEmpty != nil || empty != nil {
+		t.Errorf("GetRecordsByNames empty should return nil: got %v, err %v", empty, errEmpty)
+	}
+
+	// 5.2 Test GetRecordsByNames - Basic multi-name lookup
+	multi, errMulti := repo.GetRecordsByNames(ctx, []string{"www.base.test.", "www.base.test"}, domain.TypeA, tDNS8)
+	if errMulti != nil {
+		t.Errorf("GetRecordsByNames failed: %v", errMulti)
+	}
+	// Should find www.base.test. (with trailing dot key) or www.base.test (without)
+	if len(multi) < 1 {
+		t.Errorf("GetRecordsByNames expected at least 1 name key, got %d", len(multi))
+	}
+
+	// 5.3 Test GetRecordsByNames - Type filtering
+	multiA, errMultiA := repo.GetRecordsByNames(ctx, []string{"www.base.test."}, domain.TypeA, tDNS8)
+	if errMultiA != nil {
+		t.Errorf("GetRecordsByNames with type filter failed: %v", errMultiA)
+	}
+	if len(multiA["www.base.test."]) != 1 {
+		t.Errorf("GetRecordsByNames expected 1 A record, got %d", len(multiA["www.base.test."]))
+	}
+
+	// 5.4 Test GetRecordsByNames - No results
+	none, errNone := repo.GetRecordsByNames(ctx, []string{"nonexistent.test."}, domain.TypeA, tDNS8)
+	if errNone != nil {
+		t.Errorf("GetRecordsByNames no results failed: %v", errNone)
+	}
+	if len(none) != 0 {
+		t.Errorf("GetRecordsByNames expected 0 keys for nonexistent, got %d", len(none))
+	}
+
 	// 6. Test GetIPsForName
 	ips, errIPs := repo.GetIPsForName(ctx, "www.base.test.", tDNS8)
 	if errIPs != nil || len(ips) != 1 || ips[0] != tIPv41 {
