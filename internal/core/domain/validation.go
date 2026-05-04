@@ -147,11 +147,12 @@ func ValidateCAAContent(content string) error {
 	}
 
 	tag := parts[1]
+	// Per RFC 8654, CAA tags must contain only letters, numbers, and hyphens
 	for _, r := range tag {
-		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' {
 			continue
 		}
-		return fmt.Errorf("invalid tag: %s (must be alphanumeric)", tag)
+		return fmt.Errorf("invalid tag: %s (must be alphanumeric or hyphen)", tag)
 	}
 
 	// Value might be multiple fields if not quoted properly, but we expect it to be quoted

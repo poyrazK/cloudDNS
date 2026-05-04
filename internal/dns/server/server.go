@@ -1013,7 +1013,7 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 		if nsidRequested {
 			opt.SetOption(packet.EdnsOptionNSID, []byte(s.NodeID))
 		}
-		if len(clientCookie) >= 8 {
+		if len(clientCookie) == 8 {
 			serverCookie := s.generateServerCookie(clientCookie[:8], clientIP)
 			fullCookie := append(clientCookie[:8], serverCookie...)
 			opt.SetOption(packet.EdnsOptionCookie, fullCookie)
@@ -1173,6 +1173,12 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 				response.Header.ResCode = packet.RcodeServFail
 				response.Answers = nil
 				response.Authorities = nil
+				// RFC 8914: Add EDE for DNSSEC validation failures
+				for i := range response.Resources {
+					if response.Resources[i].Type == packet.OPT {
+						response.Resources[i].AddEDE(packet.EdeDnssecBogus, err.Error())
+					}
+				}
 			}
 		}
 	}
