@@ -24,6 +24,8 @@ var (
 	ErrAlgorithmMismatch = errors.New("dnssec: algorithm mismatch")
 	// ErrInvalidDNSKEY indicates the DNSKEY has invalid flags.
 	ErrInvalidDNSKEY = errors.New("dnssec: invalid DNSKEY flags")
+	// ErrLabelsMismatch indicates the RRSIG Labels field doesn't match the RRset.
+	ErrLabelsMismatch = errors.New("dnssec: labels mismatch")
 	// ErrInvalidSignature indicates the signature verification failed.
 	ErrInvalidSignature = errors.New("dnssec: invalid signature")
 	// ErrNoPublicKey indicates the DNSKEY has no public key data.
@@ -207,6 +209,22 @@ func stringsToChunks(s string) []string {
 	return chunks
 }
 
+// countNameLabels returns the number of labels in a DNS name.
+// For example: "example.com." = 2, "*.wildcard.zone." = 3, "." = 1
+func countNameLabels(name string) uint8 {
+	if name == "." {
+		return 1
+	}
+	// Count dots, then add 1 for the final label
+	count := 0
+	for _, c := range name {
+		if c == '.' {
+			count++
+		}
+	}
+	return uint8(count)
+}
+
 // VerifyRRSet verifies an RRSIG signature over an RRSet.
 // It supports ECDSA P-256 (Algorithm 13), RSA SHA-256 (Algorithm 8), and Ed25519 (Algorithm 15) signatures.
 func VerifyRRSet(rrset []DNSRecord, rrsig DNSRecord, dnskey DNSRecord, now uint32) (bool, error) {
@@ -215,6 +233,10 @@ func VerifyRRSet(rrset []DNSRecord, rrsig DNSRecord, dnskey DNSRecord, now uint3
 	}
 
 	// 1. Check signature expiration
+	// If Expiration < Inception, overflow occurred during signing — treat as expired
+	if rrsig.Expiration < rrsig.Inception {
+		return false, ErrSignatureExpired
+	}
 	if now > rrsig.Expiration {
 		return false, ErrSignatureExpired
 	}
@@ -239,7 +261,15 @@ func VerifyRRSet(rrset []DNSRecord, rrsig DNSRecord, dnskey DNSRecord, now uint3
 		return false, ErrInvalidDNSKEY
 	}
 
-	// 6. Reconstruct canonical wire format of RRSIG/RRset per RFC 4034 Section 8.1
+	// 6. Verify Labels field per RFC 4034 Section 8.2
+	// The Labels field must equal the number of labels in the RRset owner name.
+	// For wildcard RRs, the Labels reflects the wildcard name (e.g., "*.zone." = 2 labels).
+	expectedLabels := countNameLabels(rrset[0].Name)
+	if rrsig.Labels != expectedLabels {
+		return false, ErrLabelsMismatch
+	}
+
+	// 7. Reconstruct canonical wire format of RRSIG/RRset per RFC 4034 Section 8.1
 	buf := NewBytePacketBuffer()
 
 	// Prepend RRSIG RDATA fields (excluding Signature)
@@ -371,7 +401,7 @@ func extractRSAPublicKey(dnskey DNSRecord) (*rsa.PublicKey, error) {
 
 	// RSA public key in DNSKEY is stored as a big-endian integer
 	keySize := len(dnskey.PublicKey)
-	if keySize < 128 || keySize > 512 {
+	if keySize < 64 || keySize > 512 {
 		return nil, ErrUnsupportedAlgorithm
 	}
 

@@ -182,7 +182,13 @@ func (s *DNSSECService) SignRRSet(ctx context.Context, zoneName string, zoneID s
 		if unixNow >= 0 && unixNow <= math.MaxUint32 {
 			now = uint32(unixNow) // #nosec G115
 		}
-		expiration := now + (30 * 24 * 60 * 60)
+		// Use 64-bit arithmetic to avoid overflow when now is near uint32 max
+		ttl := uint64(30 * 24 * 60 * 60)
+		exp := uint64(now) + ttl
+		if exp > math.MaxUint32 {
+			exp = math.MaxUint32
+		}
+		expiration := uint32(exp)
 
 		sig, err := packet.SignRRSet(records, priv, packet.AlgorithmECDSAP256, zoneName, keyTag, now, expiration)
 		if err != nil {

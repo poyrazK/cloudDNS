@@ -13,6 +13,7 @@ func TestValidateCAAContent(t *testing.T) {
 		{"Valid CAA", "0 issue \"letsencrypt.org\"", false},
 		{"Valid CAA with multiple spaces", "0   issue   \"letsencrypt.org\"", false},
 		{"Valid CAA with alphanumeric tag", "0 iNsUe1 \"letsencrypt.org\"", false},
+		{"Valid CAA with hyphenated tag", "0 contactemail \"ca@example.com\"", false},
 		{"Too few parts", "0 issue", true},
 		{"Invalid flag (non-numeric)", "abc issue \"letsencrypt.org\"", true},
 		{"Invalid flag (out of range)", "256 issue \"letsencrypt.org\"", true},
