@@ -523,13 +523,14 @@ func TestPostgresRepository_Extra_Unit(t *testing.T) {
 		repo := NewPostgresRepository(db)
 
 		mock.ExpectBegin()
-		// database/sql natively rejects slice arguments for non-driver types before reaching sqlmock.
-		// This triggers a rollback in our implementation.
+		// database/sql rejects []string slices (used in UNNEST arrays) before
+		// reaching the driver, so the defer triggers a rollback. This is the
+		// documented limitation — the NULL-fix is validated by integration tests.
 		mock.ExpectRollback()
 
-		recs := []domain.Record{{ID: "r1", Name: "test.", Type: "A", Content: "1.1.1.1", TTL: 300}}
+		recs := []domain.Record{{ID: "r1", ZoneID: "z1", Name: "test.", Type: "A", Content: "1.1.1.1", TTL: 300}}
 		_ = repo.BatchCreateRecords(ctx, recs)
-		
+
 		if err := mock.ExpectationsWereMet(); err != nil {
 			t.Errorf("there were unfulfilled expectations: %s", err)
 		}

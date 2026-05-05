@@ -549,13 +549,19 @@ func (r *PostgresRepository) BatchCreateRecords(ctx context.Context, records []d
 		}
 	}()
 
-	// High-performance Postgres Batch Insert using UNNEST
+	// High-performance Postgres Batch Insert using UNNEST (all 14 columns)
 	ids := make([]string, len(records))
 	zoneIDs := make([]string, len(records))
 	names := make([]string, len(records))
 	types := make([]string, len(records))
 	contents := make([]string, len(records))
 	ttls := make([]int, len(records))
+	priorities := make([]sql.NullInt32, len(records))
+	weights := make([]sql.NullInt32, len(records))
+	ports := make([]sql.NullInt32, len(records))
+	networks := make([]sql.NullString, len(records))
+	healthCheckTypes := make([]string, len(records))
+	healthCheckTargets := make([]string, len(records))
 	createdAts := make([]time.Time, len(records))
 	updatedAts := make([]time.Time, len(records))
 
@@ -566,15 +572,36 @@ func (r *PostgresRepository) BatchCreateRecords(ctx context.Context, records []d
 		types[i] = string(rec.Type)
 		contents[i] = rec.Content
 		ttls[i] = rec.TTL
+		if rec.Priority != nil {
+			priorities[i] = sql.NullInt32{Int32: int32(*rec.Priority), Valid: true}
+		}
+		if rec.Weight != nil {
+			weights[i] = sql.NullInt32{Int32: int32(*rec.Weight), Valid: true}
+		}
+		if rec.Port != nil {
+			ports[i] = sql.NullInt32{Int32: int32(*rec.Port), Valid: true}
+		}
+		if rec.Network != nil && *rec.Network != "" {
+			networks[i] = sql.NullString{String: *rec.Network, Valid: true}
+		}
+		hcType := rec.HealthCheckType
+		if hcType == "" {
+			hcType = domain.HealthCheckNone
+		}
+		healthCheckTypes[i] = string(hcType)
+		healthCheckTargets[i] = rec.HealthCheckTarget
 		createdAts[i] = rec.CreatedAt
 		updatedAts[i] = rec.UpdatedAt
 	}
 
 	query := `
-		INSERT INTO dns_records (id, zone_id, name, type, content, ttl, created_at, updated_at)
-		SELECT * FROM UNNEST($1::uuid[], $2::uuid[], $3::text[], $4::text[], $5::text[], $6::int[], $7::timestamptz[], $8::timestamptz[])
+		INSERT INTO dns_records (id, zone_id, name, type, content, ttl, priority, weight, port, network, health_check_type, health_check_target, created_at, updated_at)
+		SELECT * FROM UNNEST($1::uuid[], $2::uuid[], $3::text[], $4::text[], $5::text[], $6::int[], $7::int[], $8::int[], $9::int[], $10::text[]::cidr[], $11::text[], $12::text[], $13::timestamptz[], $14::timestamptz[])
+		ON CONFLICT (id) DO NOTHING
+		-- Idempotent: duplicate IDs (e.g., client retries) are silently dropped.
+		-- Switch to ON CONFLICT DO UPDATE if surfacing duplicates is preferred.
 	`
-	_, err = tx.ExecContext(ctx, query, ids, zoneIDs, names, types, contents, ttls, createdAts, updatedAts)
+	_, err = tx.ExecContext(ctx, query, ids, zoneIDs, names, types, contents, ttls, priorities, weights, ports, networks, healthCheckTypes, healthCheckTargets, createdAts, updatedAts)
 	if err != nil {
 		return fmt.Errorf("unnest batch insert failed: %w", err)
 	}

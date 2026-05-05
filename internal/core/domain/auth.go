@@ -11,7 +11,8 @@ type Role string
 // Role constants define the authorization levels for API access.
 const (
 	RoleAdmin  Role = "admin"  // Full CRUD on all zones/records
-	RoleReader Role = "reader" // GET-only access
+	RoleWriter Role = "writer"  // CREATE/UPDATE records, no zone/key management
+	RoleReader Role = "reader"  // GET-only access
 )
 
 // APIKey represents a tenant's API authentication key.
