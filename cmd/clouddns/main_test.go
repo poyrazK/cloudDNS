@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"os"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -254,4 +256,66 @@ func TestRun_ConfigPaths(t *testing.T) {
 			t.Error("Expected error for API bind failure on port 1")
 		}
 	})
+}
+
+func TestDatabasePoolConfigEnvVars(t *testing.T) {
+	origMaxOpen := os.Getenv("DATABASE_MAX_OPEN_CONNS")
+	origMaxIdle := os.Getenv("DATABASE_MAX_IDLE_CONNS")
+	origMaxLifetime := os.Getenv("DATABASE_CONN_MAX_LIFETIME_MINUTES")
+	defer func() {
+		os.Setenv("DATABASE_MAX_OPEN_CONNS", origMaxOpen)
+		os.Setenv("DATABASE_MAX_IDLE_CONNS", origMaxIdle)
+		os.Setenv("DATABASE_CONN_MAX_LIFETIME_MINUTES", origMaxLifetime)
+	}()
+
+	tests := []struct {
+		name                      string
+		maxOpen, maxIdle, minutes string
+		wantOpen, wantIdle        int
+		wantLifetime              time.Duration
+	}{
+		{"defaults", "", "", "", 20, 10, 5 * time.Minute},
+		{"custom values", "50", "5", "10", 50, 5, 10 * time.Minute},
+		{"invalid open falls back", "abc", "", "", 20, 10, 5 * time.Minute},
+		{"invalid idle falls back", "", "xyz", "", 20, 10, 5 * time.Minute},
+		{"zero idle allowed", "", "0", "", 20, 0, 5 * time.Minute},
+		{"negative lifetime falls back", "", "", "-1", 20, 10, 5 * time.Minute},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			os.Setenv("DATABASE_MAX_OPEN_CONNS", tt.maxOpen)
+			os.Setenv("DATABASE_MAX_IDLE_CONNS", tt.maxIdle)
+			os.Setenv("DATABASE_CONN_MAX_LIFETIME_MINUTES", tt.minutes)
+
+			maxOpenConns := 20
+			if v := os.Getenv("DATABASE_MAX_OPEN_CONNS"); v != "" {
+				if n, err := strconv.Atoi(v); err == nil && n > 0 {
+					maxOpenConns = n
+				}
+			}
+			maxIdleConns := 10
+			if v := os.Getenv("DATABASE_MAX_IDLE_CONNS"); v != "" {
+				if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+					maxIdleConns = n
+				}
+			}
+			connMaxLifetime := 5 * time.Minute
+			if v := os.Getenv("DATABASE_CONN_MAX_LIFETIME_MINUTES"); v != "" {
+				if n, err := strconv.Atoi(v); err == nil && n > 0 {
+					connMaxLifetime = time.Duration(n) * time.Minute
+				}
+			}
+
+			if maxOpenConns != tt.wantOpen {
+				t.Errorf("maxOpenConns = %d, want %d", maxOpenConns, tt.wantOpen)
+			}
+			if maxIdleConns != tt.wantIdle {
+				t.Errorf("maxIdleConns = %d, want %d", maxIdleConns, tt.wantIdle)
+			}
+			if connMaxLifetime != tt.wantLifetime {
+				t.Errorf("connMaxLifetime = %v, want %v", connMaxLifetime, tt.wantLifetime)
+			}
+		})
+	}
 }

@@ -142,3 +142,19 @@ func TestRedisCache_DLQLen(t *testing.T) {
 		t.Errorf("Expected 2, got %d, err=%v", n, err)
 	}
 }
+
+func TestRedisCache_Close(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("Failed to run miniredis: %v", err)
+	}
+	// Don't defer mr.Close() — Close should handle it
+	cache := NewRedisCache(mr.Addr(), "", 0)
+	if err := cache.Close(); err != nil {
+		t.Errorf("Close failed: %v", err)
+	}
+	// After close, Ping should fail
+	if err := cache.Ping(context.Background()); err == nil {
+		t.Errorf("Expected Ping to fail after Close")
+	}
+}
