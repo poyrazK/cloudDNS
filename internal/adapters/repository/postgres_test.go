@@ -54,9 +54,6 @@ func setupTestDB(t *testing.T) (*sql.DB, func()) {
 			containerErr = err
 			return
 		}
-		// Use exec mode which sends parameters separately without caching
-		// This avoids the stale statement cache issue while supporting placeholder reuse
-		connConfig.DefaultQueryExecMode = pgx.QueryExecModeExec
 
 		db := stdlib.OpenDB(*connConfig)
 
@@ -84,7 +81,9 @@ func setupTestDB(t *testing.T) (*sql.DB, func()) {
 	}
 	return testDB, func() {
 		// Surface failures to reset the DB
-		if _, err := testDB.Exec("TRUNCATE dns_records, dns_zones, audit_logs, dns_zone_changes, api_keys, dnssec_keys CASCADE"); err != nil {
+		// DEALLOCATE ALL clears prepared statements which can become stale
+		// when TRUNCATE clears data but not the pgx statement cache
+		if _, err := testDB.Exec("TRUNCATE dns_records, dns_zones, audit_logs, dns_zone_changes, api_keys, dnssec_keys CASCADE; DEALLOCATE ALL"); err != nil {
 			panic(fmt.Sprintf("failed to truncate test database: %v", err))
 		}
 	}
