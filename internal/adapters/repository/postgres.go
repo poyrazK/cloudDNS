@@ -556,10 +556,10 @@ func (r *PostgresRepository) BatchCreateRecords(ctx context.Context, records []d
 	types := make([]string, len(records))
 	contents := make([]string, len(records))
 	ttls := make([]int, len(records))
-	priorities := make([]int, len(records))
-	weights := make([]int, len(records))
-	ports := make([]int, len(records))
-	networks := make([]string, len(records))
+	priorities := make([]sql.NullInt32, len(records))
+	weights := make([]sql.NullInt32, len(records))
+	ports := make([]sql.NullInt32, len(records))
+	networks := make([]sql.NullString, len(records))
 	healthCheckTypes := make([]string, len(records))
 	healthCheckTargets := make([]string, len(records))
 	createdAts := make([]time.Time, len(records))
@@ -573,16 +573,16 @@ func (r *PostgresRepository) BatchCreateRecords(ctx context.Context, records []d
 		contents[i] = rec.Content
 		ttls[i] = rec.TTL
 		if rec.Priority != nil {
-			priorities[i] = *rec.Priority
+			priorities[i] = sql.NullInt32{Int32: int32(*rec.Priority), Valid: true}
 		}
 		if rec.Weight != nil {
-			weights[i] = *rec.Weight
+			weights[i] = sql.NullInt32{Int32: int32(*rec.Weight), Valid: true}
 		}
 		if rec.Port != nil {
-			ports[i] = *rec.Port
+			ports[i] = sql.NullInt32{Int32: int32(*rec.Port), Valid: true}
 		}
-		if rec.Network != nil {
-			networks[i] = *rec.Network
+		if rec.Network != nil && *rec.Network != "" {
+			networks[i] = sql.NullString{String: *rec.Network, Valid: true}
 		}
 		hcType := rec.HealthCheckType
 		if hcType == "" {
@@ -597,6 +597,7 @@ func (r *PostgresRepository) BatchCreateRecords(ctx context.Context, records []d
 	query := `
 		INSERT INTO dns_records (id, zone_id, name, type, content, ttl, priority, weight, port, network, health_check_type, health_check_target, created_at, updated_at)
 		SELECT * FROM UNNEST($1::uuid[], $2::uuid[], $3::text[], $4::text[], $5::text[], $6::int[], $7::int[], $8::int[], $9::int[], $10::text[], $11::text[], $12::text[], $13::timestamptz[], $14::timestamptz[])
+		ON CONFLICT (id) DO NOTHING
 	`
 	_, err = tx.ExecContext(ctx, query, ids, zoneIDs, names, types, contents, ttls, priorities, weights, ports, networks, healthCheckTypes, healthCheckTargets, createdAts, updatedAts)
 	if err != nil {
