@@ -78,13 +78,13 @@ func TestHealthMonitor_ProbeTCP(t *testing.T) {
 
 	m := NewHealthMonitor(nil, nil)
 	target := ts.Listener.Addr().String()
-	status, _ := m.probeTCP(target)
+	status, _ := m.probeTCP(context.Background(), target)
 	if status != domain.HealthStatusHealthy {
 		t.Errorf("Expected Healthy for open TCP port, got %s", status)
 	}
 
 	// Failure Case
-	status, _ = m.probeTCP("localhost:1")
+	status, _ = m.probeTCP(context.Background(), "localhost:1")
 	if status != domain.HealthStatusUnhealthy {
 		t.Errorf("Expected Unhealthy for closed TCP port, got %s", status)
 	}
