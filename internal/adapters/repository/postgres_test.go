@@ -287,6 +287,7 @@ func TestPostgresRepositoryIntegration(t *testing.T) {
 		t.Errorf("GetRecords failed: %v, count: %d", errRecs, len(recs))
 	}
 
+	// 5. Test GetRecordsByNames - batch glue record lookup
 	// 5.1 Test GetRecordsByNames - Empty names
 	empty, errEmpty := repo.GetRecordsByNames(ctx, []string{}, domain.TypeA, tDNS8)
 	if errEmpty != nil || empty != nil {
