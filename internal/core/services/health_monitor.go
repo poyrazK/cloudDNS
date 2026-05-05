@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"net"
@@ -20,14 +21,23 @@ type HealthMonitor struct {
 	client *http.Client
 }
 
+// HealthMonitorOptions configures optional health monitor behavior.
+type HealthMonitorOptions struct {
+	InsecureSkipVerify bool
+}
+
 // NewHealthMonitor creates a new HealthMonitor with a default HTTP client.
-func NewHealthMonitor(repo ports.DNSRepository, logger *slog.Logger) *HealthMonitor {
+func NewHealthMonitor(repo ports.DNSRepository, logger *slog.Logger, opts *HealthMonitorOptions) *HealthMonitor {
+	client := &http.Client{Timeout: 5 * time.Second}
+	if opts != nil && opts.InsecureSkipVerify {
+		client.Transport = &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		}
+	}
 	return &HealthMonitor{
 		repo:   repo,
 		logger: logger,
-		client: &http.Client{
-			Timeout: 5 * time.Second,
-		},
+		client: client,
 	}
 }
 
