@@ -303,14 +303,18 @@ func (s *Server) startInvalidationListener(ctx context.Context) {
 func (s *Server) dlqRetryWorker(ctx context.Context) {
 	s.Logger.Info("starting DLQ retry worker")
 
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			s.Logger.Info("stopping DLQ retry worker")
 			return
-		case <-time.After(5 * time.Second):
+		case <-ticker.C:
 			// Continue to process DLQ after backoff
 		}
+		_ = ctx // ctx is checked via ctx.Done above, not used directly below
 
 		msg, err := s.Redis.PopFromDLQ(ctx, 0)
 		if err != nil {
