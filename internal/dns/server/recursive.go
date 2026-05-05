@@ -55,8 +55,7 @@ func (r *recursiveResolver) getShuffledRoots() []string {
 	_ = binary.Read(rand.Reader, binary.BigEndian, &offset)
 	rotate := int(offset % uint64(len(shuffled)))
 	// Rotate left by rotate positions
-	result := make([]string, len(shuffled))
-	copy(result, append(shuffled[rotate:], shuffled[:rotate]...))
+	result := append(shuffled[rotate:], shuffled[:rotate]...)
 	return result
 }
 
