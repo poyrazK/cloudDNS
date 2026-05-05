@@ -54,6 +54,14 @@ func setupTestDB(t *testing.T) (*sql.DB, func()) {
 			return
 		}
 
+		// Disable pgx statement cache to prevent stale prepared statements
+		// across test runs. Tests use TRUNCATE which clears data but not the
+		// pgx statement cache, causing "expected N arguments, got M" errors.
+		if _, err := db.Exec("SET statement_cache = 'off'"); err != nil {
+			containerErr = err
+			return
+		}
+
 		schemaPath := filepath.Join(".", "schema.sql")
 		schema, err := os.ReadFile(schemaPath) // #nosec G304
 		if err != nil {
