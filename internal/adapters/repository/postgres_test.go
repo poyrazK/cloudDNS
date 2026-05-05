@@ -11,7 +11,8 @@ import (
 	"testing"
 	"time"
 
-	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -48,19 +49,17 @@ func setupTestDB(t *testing.T) (*sql.DB, func()) {
 			return
 		}
 
-		db, err := sql.Open("pgx", connStr)
+		connConfig, err := pgx.ParseConfig(connStr)
 		if err != nil {
 			containerErr = err
 			return
 		}
+		// Disable statement cache to prevent stale prepared statement errors
+		// across test runs. TRUNCATE clears data but not the pgx statement cache.
+		connConfig.StatementCacheCapacity = 0
+		connConfig.DescriptionCacheCapacity = 0
 
-		// Disable pgx statement cache to prevent stale prepared statements
-		// across test runs. Tests use TRUNCATE which clears data but not the
-		// pgx statement cache, causing "expected N arguments, got M" errors.
-		if _, err := db.Exec("SET statement_cache = 'off'"); err != nil {
-			containerErr = err
-			return
-		}
+		db := stdlib.OpenDB(*connConfig)
 
 		schemaPath := filepath.Join(".", "schema.sql")
 		schema, err := os.ReadFile(schemaPath) // #nosec G304
