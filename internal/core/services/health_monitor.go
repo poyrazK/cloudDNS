@@ -119,7 +119,7 @@ func (m *HealthMonitor) probeRecord(ctx context.Context, rec domain.Record) {
 	case domain.HealthCheckHTTP:
 		status, errMsg = m.probeHTTP(ctx, rec.HealthCheckTarget)
 	case domain.HealthCheckTCP:
-		status, errMsg = m.probeTCP(rec.HealthCheckTarget)
+		status, errMsg = m.probeTCP(ctx, rec.HealthCheckTarget)
 	default:
 		return
 	}
@@ -147,8 +147,9 @@ func (m *HealthMonitor) probeHTTP(ctx context.Context, target string) (domain.He
 	return domain.HealthStatusUnhealthy, fmt.Sprintf("HTTP status: %d", resp.StatusCode)
 }
 
-func (m *HealthMonitor) probeTCP(target string) (domain.HealthStatus, string) {
-	conn, err := net.DialTimeout("tcp", target, 3*time.Second)
+func (m *HealthMonitor) probeTCP(ctx context.Context, target string) (domain.HealthStatus, string) {
+	dialer := &net.Dialer{Timeout: 3 * time.Second}
+	conn, err := dialer.DialContext(ctx, "tcp", target)
 	if err != nil {
 		return domain.HealthStatusUnhealthy, err.Error()
 	}

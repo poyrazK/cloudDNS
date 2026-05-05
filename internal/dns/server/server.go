@@ -371,13 +371,25 @@ func (s *Server) Run(ctx context.Context) error {
 		if s.dotListener != nil {
 			_ = s.dotListener.Close()
 		}
+		shutdownCtx, shutdownCancel := context.WithTimeout(ctx, 5*time.Second)
+		defer shutdownCancel()
 		if s.dohServer != nil {
-			shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-			defer cancel()
 			_ = s.dohServer.Shutdown(shutdownCtx)
 		}
 		if s.doqListener != nil {
 			_ = s.doqListener.Close()
+		}
+		if s.Redis != nil {
+			errCh := make(chan error, 1)
+			go func() { errCh <- s.Redis.Close() }()
+			select {
+			case err := <-errCh:
+				if err != nil {
+					s.Logger.Error("redis shutdown failed", "error", err)
+				}
+			case <-shutdownCtx.Done():
+				s.Logger.Warn("redis close timed out during shutdown")
+			}
 		}
 	}(ctx)
 
