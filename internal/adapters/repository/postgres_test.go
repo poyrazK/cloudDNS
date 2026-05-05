@@ -54,9 +54,9 @@ func setupTestDB(t *testing.T) (*sql.DB, func()) {
 			containerErr = err
 			return
 		}
-		// Use simple protocol to avoid prepared statement cache issues
-		// TRUNCATE in tests clears data but not the pgx statement cache
-		connConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
+		// Use exec mode which sends parameters separately without caching
+		// This avoids the stale statement cache issue while supporting placeholder reuse
+		connConfig.DefaultQueryExecMode = pgx.QueryExecModeExec
 
 		db := stdlib.OpenDB(*connConfig)
 
