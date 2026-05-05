@@ -596,7 +596,7 @@ func (r *PostgresRepository) BatchCreateRecords(ctx context.Context, records []d
 
 	query := `
 		INSERT INTO dns_records (id, zone_id, name, type, content, ttl, priority, weight, port, network, health_check_type, health_check_target, created_at, updated_at)
-		SELECT * FROM UNNEST($1::uuid[], $2::uuid[], $3::text[], $4::text[], $5::text[], $6::int[], $7::int[], $8::int[], $9::int[], $10::text[], $11::text[], $12::text[], $13::timestamptz[], $14::timestamptz[])
+		SELECT * FROM UNNEST($1::uuid[], $2::uuid[], $3::text[], $4::text[], $5::text[], $6::int[], $7::int[], $8::int[], $9::int[], $10::text[]::cidr[], $11::text[], $12::text[], $13::timestamptz[], $14::timestamptz[])
 		ON CONFLICT (id) DO NOTHING
 		-- Idempotent: duplicate IDs (e.g., client retries) are silently dropped.
 		-- Switch to ON CONFLICT DO UPDATE if surfacing duplicates is preferred.
