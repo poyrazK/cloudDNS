@@ -314,7 +314,6 @@ func (s *Server) dlqRetryWorker(ctx context.Context) {
 		case <-ticker.C:
 			// Continue to process DLQ after backoff
 		}
-		_ = ctx // ctx is checked via ctx.Done above, not used directly below
 
 		msg, err := s.Redis.PopFromDLQ(ctx, 0)
 		if err != nil {

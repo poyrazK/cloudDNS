@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"sort"
@@ -14,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
 	"github.com/poyrazK/cloudDNS/internal/core/ports"
 	"github.com/poyrazK/cloudDNS/internal/dns/packet"
@@ -1389,5 +1391,47 @@ func TestHandleIXFR_TSIGVerifyFailed(t *testing.T) {
 	_ = res.FromBuffer(pb)
 	if res.Header.ResCode != packet.RcodeRefused {
 		t.Errorf("Expected NOTAUTH (5), got %d", res.Header.ResCode)
+	}
+}
+
+func TestDLQRetryWorker_Shutdown(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("Failed to run miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	redisCache := NewRedisCache(mr.Addr(), "", 0)
+	defer redisCache.Close()
+
+	srv := &Server{
+		Redis:  redisCache,
+		Logger: slog.Default(),
+		Cache:  nil,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		srv.dlqRetryWorker(ctx)
+	}()
+
+	// Cancel immediately — worker should exit promptly, not after 5s
+	cancel()
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Pass — exited promptly after context cancel
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("dlqRetryWorker did not exit within 500ms after context cancel")
 	}
 }
