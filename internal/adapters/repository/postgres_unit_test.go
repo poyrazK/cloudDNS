@@ -64,7 +64,7 @@ func TestPostgresRepository_Unit(t *testing.T) {
 		rows := sqlmock.NewRows([]string{"id", "tenant_id", "name", "vpc_id", "description", "role", "master_server", "created_at", "updated_at"}).
 			AddRow("z1", "t1", "example.com.", "", "", "master", "", time.Now(), time.Now())
 
-		mock.ExpectQuery(`SELECT .* FROM dns_zones WHERE REVERSE\(\$1\) LIKE REVERSE\(name\) \|\| '%'`).
+		mock.ExpectQuery(`SELECT .* FROM dns_zones WHERE name <= \$1 AND \$1 LIKE name \|\| '%'`).
 			WithArgs("example.com.").
 			WillReturnRows(rows)
 
@@ -82,7 +82,7 @@ func TestPostgresRepository_Unit(t *testing.T) {
 		rows := sqlmock.NewRows([]string{"id", "tenant_id", "name", "vpc_id", "description", "role", "master_server", "created_at", "updated_at"}).
 			AddRow("z1", "t1", "example.com.", "", "", "master", "", time.Now(), time.Now())
 
-		mock.ExpectQuery(`SELECT .* FROM dns_zones WHERE REVERSE\(\$1\) LIKE REVERSE\(name\) \|\| '%'`).
+		mock.ExpectQuery(`SELECT .* FROM dns_zones WHERE name <= \$1 AND \$1 LIKE name \|\| '%'`).
 			WithArgs("www.example.com.").
 			WillReturnRows(rows)
 
@@ -97,7 +97,7 @@ func TestPostgresRepository_Unit(t *testing.T) {
 
 	// 2d. Test GetZoneLongestMatch no match
 	t.Run("GetZoneLongestMatch_NoMatch", func(t *testing.T) {
-		mock.ExpectQuery(`SELECT .* FROM dns_zones WHERE REVERSE\(\$1\) LIKE REVERSE\(name\) \|\| '%'`).
+		mock.ExpectQuery(`SELECT .* FROM dns_zones WHERE name <= \$1 AND \$1 LIKE name \|\| '%'`).
 			WithArgs("unknown.domain.").
 			WillReturnError(sql.ErrNoRows)
 

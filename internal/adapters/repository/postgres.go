@@ -162,7 +162,7 @@ func (r *PostgresRepository) GetZone(ctx context.Context, name string) (*domain.
 func (r *PostgresRepository) GetZoneLongestMatch(ctx context.Context, qName string) (*domain.Zone, error) {
 	query := `SELECT id, tenant_id, name, vpc_id, description, role, master_server, created_at, updated_at
 		 FROM dns_zones
-		 WHERE REVERSE($1) LIKE REVERSE(name) || '%'
+		 WHERE name <= $1 AND $1 LIKE name || '%'
 		 ORDER BY LENGTH(name) DESC
 		 LIMIT 1`
 	var z domain.Zone
@@ -465,11 +465,24 @@ func (r *PostgresRepository) CreateZoneWithRecords(ctx context.Context, zone *do
 		return errExec
 	}
 
-	// 2. Insert Records
-	recordQuery := `INSERT INTO dns_records (id, zone_id, name, type, content, ttl, priority, weight, port, created_at, updated_at) 
+	// 2. Insert Records row-by-row (UNNEST batch not used here — sqlmock
+	// doesn't support slice args for UNNEST in transaction context)
+	recordQuery := `INSERT INTO dns_records (id, zone_id, name, type, content, ttl, priority, weight, port, created_at, updated_at)
 			        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
 	for _, rec := range records {
-		_, errExecRecord := tx.ExecContext(ctx, recordQuery, rec.ID, rec.ZoneID, rec.Name, rec.Type, rec.Content, rec.TTL, rec.Priority, rec.Weight, rec.Port, rec.CreatedAt, rec.UpdatedAt)
+		priority := 0
+		if rec.Priority != nil {
+			priority = *rec.Priority
+		}
+		weight := 0
+		if rec.Weight != nil {
+			weight = *rec.Weight
+		}
+		port := 0
+		if rec.Port != nil {
+			port = *rec.Port
+		}
+		_, errExecRecord := tx.ExecContext(ctx, recordQuery, rec.ID, rec.ZoneID, rec.Name, rec.Type, rec.Content, rec.TTL, priority, weight, port, rec.CreatedAt, rec.UpdatedAt)
 		if errExecRecord != nil {
 			return errExecRecord
 		}

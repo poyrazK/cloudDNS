@@ -1,6 +1,7 @@
 package api
 
 import (
+	"container/heap"
 	"sync"
 	"time"
 )
@@ -60,21 +61,49 @@ func DefaultRateLimitConfig() RateLimitConfig {
 type tokenBucket struct {
 	mu      sync.Mutex
 	buckets map[string]*bucket
+	heap    bucketMinHeap // min-heap by lastSeen for O(1) oldest access
 	rate    float64
 	burst   int
 	maxKeys int
 }
 
+// bucketEntry pairs a key with its bucket for heap indexing.
+type bucketEntry struct {
+	key string
+	b   *bucket
+}
+
+// bucketMinHeap implements heap.Interface for O(1) access to oldest bucket.
+type bucketMinHeap []*bucketEntry
+
+func (h bucketMinHeap) Len() int { return len(h) }
+func (h bucketMinHeap) Less(i, j int) bool {
+	return h[i].b.lastSeen.Before(h[j].b.lastSeen)
+}
+func (h bucketMinHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
+func (h *bucketMinHeap) Push(x any) { *h = append(*h, x.(*bucketEntry)) }
+func (h *bucketMinHeap) Pop() any {
+	old := *h
+	n := len(old)
+	item := old[n-1]
+	*h = old[:n-1]
+	return item
+}
+
 type bucket struct {
-	tokens  float64
-	last    time.Time
-	lastSeen time.Time // for deterministic eviction
+	tokens    float64
+	last      time.Time
+	lastSeen  time.Time // for deterministic eviction
+	heapIdx   int       // index in heap, -1 if not in heap
 }
 
 // newTokenBucket creates a new token bucket limiter.
 func newTokenBucket(rate float64, burst int, maxKeys int) *tokenBucket {
+	h := bucketMinHeap{}
+	heap.Init(&h)
 	return &tokenBucket{
 		buckets: make(map[string]*bucket),
+		heap:    h,
 		rate:    rate,
 		burst:   burst,
 		maxKeys: maxKeys,
@@ -92,13 +121,21 @@ func (tb *tokenBucket) Allow(key string) bool {
 		if len(tb.buckets) >= tb.maxKeys {
 			tb.evictOldestBucket()
 		}
-		b = &bucket{tokens: float64(tb.burst), last: now, lastSeen: now}
+		b = &bucket{tokens: float64(tb.burst), last: now, lastSeen: now, heapIdx: -1}
+		entry := &bucketEntry{key: key, b: b}
+		heap.Push(&tb.heap, entry)
+		b.heapIdx = len(tb.heap) - 1
 		tb.buckets[key] = b
 	}
 
 	elapsed := now.Sub(b.last).Seconds()
 	b.last = now
 	b.lastSeen = now
+
+	// Update heap position after lastSeen change
+	if b.heapIdx >= 0 {
+		heap.Fix(&tb.heap, b.heapIdx)
+	}
 
 	b.tokens += elapsed * tb.rate
 	if b.tokens > float64(tb.burst) {
@@ -114,16 +151,12 @@ func (tb *tokenBucket) Allow(key string) bool {
 
 // evictOldestBucket removes the bucket with the oldest lastSeen timestamp.
 func (tb *tokenBucket) evictOldestBucket() {
-	oldestID := ""
-	oldestTime := time.Now().Add(time.Hour) // far future
-	for id, b := range tb.buckets {
-		if b.lastSeen.Before(oldestTime) {
-			oldestTime = b.lastSeen
-			oldestID = id
-		}
+	if len(tb.heap) == 0 {
+		return
 	}
-	if oldestID != "" {
-		delete(tb.buckets, oldestID)
+	entry := heap.Pop(&tb.heap).(*bucketEntry)
+	if entry != nil {
+		delete(tb.buckets, entry.key)
 	}
 }
 
