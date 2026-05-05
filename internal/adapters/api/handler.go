@@ -84,7 +84,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 
 	// Write operations - rate limited per tenant
 	mux.Handle("POST /zones", cors(auth(rateLimitWrite(admin(http.HandlerFunc(h.CreateZone))))))
-	mux.Handle("POST /zones/{id}/records", cors(auth(rateLimitWrite(admin(http.HandlerFunc(h.CreateRecord))))))
+	mux.Handle("POST /zones/{id}/records", cors(auth(rateLimitWrite(RequireRole(domain.RoleAdmin, domain.RoleWriter)(http.HandlerFunc(h.CreateRecord))))))
 
 	// Delete operations - more restrictive
 	mux.Handle("DELETE /zones/{id}", cors(auth(rateLimitDeleteZone(admin(http.HandlerFunc(h.DeleteZone))))))
