@@ -43,7 +43,7 @@ func setupTestDB(t *testing.T) (*sql.DB, func()) {
 			return
 		}
 
-		connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
+		connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable", "default_query_exec_mode=describe_exec")
 		if err != nil {
 			containerErr = err
 			return
@@ -290,7 +290,7 @@ func TestPostgresRepositoryIntegration(t *testing.T) {
 		t.Errorf("GetRecords failed: %v, count: %d", errRecs, len(recs))
 	}
 
-	// 5. Test GetIPsForName
+	// 6. Test GetIPsForName
 	ips, errIPs := repo.GetIPsForName(ctx, "www.base.test.", tDNS8)
 	if errIPs != nil || len(ips) != 1 || ips[0] != tIPv41 {
 		t.Errorf("GetIPsForName failed: %v, got %v", errIPs, ips)

@@ -8,7 +8,7 @@
 
 ### Hexagonal (Ports & Adapters) Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────┐
 │                     cmd/ (Entry Points)                      │
 ├─────────────────────────────────────────────────────────────┤
@@ -72,7 +72,7 @@
 All configuration via environment variables:
 - `DATABASE_URL` - PostgreSQL (default: `postgres://postgres:postgres@localhost:5432/clouddns?sslmode=disable`)
 - `REDIS_URL` - Redis cache
-- `DNS_ADDR` - DNS bind address (default: `127.0.0.1:10053`)
+- `DNS_ADDR` - DNS bind address (default: `127.0.0.1:1053`; uses 1053 instead of privileged port 53)
 - `API_ADDR` - Management API bind (default: `:8080`)
 - `LOG_LEVEL`, `LOG_FORMAT`
 - `DNSSEC_MODE` - `disabled`, `ad-bit-only`, `strict`
@@ -96,7 +96,7 @@ go test -v -timeout 10m -coverprofile=coverage.txt $(go list ./... | grep -v "to
 ### Deploy
 - ~~GitHub Actions: lint → test → build → push to GCP Artifact Registry → GKE deployment~~
 - **Note:** GKE deployment is disabled — we outgrew the gcloud subscription and no longer use deploy workflows
-- Ports: 1053/udp, 1053/tcp, 8080/tcp, 853/tcp (Note: uses 1053 instead of privileged 53)
+- Ports: 1053/udp, 1053/tcp, 8080/tcp, 853/tcp
 
 ## Query Flow
 
