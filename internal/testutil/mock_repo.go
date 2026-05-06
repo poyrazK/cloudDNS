@@ -21,6 +21,12 @@ func (m *MockRepo) GetRecords(_ context.Context, name string, qType domain.Recor
 	return args.Get(0).([]domain.Record), args.Error(1)
 }
 
+// GetRecordsByNames implements ports.DNSRepository for testing.
+func (m *MockRepo) GetRecordsByNames(_ context.Context, names []string, qType domain.RecordType, clientIP string) (map[string][]domain.Record, error) {
+	args := m.Called(names, qType, clientIP)
+	return args.Get(0).(map[string][]domain.Record), args.Error(1)
+}
+
 // GetIPsForName implements ports.DNSRepository for testing.
 func (m *MockRepo) GetIPsForName(_ context.Context, name string, clientIP string) ([]string, error) {
 	args := m.Called(name, clientIP)

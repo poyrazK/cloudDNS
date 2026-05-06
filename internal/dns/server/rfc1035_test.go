@@ -94,6 +94,66 @@ func TestRFC1035_ResponseFormat(t *testing.T) {
 	}
 }
 
+// TestAuthoritySection_GlueRecordsBatch verifies batch glue record lookup via GetRecordsByNames
+func TestAuthoritySection_GlueRecordsBatch(t *testing.T) {
+	repo := &mockServerRepo{
+		zones: []domain.Zone{
+			{ID: "z1", Name: "example.com."},
+		},
+		records: []domain.Record{
+			{Name: "example.com.", Type: domain.TypeSOA, Content: "ns1.example.com. admin.example.com. 1 3600 600 1209600 300", TTL: 3600},
+			{Name: "example.com.", Type: domain.TypeNS, Content: "ns1.example.com.", TTL: 3600},
+			{Name: "example.com.", Type: domain.TypeNS, Content: "ns2.example.com.", TTL: 3600},
+			{Name: "ns1.example.com.", Type: domain.TypeA, Content: "1.2.3.4", TTL: 3600},
+			{Name: "ns2.example.com.", Type: domain.TypeA, Content: "5.6.7.8", TTL: 3600},
+			{Name: "www.example.com.", Type: domain.TypeA, Content: "10.0.0.1", TTL: 300},
+		},
+	}
+	srv := NewServer("127.0.0.1:0", repo, nil)
+	srv.DisableAsync = true
+
+	req := packet.NewDNSPacket()
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "www.example.com.", QType: packet.A})
+
+	reqBuf := packet.NewBytePacketBuffer()
+	_ = req.Write(reqBuf)
+
+	var capturedResp []byte
+	_ = srv.handlePacket(context.Background(), reqBuf.Buf[:reqBuf.Position()], &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 53}, func(resp []byte) error {
+		capturedResp = resp
+		return nil
+	}, "udp")
+
+	resPacket := packet.NewDNSPacket()
+	resBuf := packet.NewBytePacketBuffer()
+	resBuf.Load(capturedResp)
+	_ = resPacket.FromBuffer(resBuf)
+
+	// Verify authority section has both NS records
+	if len(resPacket.Authorities) != 2 {
+		t.Errorf("Expected 2 NS records in authority, got %d", len(resPacket.Authorities))
+	}
+
+	// Verify additional section has both glue A records
+	if len(resPacket.Resources) != 2 {
+		t.Errorf("Expected 2 glue A records in additional, got %d", len(resPacket.Resources))
+	}
+
+	// Verify the glue records are for the correct names
+	glueNames := make(map[string]bool)
+	for _, r := range resPacket.Resources {
+		if r.Type == packet.A {
+			glueNames[r.Name] = true
+		}
+	}
+	if !glueNames["ns1.example.com."] {
+		t.Errorf("Missing glue A for ns1.example.com.")
+	}
+	if !glueNames["ns2.example.com."] {
+		t.Errorf("Missing glue A for ns2.example.com.")
+	}
+}
+
 // RFC 1035: Zone Transfers (AXFR)
 func TestRFC1035_AXFR(t *testing.T) {
 	repo := &mockServerRepo{

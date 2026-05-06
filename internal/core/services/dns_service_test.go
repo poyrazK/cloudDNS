@@ -55,6 +55,21 @@ func (m *mockRepo) GetRecords(_ context.Context, name string, qType domain.Recor
 	return res, nil
 }
 
+func (m *mockRepo) GetRecordsByNames(_ context.Context, names []string, qType domain.RecordType, _ string) (map[string][]domain.Record, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	result := make(map[string][]domain.Record)
+	for _, name := range names {
+		for _, r := range m.records {
+			if r.Name == name && (qType == "" || r.Type == qType) {
+				result[name] = append(result[name], r)
+			}
+		}
+	}
+	return result, nil
+}
+
 func (m *mockRepo) GetIPsForName(_ context.Context, name string, _ string) ([]string, error) {
 	if m.err != nil {
 		return nil, m.err

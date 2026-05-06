@@ -107,3 +107,143 @@ func TestComputeDS_InvalidAlgID(t *testing.T) {
 		t.Errorf("Expected empty digest for unsupported algorithm")
 	}
 }
+
+// TestWriteSignCanonicalRData_AAAA verifies canonical RDATA writing for AAAA records.
+func TestWriteSignCanonicalRData_AAAA(t *testing.T) {
+	records := []DNSRecord{
+		{Name: "ipv6.test.", Type: AAAA, TTL: 300, IP: []byte{0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01}, Class: 1},
+	}
+	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	_, err := SignRRSet(records, priv, AlgorithmECDSAP256, "test.", 1234, 1600000000, 1700000000)
+	if err != nil {
+		t.Fatalf("SignRRSet failed for AAAA: %v", err)
+	}
+}
+
+// TestWriteSignCanonicalRData_CNAME verifies canonical RDATA writing for CNAME records.
+func TestWriteSignCanonicalRData_CNAME(t *testing.T) {
+	records := []DNSRecord{
+		{Name: "cname.test.", Type: CNAME, TTL: 300, Host: "TARGET.EXAMPLE.COM.", Class: 1},
+	}
+	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	_, err := SignRRSet(records, priv, AlgorithmECDSAP256, "test.", 1234, 1600000000, 1700000000)
+	if err != nil {
+		t.Fatalf("SignRRSet failed for CNAME: %v", err)
+	}
+}
+
+// TestWriteSignCanonicalRData_NS verifies canonical RDATA writing for NS records.
+func TestWriteSignCanonicalRData_NS(t *testing.T) {
+	records := []DNSRecord{
+		{Name: "ns.test.", Type: NS, TTL: 300, Host: "NS1.EXAMPLE.COM.", Class: 1},
+	}
+	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	_, err := SignRRSet(records, priv, AlgorithmECDSAP256, "test.", 1234, 1600000000, 1700000000)
+	if err != nil {
+		t.Fatalf("SignRRSet failed for NS: %v", err)
+	}
+}
+
+// TestWriteSignCanonicalRData_MX verifies canonical RDATA writing for MX records.
+func TestWriteSignCanonicalRData_MX(t *testing.T) {
+	records := []DNSRecord{
+		{Name: "mx.test.", Type: MX, TTL: 300, Priority: 10, Host: "MAIL.EXAMPLE.COM.", Class: 1},
+	}
+	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	_, err := SignRRSet(records, priv, AlgorithmECDSAP256, "test.", 1234, 1600000000, 1700000000)
+	if err != nil {
+		t.Fatalf("SignRRSet failed for MX: %v", err)
+	}
+}
+
+// TestWriteSignCanonicalRData_TXT verifies canonical RDATA writing for TXT records.
+func TestWriteSignCanonicalRData_TXT(t *testing.T) {
+	records := []DNSRecord{
+		{Name: "txt.test.", Type: TXT, TTL: 300, Txt: "Hello World Test", Class: 1},
+	}
+	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	_, err := SignRRSet(records, priv, AlgorithmECDSAP256, "test.", 1234, 1600000000, 1700000000)
+	if err != nil {
+		t.Fatalf("SignRRSet failed for TXT: %v", err)
+	}
+}
+
+// TestWriteSignCanonicalRData_SOA verifies canonical RDATA writing for SOA records.
+func TestWriteSignCanonicalRData_SOA(t *testing.T) {
+	records := []DNSRecord{
+		{Name: "soa.test.", Type: SOA, TTL: 300,
+			MName:   "NS1.EXAMPLE.COM.",
+			RName:   "ADMIN.EXAMPLE.COM.",
+			Serial:  2024050101,
+			Refresh: 3600,
+			Retry:   600,
+			Expire:  1209600,
+			Minimum: 300,
+			Class: 1},
+	}
+	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	_, err := SignRRSet(records, priv, AlgorithmECDSAP256, "test.", 1234, 1600000000, 1700000000)
+	if err != nil {
+		t.Fatalf("SignRRSet failed for SOA: %v", err)
+	}
+}
+
+// TestWriteSignCanonicalRData_SRV verifies canonical RDATA writing for SRV records.
+func TestWriteSignCanonicalRData_SRV(t *testing.T) {
+	records := []DNSRecord{
+		{Name: "_sip._tcp.srv.test.", Type: SRV, TTL: 300, Priority: 10, Weight: 20, Port: 5060, Host: "SIP.EXAMPLE.COM.", Class: 1},
+	}
+	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	_, err := SignRRSet(records, priv, AlgorithmECDSAP256, "test.", 1234, 1600000000, 1700000000)
+	if err != nil {
+		t.Fatalf("SignRRSet failed for SRV: %v", err)
+	}
+}
+
+// TestWriteSignCanonicalRData_DNSKEY verifies canonical RDATA writing for DNSKEY records.
+func TestWriteSignCanonicalRData_DNSKEY(t *testing.T) {
+	records := []DNSRecord{
+		{Name: "dnskey.test.", Type: DNSKEY, TTL: 300, Flags: 257, Algorithm: 13, PublicKey: []byte{0x01, 0x02, 0x03, 0x04}, Class: 1},
+	}
+	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	_, err := SignRRSet(records, priv, AlgorithmECDSAP256, "test.", 1234, 1600000000, 1700000000)
+	if err != nil {
+		t.Fatalf("SignRRSet failed for DNSKEY: %v", err)
+	}
+}
+
+// TestWriteSignCanonicalRData_DS verifies canonical RDATA writing for DS records.
+func TestWriteSignCanonicalRData_DS(t *testing.T) {
+	records := []DNSRecord{
+		{Name: "ds.test.", Type: DS, TTL: 300, KeyTag: 12345, Algorithm: 13, DigestType: 2, Digest: []byte{0xaa, 0xbb, 0xcc, 0xdd}, Class: 1},
+	}
+	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	_, err := SignRRSet(records, priv, AlgorithmECDSAP256, "test.", 1234, 1600000000, 1700000000)
+	if err != nil {
+		t.Fatalf("SignRRSet failed for DS: %v", err)
+	}
+}
+
+// TestWriteSignCanonicalRData_NSEC verifies canonical RDATA writing for NSEC records.
+func TestWriteSignCanonicalRData_NSEC(t *testing.T) {
+	records := []DNSRecord{
+		{Name: "nsec.test.", Type: NSEC, TTL: 300, NextName: "next.test.", TypeBitMap: []byte{0x00, 0x01, 0x00, 0x1e}, Class: 1},
+	}
+	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	_, err := SignRRSet(records, priv, AlgorithmECDSAP256, "test.", 1234, 1600000000, 1700000000)
+	if err != nil {
+		t.Fatalf("SignRRSet failed for NSEC: %v", err)
+	}
+}
+
+// TestWriteSignCanonicalRData_PTR verifies canonical RDATA writing for PTR records.
+func TestWriteSignCanonicalRData_PTR(t *testing.T) {
+	records := []DNSRecord{
+		{Name: "1.2.3.4.in-addr.arpa.", Type: PTR, TTL: 300, Host: "PTR.TARGET.COM.", Class: 1},
+	}
+	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	_, err := SignRRSet(records, priv, AlgorithmECDSAP256, "test.", 1234, 1600000000, 1700000000)
+	if err != nil {
+		t.Fatalf("SignRRSet failed for PTR: %v", err)
+	}
+}

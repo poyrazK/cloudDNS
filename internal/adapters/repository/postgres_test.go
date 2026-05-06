@@ -11,7 +11,8 @@ import (
 	"testing"
 	"time"
 
-	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -42,17 +43,19 @@ func setupTestDB(t *testing.T) (*sql.DB, func()) {
 			return
 		}
 
-		connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
+		connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable", "default_query_exec_mode=describe_exec")
 		if err != nil {
 			containerErr = err
 			return
 		}
 
-		db, err := sql.Open("pgx", connStr)
+		connConfig, err := pgx.ParseConfig(connStr)
 		if err != nil {
 			containerErr = err
 			return
 		}
+
+		db := stdlib.OpenDB(*connConfig)
 
 		schemaPath := filepath.Join(".", "schema.sql")
 		schema, err := os.ReadFile(schemaPath) // #nosec G304

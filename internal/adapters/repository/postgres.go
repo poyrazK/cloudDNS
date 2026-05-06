@@ -103,6 +103,84 @@ func (r *PostgresRepository) GetRecords(ctx context.Context, name string, qType 
 	return records, nil
 }
 
+// GetRecordsByNames returns records for multiple names with a single query.
+// Used for batch-fetching glue records to avoid N+1 queries.
+func (r *PostgresRepository) GetRecordsByNames(ctx context.Context, names []string, qType domain.RecordType, clientIP string) (map[string][]domain.Record, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+
+	// Build query: WHERE LOWER(r.name) IN (LOWER($1), LOWER($2), ...)
+	placeholders := make([]string, len(names))
+	args := make([]interface{}, len(names)+2)
+	args[0] = clientIP
+	for i, name := range names {
+		placeholders[i] = fmt.Sprintf("LOWER($%d)", i+2)
+		args[i+1] = name
+	}
+
+	query := fmt.Sprintf(`SELECT r.id, r.zone_id, r.name, r.type, r.content, r.ttl, r.priority, r.weight, r.port, r.network,
+                 r.health_check_type, r.health_check_target, COALESCE(h.status, 'UNKNOWN')
+          FROM dns_records r
+          LEFT JOIN record_health h ON r.id = h.record_id
+          WHERE LOWER(r.name) IN (%s) AND (r.network IS NULL OR $1::inet <<= r.network)`,
+		strings.Join(placeholders, ","))
+
+	if qType != "" {
+		query += fmt.Sprintf(` AND r.type = $%d`, len(names)+2)
+		args = append(args, string(qType))
+	}
+
+	rows, errQuery := r.db.QueryContext(ctx, query, args...)
+	if errQuery != nil {
+		return nil, errQuery
+	}
+	defer func() {
+		if errClose := rows.Close(); errClose != nil {
+			log.Printf("failed to close rows: %v", errClose)
+		}
+	}()
+
+	result := make(map[string][]domain.Record)
+	for rows.Next() {
+		var rec domain.Record
+		var priority, weight, port sql.NullInt32
+		var hcType, hcTarget, hStatus sql.NullString
+		if errScan := rows.Scan(&rec.ID, &rec.ZoneID, &rec.Name, &rec.Type, &rec.Content, &rec.TTL, &priority, &weight, &port, &rec.Network, &hcType, &hcTarget, &hStatus); errScan != nil {
+			return nil, errScan
+		}
+		if priority.Valid {
+			p := int(priority.Int32)
+			rec.Priority = &p
+		}
+		if weight.Valid {
+			w := int(weight.Int32)
+			rec.Weight = &w
+		}
+		if port.Valid {
+			p := int(port.Int32)
+			rec.Port = &p
+		}
+		if hcType.Valid {
+			rec.HealthCheckType = domain.HealthCheckType(hcType.String)
+		}
+		if hcTarget.Valid {
+			rec.HealthCheckTarget = hcTarget.String
+		}
+		if hStatus.Valid {
+			rec.HealthStatus = domain.HealthStatus(hStatus.String)
+		}
+		// Normalize key with trailing dot to match ConvertDomainToPacketRecord behavior
+		key := rec.Name
+		if !strings.HasSuffix(key, ".") {
+			key += "."
+		}
+		result[key] = append(result[key], rec)
+	}
+
+	return result, rows.Err()
+}
+
 // GetIPsForName implements ports.DNSRepository.
 func (r *PostgresRepository) GetIPsForName(ctx context.Context, name string, clientIP string) ([]string, error) {
 	// Optimized query returning only content for Type A
