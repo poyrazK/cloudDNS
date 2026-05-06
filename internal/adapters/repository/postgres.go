@@ -536,33 +536,39 @@ func (r *PostgresRepository) CreateZoneWithRecords(ctx context.Context, zone *do
 	}()
 
 	// 1. Insert Zone
-	zoneQuery := `INSERT INTO dns_zones (id, tenant_id, name, vpc_id, description, role, master_server, created_at, updated_at) 
+	zoneQuery := `INSERT INTO dns_zones (id, tenant_id, name, vpc_id, description, role, master_server, created_at, updated_at)
 			      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
 	_, errExec := tx.ExecContext(ctx, zoneQuery, zone.ID, zone.TenantID, zone.Name, zone.VPCID, zone.Description, zone.Role, zone.MasterServer, zone.CreatedAt, zone.UpdatedAt)
 	if errExec != nil {
 		return errExec
 	}
 
-	// 2. Insert Records row-by-row (UNNEST batch not used here — sqlmock
-	// doesn't support slice args for UNNEST in transaction context)
-	recordQuery := `INSERT INTO dns_records (id, zone_id, name, type, content, ttl, priority, weight, port, created_at, updated_at)
-			        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
-	for _, rec := range records {
-		priority := 0
-		if rec.Priority != nil {
-			priority = *rec.Priority
+	// 2. Batch insert records using multi-row VALUES
+	if len(records) > 0 {
+		valueStrings := make([]string, 0, len(records))
+		valueArgs := make([]interface{}, 0, len(records)*11)
+		for i, rec := range records {
+			offset := i * 11
+			valueStrings = append(valueStrings, fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d)",
+				offset+1, offset+2, offset+3, offset+4, offset+5, offset+6, offset+7, offset+8, offset+9, offset+10, offset+11))
+			priority := 0
+			if rec.Priority != nil {
+				priority = *rec.Priority
+			}
+			weight := 0
+			if rec.Weight != nil {
+				weight = *rec.Weight
+			}
+			port := 0
+			if rec.Port != nil {
+				port = *rec.Port
+			}
+			valueArgs = append(valueArgs, rec.ID, rec.ZoneID, rec.Name, rec.Type, rec.Content, rec.TTL, priority, weight, port, rec.CreatedAt, rec.UpdatedAt)
 		}
-		weight := 0
-		if rec.Weight != nil {
-			weight = *rec.Weight
-		}
-		port := 0
-		if rec.Port != nil {
-			port = *rec.Port
-		}
-		_, errExecRecord := tx.ExecContext(ctx, recordQuery, rec.ID, rec.ZoneID, rec.Name, rec.Type, rec.Content, rec.TTL, priority, weight, port, rec.CreatedAt, rec.UpdatedAt)
-		if errExecRecord != nil {
-			return errExecRecord
+		batchQuery := fmt.Sprintf("INSERT INTO dns_records (id, zone_id, name, type, content, ttl, priority, weight, port, created_at, updated_at) VALUES %s", strings.Join(valueStrings, ","))
+		_, errExec = tx.ExecContext(ctx, batchQuery, valueArgs...)
+		if errExec != nil {
+			return errExec
 		}
 	}
 
