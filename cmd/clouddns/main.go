@@ -277,7 +277,7 @@ func run(ctx context.Context) error {
 
 	// 5. Start Health Monitor (Smart Engine)
 	if repo != nil {
-		healthMonitor := services.NewHealthMonitor(repo, logger)
+		healthMonitor := services.NewHealthMonitor(repo, logger, nil)
 		go healthMonitor.Start(runCtx, 30*time.Second)
 	}
 

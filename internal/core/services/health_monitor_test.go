@@ -47,7 +47,7 @@ func TestHealthMonitor_ProbeHTTP(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	m := NewHealthMonitor(nil, nil)
+	m := NewHealthMonitor(nil, nil, nil)
 	status, msg := m.probeHTTP(ctx, ts.URL)
 	if status != domain.HealthStatusHealthy {
 		t.Errorf("Expected Healthy, got %s (msg: %s)", status, msg)
@@ -76,7 +76,7 @@ func TestHealthMonitor_ProbeTCP(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer ts.Close()
 
-	m := NewHealthMonitor(nil, nil)
+	m := NewHealthMonitor(nil, nil, nil)
 	target := ts.Listener.Addr().String()
 	status, _ := m.probeTCP(context.Background(), target)
 	if status != domain.HealthStatusHealthy {
@@ -92,7 +92,7 @@ func TestHealthMonitor_ProbeTCP(t *testing.T) {
 
 func TestHealthMonitor_RunChecks(t *testing.T) {
 	repo := &testutil.MockRepo{}
-	m := NewHealthMonitor(repo, nil)
+	m := NewHealthMonitor(repo, nil, nil)
 
 	// Mock server for probe target
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -136,7 +136,7 @@ func TestHealthMonitor_RunChecks(t *testing.T) {
 func TestHealthMonitor_Start(t *testing.T) {
 	repo := &testutil.MockRepo{}
 	logger := slog.Default()
-	m := NewHealthMonitor(repo, logger)
+	m := NewHealthMonitor(repo, logger, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
@@ -146,4 +146,18 @@ func TestHealthMonitor_Start(t *testing.T) {
 
 	// Verify no probe was attempted
 	repo.AssertNotCalled(t, "GetRecordsToProbeStreaming")
+}
+
+func TestHealthMonitor_InsecureSkipVerify(t *testing.T) {
+	m := NewHealthMonitor(nil, nil, &HealthMonitorOptions{InsecureSkipVerify: true})
+	if m.client.Transport == nil {
+		t.Fatal("expected custom transport with InsecureSkipVerify")
+	}
+	tr, ok := m.client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("expected *http.Transport, got %T", m.client.Transport)
+	}
+	if tr.TLSClientConfig == nil || !tr.TLSClientConfig.InsecureSkipVerify {
+		t.Fatal("expected TLSClientConfig.InsecureSkipVerify to be true")
+	}
 }

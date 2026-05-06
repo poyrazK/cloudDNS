@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	mrand "math/rand"
 	"net"
 	"strings"
 	"time"
@@ -50,11 +49,14 @@ func newRecursiveResolver() *recursiveResolver {
 func (r *recursiveResolver) getShuffledRoots() []string {
 	shuffled := make([]string, len(r.rootHints))
 	copy(shuffled, r.rootHints)
-	// #nosec G404 -- Shuffling root hints for load balancing doesn't require crypto/rand
-	mrand.Shuffle(len(shuffled), func(i, j int) {
-		shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
-	})
-	return shuffled
+	// Use crypto/rand to pick a random rotation offset, preventing predictable
+	// root server ordering that could be exploited in amplification attacks.
+	var offset uint64
+	_ = binary.Read(rand.Reader, binary.BigEndian, &offset)
+	rotate := int(offset % uint64(len(shuffled)))
+	// Rotate left by rotate positions
+	result := append(shuffled[rotate:], shuffled[:rotate]...)
+	return result
 }
 
 func (s *Server) resolveRecursive(name string, qType packet.QueryType) (*packet.DNSPacket, error) {
