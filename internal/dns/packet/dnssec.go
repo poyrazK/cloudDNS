@@ -227,6 +227,7 @@ func SignRRSet(records []DNSRecord, privKey any, algorithm uint8, signerName str
 	return sig, nil
 }
 
+// countLabels returns the number of DNS name labels (e.g., "www.example.com." has 3).
 func countLabels(name string) int {
 	name = strings.TrimSuffix(name, ".")
 	if name == "" {
