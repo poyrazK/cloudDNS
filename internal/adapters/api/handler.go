@@ -14,6 +14,17 @@ import (
 
 const maxBodySize = 1 << 20 // 1MB
 
+// writeJSONError logs the internal error and writes a safe JSON response to the client.
+func (h *Handler) writeJSONError(w http.ResponseWriter, status int, publicMsg string, logErr error) {
+	if logErr != nil {
+		h.logger.Error("API error", "status", status, "error", logErr)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	resp := map[string]string{"error": publicMsg}
+	json.NewEncoder(w).Encode(resp)
+}
+
 // validateContentType checks if Content-Type is application/json.
 // Returns true if empty (backward compat) or exactly "application/json".
 func validateContentType(r *http.Request) bool {
@@ -146,7 +157,7 @@ func (h *Handler) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
 
 	logs, err := h.svc.ListAuditLogs(r.Context(), tenantID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		h.writeJSONError(w, http.StatusInternalServerError, "An internal error occurred", err)
 		return
 	}
 
@@ -164,12 +175,12 @@ func (h *Handler) CreateZone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodySize)).Decode(&zone); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		h.writeJSONError(w, http.StatusBadRequest, "Invalid request body", err)
 		return
 	}
 
 	if err := domain.ValidateZoneName(zone.Name); err != nil {
-		http.Error(w, "Invalid zone name: "+err.Error(), http.StatusBadRequest)
+		h.writeJSONError(w, http.StatusBadRequest, "Invalid zone name", err)
 		return
 	}
 
@@ -177,13 +188,13 @@ func (h *Handler) CreateZone(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := r.Context().Value(CtxTenantID).(string)
 	if !ok || tenantID == "" {
 		h.logger.Warn("CreateZone: missing or invalid tenant ID in context")
-		http.Error(w, "Unauthorized: missing tenant context", http.StatusUnauthorized)
+		h.writeJSONError(w, http.StatusUnauthorized, "Unauthorized: missing tenant context", nil)
 		return
 	}
 	zone.TenantID = tenantID
 
 	if err := domain.ValidateZoneRole(zone.Role, zone.MasterServer); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		h.writeJSONError(w, http.StatusBadRequest, "Invalid zone configuration", err)
 		return
 	}
 	if zone.Role == "" {
@@ -191,7 +202,7 @@ func (h *Handler) CreateZone(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.svc.CreateZone(r.Context(), &zone); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		h.writeJSONError(w, http.StatusInternalServerError, "An internal error occurred", err)
 		return
 	}
 
@@ -213,7 +224,7 @@ func (h *Handler) ListZones(w http.ResponseWriter, r *http.Request) {
 
 	zones, err := h.svc.ListZones(r.Context(), tenantID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		h.writeJSONError(w, http.StatusInternalServerError, "An internal error occurred", err)
 		return
 	}
 
@@ -236,7 +247,7 @@ func (h *Handler) ListRecordsForZone(w http.ResponseWriter, r *http.Request) {
 
 	records, err := h.svc.ListRecordsForZone(r.Context(), zoneID, tenantID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		h.writeJSONError(w, http.StatusInternalServerError, "An internal error occurred", err)
 		return
 	}
 
@@ -255,12 +266,12 @@ func (h *Handler) CreateRecord(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodySize)).Decode(&record); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		h.writeJSONError(w, http.StatusBadRequest, "Invalid request body", err)
 		return
 	}
 
 	if err := domain.ValidateRecord(&record); err != nil {
-		http.Error(w, "Invalid record: "+err.Error(), http.StatusBadRequest)
+		h.writeJSONError(w, http.StatusBadRequest, "Invalid record", err)
 		return
 	}
 
@@ -269,13 +280,13 @@ func (h *Handler) CreateRecord(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := r.Context().Value(CtxTenantID).(string)
 	if !ok || tenantID == "" {
 		h.logger.Warn("CreateRecord: missing or invalid tenant ID in context")
-		http.Error(w, "Unauthorized: missing tenant context", http.StatusUnauthorized)
+		h.writeJSONError(w, http.StatusUnauthorized, "Unauthorized: missing tenant context", nil)
 		return
 	}
 	record.TenantID = tenantID
 
 	if err := h.svc.CreateRecord(r.Context(), &record); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		h.writeJSONError(w, http.StatusInternalServerError, "An internal error occurred", err)
 		return
 	}
 
@@ -292,12 +303,12 @@ func (h *Handler) DeleteZone(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := r.Context().Value(CtxTenantID).(string)
 	if !ok || tenantID == "" {
 		h.logger.Warn("DeleteZone: missing or invalid tenant ID in context")
-		http.Error(w, "Unauthorized: missing tenant context", http.StatusUnauthorized)
+		h.writeJSONError(w, http.StatusUnauthorized, "Unauthorized: missing tenant context", nil)
 		return
 	}
 
 	if err := h.svc.DeleteZone(r.Context(), id, tenantID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		h.writeJSONError(w, http.StatusInternalServerError, "An internal error occurred", err)
 		return
 	}
 
@@ -312,12 +323,12 @@ func (h *Handler) DeleteRecord(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := r.Context().Value(CtxTenantID).(string)
 	if !ok || tenantID == "" {
 		h.logger.Warn("DeleteRecord: missing or invalid tenant ID in context")
-		http.Error(w, "Unauthorized: missing tenant context", http.StatusUnauthorized)
+		h.writeJSONError(w, http.StatusUnauthorized, "Unauthorized: missing tenant context", nil)
 		return
 	}
 
 	if err := h.svc.DeleteRecord(r.Context(), id, zoneID, tenantID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		h.writeJSONError(w, http.StatusInternalServerError, "An internal error occurred", err)
 		return
 	}
 
