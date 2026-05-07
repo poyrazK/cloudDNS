@@ -26,7 +26,8 @@ type EDE struct {
 	Info   string
 }
 
-// RFC 8914 Extended DNS Error Codes
+// EDECodes defines RFC 8914 Extended DNS Error Codes used in DNS responses.
+// Error codes cover the full set of DNSSEC validation failure reasons.
 const (
 	EDECodeOther                  uint16 = 0  // Other Error
 	EDECodeUnsupportedDNSKEYAlgo   uint16 = 1  // Unsupported DNSKEY Algorithm
