@@ -1314,6 +1314,7 @@ func (s *Server) handleNotify(ctx context.Context, request *packet.DNSPacket, cl
 	// Trigger async refresh if it's a slave zone
 	if !s.DisableAsync {
 		go func(zoneName string) {
+			// Check for cancellation or shutdown before starting long-running operations.
 			select {
 			case <-ctx.Done():
 				return
@@ -1327,6 +1328,14 @@ func (s *Server) handleNotify(ctx context.Context, request *packet.DNSPacket, cl
 				return
 			}
 			if zone != nil && zone.Role == "slave" {
+				// Check again before refresh to avoid unnecessary work during shutdown.
+				select {
+				case <-ctx.Done():
+					return
+				case <-s.done:
+					return
+				default:
+				}
 				s.refreshZone(ctx, zone)
 			}
 		}(request.Questions[0].Name)
