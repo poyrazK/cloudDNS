@@ -262,6 +262,7 @@ func (s *Server) updateDNSSECMetrics(ctx context.Context) {
 	}
 	stats, err := s.DNSSEC.CollectKeyStats(ctx)
 	if err != nil {
+		s.Logger.Debug("failed to collect DNSSEC key stats", "error", err)
 		return
 	}
 	metrics.DNSSECKeysTotal.Reset()

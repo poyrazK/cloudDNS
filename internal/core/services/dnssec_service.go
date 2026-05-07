@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"fmt"
+	"log/slog"
 	"math"
 	"strings"
 	"time"
@@ -20,12 +21,13 @@ import (
 
 // DNSSECService provides functionality for managing DNSSEC keys and signing RRsets.
 type DNSSECService struct {
-	repo ports.DNSRepository
+	repo   ports.DNSRepository
+	logger *slog.Logger
 }
 
 // NewDNSSECService creates and returns a new DNSSECService instance.
 func NewDNSSECService(repo ports.DNSRepository) *DNSSECService {
-	return &DNSSECService{repo: repo}
+	return &DNSSECService{repo: repo, logger: slog.Default()}
 }
 
 // GenerateKey creates a new ECDSA P-256 key pair for a zone
@@ -223,6 +225,7 @@ func (s *DNSSECService) CollectKeyStats(ctx context.Context) ([]keyStats, error)
 	for _, zone := range zones {
 		keys, err := s.repo.ListKeysForZone(ctx, zone.ID)
 		if err != nil {
+			s.logger.Debug("failed to list keys for zone", "zone", zone.Name, "error", err)
 			continue
 		}
 		for _, k := range keys {

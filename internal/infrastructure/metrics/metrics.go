@@ -294,4 +294,14 @@ func (c *ZoneRecordCounter) collect() {
 	if err == nil {
 		ZonesTotal.Set(float64(len(zones)))
 	}
+
+	// Count records across all zones
+	var totalRecords int
+	for _, z := range zones {
+		records, err := c.repo.ListRecordsForZone(ctx, z.ID, "")
+		if err == nil {
+			totalRecords += len(records)
+		}
+	}
+	RecordsTotal.Set(float64(totalRecords))
 }
