@@ -8,7 +8,9 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"fmt"
+	"log/slog"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,12 +21,13 @@ import (
 
 // DNSSECService provides functionality for managing DNSSEC keys and signing RRsets.
 type DNSSECService struct {
-	repo ports.DNSRepository
+	repo   ports.DNSRepository
+	logger *slog.Logger
 }
 
 // NewDNSSECService creates and returns a new DNSSECService instance.
 func NewDNSSECService(repo ports.DNSRepository) *DNSSECService {
-	return &DNSSECService{repo: repo}
+	return &DNSSECService{repo: repo, logger: slog.Default()}
 }
 
 // GenerateKey creates a new ECDSA P-256 key pair for a zone
@@ -198,4 +201,45 @@ func (s *DNSSECService) SignRRSet(ctx context.Context, zoneName string, zoneID s
 	}
 
 	return sigs, nil
+}
+
+// KeyStats holds DNSSEC key statistics for metrics.
+type KeyStats struct {
+	ZoneID     string
+	ZoneName   string
+	KeyType    string
+	Algorithm  int
+	AgeSeconds float64
+}
+
+// CollectKeyStats returns statistics for all active DNSSEC keys.
+// Used by the metrics collector to update DNSSEC key age metrics.
+func (s *DNSSECService) CollectKeyStats(ctx context.Context) ([]KeyStats, error) {
+	zones, err := s.repo.ListZones(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+
+	var stats []KeyStats
+	now := time.Now()
+	for _, zone := range zones {
+		keys, err := s.repo.ListKeysForZone(ctx, zone.ID)
+		if err != nil {
+			s.logger.Debug("failed to list keys for zone", "zone", zone.Name, "error", err)
+			continue
+		}
+		for _, k := range keys {
+			if !k.Active {
+				continue
+			}
+			stats = append(stats, KeyStats{
+				ZoneID:     zone.ID,
+				ZoneName:   zone.Name,
+				KeyType:    strings.ToLower(k.KeyType),
+				Algorithm:  k.Algorithm,
+				AgeSeconds: now.Sub(k.CreatedAt).Seconds(),
+			})
+		}
+	}
+	return stats, nil
 }

@@ -178,6 +178,21 @@ func run(ctx context.Context) error {
 				}
 			}
 		}()
+
+		// Periodic zone/record count metrics
+		var metricsCollector *metrics.DerivedMetricCollector
+		go func() {
+			interval := 30 * time.Second
+			if os.Getenv("TEST_MODE") == "true" {
+				interval = 10 * time.Millisecond
+			}
+			counter := metrics.NewZoneRecordCounter(repo, interval)
+			counter.Start(runCtx)
+			metricsCollector = metrics.NewDerivedMetricCollector(interval)
+			<-runCtx.Done()
+			counter.Stop()
+			metricsCollector.Stop()
+		}()
 	}
 
 	var cacheInvalidator ports.CacheInvalidator
