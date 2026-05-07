@@ -64,6 +64,7 @@ func (m *HealthMonitor) Start(ctx context.Context, interval time.Duration) {
 	}
 }
 
+// runChecks fetches records in batches and probes their health status concurrently.
 func (m *HealthMonitor) runChecks(ctx context.Context) {
 	const batchSize = 100
 
@@ -121,6 +122,7 @@ func (m *HealthMonitor) runChecks(ctx context.Context) {
 	}
 }
 
+// probeRecord checks a record's health and updates its status in the repository.
 func (m *HealthMonitor) probeRecord(ctx context.Context, rec domain.Record) {
 	var status domain.HealthStatus
 	var errMsg string
@@ -139,6 +141,7 @@ func (m *HealthMonitor) probeRecord(ctx context.Context, rec domain.Record) {
 	}
 }
 
+// probeHTTP performs an HTTP health check and returns status and error message.
 func (m *HealthMonitor) probeHTTP(ctx context.Context, target string) (domain.HealthStatus, string) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
@@ -157,6 +160,7 @@ func (m *HealthMonitor) probeHTTP(ctx context.Context, target string) (domain.He
 	return domain.HealthStatusUnhealthy, fmt.Sprintf("HTTP status: %d", resp.StatusCode)
 }
 
+// probeTCP attempts a TCP connection
 func (m *HealthMonitor) probeTCP(ctx context.Context, target string) (domain.HealthStatus, string) {
 	dialer := &net.Dialer{Timeout: 3 * time.Second}
 	conn, err := dialer.DialContext(ctx, "tcp", target)
