@@ -22,7 +22,9 @@ func (h *Handler) writeJSONError(w http.ResponseWriter, status int, publicMsg st
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	resp := map[string]string{"error": publicMsg}
-	json.NewEncoder(w).Encode(resp)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		h.logger.Error("failed to encode error response", "error", err)
+	}
 }
 
 // validateContentType checks if Content-Type is application/json.
