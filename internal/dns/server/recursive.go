@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/poyrazK/cloudDNS/internal/dns/packet"
+	"github.com/poyrazK/cloudDNS/internal/infrastructure/metrics"
 )
 
 type recursiveResolver struct {
@@ -83,6 +84,7 @@ func (s *Server) resolveRecursive(name string, qType packet.QueryType) (*packet.
 		// Check total resolution timeout
 		if time.Since(resolveStart) >= recursiveTimeout {
 			s.Logger.Warn("recursive resolution timed out during root iteration", "name", name)
+			metrics.RecursiveResolutionsTotal.WithLabelValues("timeout").Inc()
 			return nil, errors.New(errRecursiveTimeout)
 		}
 		rootNS := roots[i]
@@ -142,11 +144,13 @@ func (s *Server) resolveRecursive(name string, qType packet.QueryType) (*packet.
 					continue
 				}
 
+				metrics.RecursiveResolutionsTotal.WithLabelValues("success").Inc()
 				return resp, nil
 			}
 
 			// NXDOMAIN is a definitive answer, so we stop here
 			if resp.Header.ResCode == 3 {
+				metrics.RecursiveResolutionsTotal.WithLabelValues("nxdomain").Inc()
 				return resp, nil
 			}
 
@@ -178,6 +182,7 @@ func (s *Server) resolveRecursive(name string, qType packet.QueryType) (*packet.
 		// Check total resolution timeout before each fallback query
 		if time.Since(resolveStart) >= recursiveTimeout {
 			s.Logger.Warn("recursive resolution timed out during fallback", "name", name)
+			metrics.RecursiveResolutionsTotal.WithLabelValues("timeout").Inc()
 			return nil, errors.New(errRecursiveTimeout)
 		}
 		serverAddr := net.JoinHostPort(fallback, "53")

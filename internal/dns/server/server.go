@@ -251,6 +251,28 @@ func (s *Server) automateDNSSEC() {
 			s.Logger.Error("DNSSEC automation failed for zone", "zone", z.Name, "error", errAutomate)
 		}
 	}
+
+	// Update DNSSEC key metrics after automation
+	s.updateDNSSECMetrics(ctx)
+}
+
+func (s *Server) updateDNSSECMetrics(ctx context.Context) {
+	if s.DNSSEC == nil {
+		return
+	}
+	stats, err := s.DNSSEC.CollectKeyStats(ctx)
+	if err != nil {
+		return
+	}
+	metrics.DNSSECKeysTotal.Reset()
+	metrics.DNSSECKeysAgeSeconds.Reset()
+	signedZones := 0
+	for _, st := range stats {
+		metrics.DNSSECKeysTotal.WithLabelValues(st.ZoneName, st.KeyType, fmt.Sprintf("%d", st.Algorithm)).Set(1)
+		metrics.DNSSECKeysAgeSeconds.WithLabelValues(st.ZoneName, st.KeyType).Set(st.AgeSeconds)
+		signedZones++
+	}
+	metrics.DNSSECZonesSigned.Set(float64(signedZones))
 }
 
 // startInvalidationListener listens for cache invalidation events from Redis pub/sub.
@@ -821,6 +843,7 @@ func (s *Server) sendAXFRRecord(conn net.Conn, id uint16, q packet.DNSQuestion, 
 	}
 	s.Logger.Debug("AXFR sent packet", "index", index, "type", pRec.Type)
 	packet.PutBuffer(resBuffer)
+	metrics.AXFRBytesTotal.Add(float64(len(fullResp)))
 }
 
 // sendTCPError sends a TCP DNS error response with the given RCODE.
@@ -944,6 +967,7 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 
 	if data, found := s.Cache.GetInto(cacheKey, request.Header.ID); found {
 		metrics.CacheOperations.WithLabelValues("l1", "hit").Inc()
+		metrics.RecordCacheHit()
 		metrics.QueriesTotal.WithLabelValues(qTypeLabel, "0", protocol).Inc()
 		metrics.QueryDuration.WithLabelValues("cache_l1").Observe(time.Since(start).Seconds())
 		err := sendFn(data)
@@ -951,10 +975,12 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 		return err
 	}
 	metrics.CacheOperations.WithLabelValues("l1", "miss").Inc()
+	metrics.RecordCacheMiss()
 
 	if s.Redis != nil {
 		if data, remainingTTL, found := s.Redis.GetWithTTL(ctx, cacheKey); found {
 			metrics.CacheOperations.WithLabelValues("l2", "hit").Inc()
+			metrics.RecordCacheHit()
 			metrics.QueriesTotal.WithLabelValues(qTypeLabel, "0", protocol).Inc()
 			metrics.QueryDuration.WithLabelValues("cache_l2").Observe(time.Since(start).Seconds())
 			// Rewrite Transaction ID (data is a copy from Redis, safe to mutate)
@@ -969,6 +995,10 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 			}
 			s.Cache.Set(cacheKey, data, remainingTTL)
 			cachedData = data
+		} else if s.Redis != nil {
+			// Redis was checked but key not found = L2 miss
+			metrics.CacheOperations.WithLabelValues("l2", "miss").Inc()
+			metrics.RecordCacheMiss()
 		}
 	}
 
@@ -1069,6 +1099,7 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 	qTypeStr := queryTypeToRecordType(q.QType)
 	records, errRepo := s.Repo.GetRecords(ctx, q.Name, qTypeStr, clientIP)
 	metrics.QueryDuration.WithLabelValues("database").Observe(time.Since(dbStart).Seconds())
+	metrics.RecordCacheMiss() // DB lookup is a cache miss for ratio purposes
 
 	if errRepo == nil && len(records) > 0 {
 		for _, rec := range records {
@@ -1303,6 +1334,7 @@ func (s *Server) handleNotify(ctx context.Context, request *packet.DNSPacket, cl
 		return nil
 	}
 	s.Logger.Info("received NOTIFY", "zone", request.Questions[0].Name, "from", clientIP)
+	metrics.NotifiesTotal.WithLabelValues(request.Questions[0].Name, "accepted").Inc()
 
 	response := packet.NewDNSPacket()
 	response.Header.ID = request.Header.ID
