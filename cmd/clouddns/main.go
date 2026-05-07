@@ -186,7 +186,7 @@ func run(ctx context.Context) error {
 				interval = 10 * time.Millisecond
 			}
 			counter := metrics.NewZoneRecordCounter(repo, interval)
-			counter.Start()
+			counter.Start(runCtx)
 			<-runCtx.Done()
 			counter.Stop()
 		}()

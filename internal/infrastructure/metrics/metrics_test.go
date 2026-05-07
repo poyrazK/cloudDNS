@@ -1,7 +1,6 @@
 package metrics
 
 import (
-	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -65,46 +64,46 @@ func TestDNSBuckets(t *testing.T) {
 
 func TestRecordCacheHitMiss(t *testing.T) {
 	// Save original values
-	origHit := atomic.LoadUint64(&CacheHitCount)
-	origMiss := atomic.LoadUint64(&CacheMissCount)
+	origHit := cacheHitCount.Load()
+	origMiss := cacheMissCount.Load()
 
 	// Reset for test
-	atomic.StoreUint64(&CacheHitCount, 0)
-	atomic.StoreUint64(&CacheMissCount, 0)
+	cacheHitCount.Store(0)
+	cacheMissCount.Store(0)
 
 	RecordCacheHit()
 	RecordCacheHit()
 	RecordCacheMiss()
 
-	if atomic.LoadUint64(&CacheHitCount) != 2 {
-		t.Errorf("CacheHitCount = %d, want 2", atomic.LoadUint64(&CacheHitCount))
+	if cacheHitCount.Load() != 2 {
+		t.Errorf("cacheHitCount = %d, want 2", cacheHitCount.Load())
 	}
-	if atomic.LoadUint64(&CacheMissCount) != 1 {
-		t.Errorf("CacheMissCount = %d, want 1", atomic.LoadUint64(&CacheMissCount))
+	if cacheMissCount.Load() != 1 {
+		t.Errorf("cacheMissCount = %d, want 1", cacheMissCount.Load())
 	}
 
 	// Restore
-	atomic.StoreUint64(&CacheHitCount, origHit)
-	atomic.StoreUint64(&CacheMissCount, origMiss)
+	cacheHitCount.Store(origHit)
+	cacheMissCount.Store(origMiss)
 }
 
 func TestDerivedMetricCollector(t *testing.T) {
 	// Save and reset
-	origHit := atomic.LoadUint64(&CacheHitCount)
-	origMiss := atomic.LoadUint64(&CacheMissCount)
-	atomic.StoreUint64(&CacheHitCount, 0)
-	atomic.StoreUint64(&CacheMissCount, 0)
+	origHit := cacheHitCount.Load()
+	origMiss := cacheMissCount.Load()
+	cacheHitCount.Store(0)
+	cacheMissCount.Store(0)
 
 	// Simulate 80% hit rate
-	atomic.StoreUint64(&CacheHitCount, 80)
-	atomic.StoreUint64(&CacheMissCount, 20)
+	cacheHitCount.Store(80)
+	cacheMissCount.Store(20)
 
 	collector := NewDerivedMetricCollector(50 * time.Millisecond)
 	collector.compute()
 
 	// Restore
-	atomic.StoreUint64(&CacheHitCount, origHit)
-	atomic.StoreUint64(&CacheMissCount, origMiss)
+	cacheHitCount.Store(origHit)
+	cacheMissCount.Store(origMiss)
 	collector.Stop()
 }
 

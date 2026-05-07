@@ -49,11 +49,10 @@ var (
 	// BGPAnnounced indicates if the node is currently announcing routes via BGP
 	BGPAnnounced prometheus.Gauge
 
-	// CacheHitRatio tracks the L1 cache hit ratio (computed periodically)
-	CacheHitRatio prometheus.Gauge
-	// CacheHitCount and CacheMissCount track raw counts for ratio computation
-	CacheHitCount  uint64
-	CacheMissCount uint64
+	// cacheMissCount and cacheHitCount track raw counts for ratio computation.
+	// Thread-safe via atomic operations.
+	cacheHitCount  atomic.Uint64
+	cacheMissCount atomic.Uint64
 
 	// DNSSECKeysTotal tracks DNSSEC keys by zone, key type, and algorithm
 	DNSSECKeysTotal *prometheus.GaugeVec
@@ -75,6 +74,8 @@ var (
 	ZonesTotal prometheus.Gauge
 	// RecordsTotal tracks total records across all zones
 	RecordsTotal prometheus.Gauge
+	// CacheHitRatio tracks the L1 cache hit ratio (computed periodically)
+	CacheHitRatio prometheus.Gauge
 )
 
 // DerivedMetricCollector periodically computes derived metrics (e.g., cache hit ratio)
@@ -111,8 +112,8 @@ func (c *DerivedMetricCollector) run() {
 }
 
 func (c *DerivedMetricCollector) compute() {
-	hits := atomic.LoadUint64(&CacheHitCount)
-	misses := atomic.LoadUint64(&CacheMissCount)
+	hits := cacheHitCount.Load()
+	misses := cacheMissCount.Load()
 	total := hits + misses
 	if total > 0 {
 		CacheHitRatio.Set(float64(hits) / float64(total))
@@ -128,13 +129,13 @@ func (c *DerivedMetricCollector) Stop() {
 // RecordCacheHit records a cache hit for derived metric computation.
 // Thread-safe via atomic operations.
 func RecordCacheHit() {
-	atomic.AddUint64(&CacheHitCount, 1)
+	cacheHitCount.Add(1)
 }
 
 // RecordCacheMiss records a cache miss for derived metric computation.
 // Thread-safe via atomic operations.
 func RecordCacheMiss() {
-	atomic.AddUint64(&CacheMissCount, 1)
+	cacheMissCount.Add(1)
 }
 
 func init() {
@@ -262,20 +263,21 @@ func NewZoneRecordCounter(repo ZoneRecordRepo, interval time.Duration) *ZoneReco
 }
 
 // Start begins the periodic collection goroutine.
-func (c *ZoneRecordCounter) Start() {
+// The provided ctx is used as the parent context for cancellation.
+func (c *ZoneRecordCounter) Start(ctx context.Context) {
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
 		ticker := time.NewTicker(c.interval)
 		defer ticker.Stop()
 		// Run once immediately
-		c.collect()
+		c.collect(ctx)
 		for {
 			select {
 			case <-c.stopCh:
 				return
 			case <-ticker.C:
-				c.collect()
+				c.collect(ctx)
 			}
 		}
 	}()
@@ -288,8 +290,7 @@ func (c *ZoneRecordCounter) Stop() {
 	close(c.doneCh)
 }
 
-func (c *ZoneRecordCounter) collect() {
-	ctx := context.Background()
+func (c *ZoneRecordCounter) collect(ctx context.Context) {
 	zones, err := c.repo.ListZones(ctx, "")
 	if err == nil {
 		ZonesTotal.Set(float64(len(zones)))
