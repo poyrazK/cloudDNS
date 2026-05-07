@@ -29,6 +29,7 @@ func NewDNSService(repo ports.DNSRepository, cache ports.CacheInvalidator) ports
 	}
 }
 
+// CreateZone creates a new DNS zone with default SOA and NS records.
 func (s *dnsService) CreateZone(ctx context.Context, zone *domain.Zone) error {
 	zone.ID = uuid.New().String()
 	zone.CreatedAt = time.Now()
@@ -77,6 +78,7 @@ func (s *dnsService) CreateZone(ctx context.Context, zone *domain.Zone) error {
 	return nil
 }
 
+// CreateRecord creates a new DNS record and invalidates the cache.
 func (s *dnsService) CreateRecord(ctx context.Context, record *domain.Record) error {
 	record.ID = uuid.New().String()
 	record.CreatedAt = time.Now()
@@ -101,6 +103,7 @@ func (s *dnsService) CreateRecord(ctx context.Context, record *domain.Record) er
 	return nil
 }
 
+// audit logs an action to the audit trail via the repository.
 func (s *dnsService) audit(ctx context.Context, tenantID, action, resType, resID, details string) {
 	logEntry := &domain.AuditLog{
 		ID:           uuid.New().String(),
@@ -116,6 +119,7 @@ func (s *dnsService) audit(ctx context.Context, tenantID, action, resType, resID
 	}
 }
 
+// Resolve looks up DNS records for a name and type, checking direct and wildcard matches.
 func (s *dnsService) Resolve(ctx context.Context, name string, qType domain.RecordType, clientIP string) ([]domain.Record, error) {
 	// 1. Direct Match
 	records, err := s.repo.GetRecords(ctx, name, qType, clientIP)
@@ -150,6 +154,7 @@ func (s *dnsService) Resolve(ctx context.Context, name string, qType domain.Reco
 	return nil, nil
 }
 
+// filterHealthy returns only records that are not marked unhealthy, or all records if all are unhealthy.
 func (s *dnsService) filterHealthy(records []domain.Record) []domain.Record {
 	var healthy []domain.Record
 	for _, rec := range records {
@@ -165,14 +170,17 @@ func (s *dnsService) filterHealthy(records []domain.Record) []domain.Record {
 	return healthy
 }
 
+// ListZones returns all zones belonging to a tenant.
 func (s *dnsService) ListZones(ctx context.Context, tenantID string) ([]domain.Zone, error) {
 	return s.repo.ListZones(ctx, tenantID)
 }
 
+// ListRecordsForZone returns all records in a zone for a given tenant.
 func (s *dnsService) ListRecordsForZone(ctx context.Context, zoneID string, tenantID string) ([]domain.Record, error) {
 	return s.repo.ListRecordsForZone(ctx, zoneID, tenantID)
 }
 
+// DeleteZone deletes a zone and all its records for a tenant.
 func (s *dnsService) DeleteZone(ctx context.Context, zoneID string, tenantID string) error {
 	if err := s.repo.DeleteZone(ctx, zoneID, tenantID); err != nil {
 		return err
@@ -181,6 +189,7 @@ func (s *dnsService) DeleteZone(ctx context.Context, zoneID string, tenantID str
 	return nil
 }
 
+// DeleteRecord deletes a DNS record and invalidates the cache.
 func (s *dnsService) DeleteRecord(ctx context.Context, recordID string, zoneID string, tenantID string) error {
 	// Fetch record details to invalidate the cache
 	record, err := s.repo.GetRecord(ctx, recordID, zoneID, tenantID)
@@ -206,6 +215,7 @@ func (s *dnsService) DeleteRecord(ctx context.Context, recordID string, zoneID s
 	return nil
 }
 
+// ImportZone parses a zone file and imports it for a tenant.
 func (s *dnsService) ImportZone(ctx context.Context, tenantID string, r io.Reader) (*domain.Zone, error) {
 	parser := master.New()
 	data, err := parser.Parse(r)

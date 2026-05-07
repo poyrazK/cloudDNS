@@ -55,12 +55,14 @@ type cacheLockTable [cacheLockShardCount]cacheLockShard
 
 var globalCacheLocks cacheLockTable
 
+// fnv32 returns a 32-bit FNV-1a hash of the key for cache lock sharding.
 func fnv32(key string) uint32 {
 	h := fnv.New32a()
 	h.Write([]byte(key)) // #nosec G104
 	return h.Sum32()
 }
 
+// lockKey returns the cache lock shard for the given key using FNV hashing.
 func (t *cacheLockTable) lockKey(key string) *cacheLockShard {
 	return &t[fnv32(key)%cacheLockShardCount]
 }
@@ -185,6 +187,7 @@ func NewServer(addr string, repo ports.DNSRepository, logger *slog.Logger) *Serv
 	return s
 }
 
+// generateServerCookie creates a DNS COOKIE (RFC 9013) server cookie from a client cookie and client IP.
 func (s *Server) generateServerCookie(clientCookie []byte, clientIP string) []byte {
 	h := hmac.New(sha256.New, s.CookieSecret)
 	h.Write(clientCookie)
@@ -192,6 +195,7 @@ func (s *Server) generateServerCookie(clientCookie []byte, clientIP string) []by
 	return h.Sum(nil)[:16] // Return 16 bytes of server cookie
 }
 
+// padResponse pads a DNS response to a multiple of blockSize for privacy (RFC 9276).
 func (s *Server) padResponse(response *packet.DNSPacket, blockSize int) {
 	// Find OPT record
 	var opt *packet.DNSRecord
@@ -233,6 +237,7 @@ func (s *Server) padResponse(response *packet.DNSPacket, blockSize int) {
 	opt.SetOption(packet.EdnsOptionPadding, padding)
 }
 
+// automateDNSSEC runs periodic DNSSEC key lifecycle management for all zones.
 func (s *Server) automateDNSSEC() {
 	ctx := s.lifecycleCtx
 	// Get all zones
@@ -248,6 +253,7 @@ func (s *Server) automateDNSSEC() {
 	}
 }
 
+// startInvalidationListener listens for cache invalidation events from Redis pub/sub.
 func (s *Server) startInvalidationListener(ctx context.Context) {
 	pubsub := s.Redis.Subscribe(ctx)
 	defer func() {
@@ -582,6 +588,7 @@ func (s *Server) Run(ctx context.Context) error {
 	return nil // async shutdown handles cleanup in background
 }
 
+// handleDoH handles DNS-over-HTTPS requests (RFC 8484).
 func (s *Server) handleDoH(w http.ResponseWriter, r *http.Request) {
 	var dnsMsg []byte
 	var errDoH error
@@ -627,6 +634,7 @@ func (s *Server) handleDoH(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// udpWorker processes UDP DNS tasks from the server's task queue.
 func (s *Server) udpWorker() {
 	defer s.wg.Done()
 	for {
@@ -641,6 +649,7 @@ func (s *Server) udpWorker() {
 	}
 }
 
+// handleUDPConnection processes a single UDP DNS packet and sends the response back.
 func (s *Server) handleUDPConnection(ctx context.Context, pc net.PacketConn, addr net.Addr, data []byte) {
 	if errHandle := s.handlePacket(ctx, data, addr, func(resp []byte) error {
 		_, errWrite := pc.WriteTo(resp, addr)
@@ -650,6 +659,7 @@ func (s *Server) handleUDPConnection(ctx context.Context, pc net.PacketConn, add
 	}
 }
 
+// handleTCPConnection reads DNS messages from a TCP connection until the connection closes.
 func (s *Server) handleTCPConnection(ctx context.Context, conn net.Conn) {
 	defer func() { _ = conn.Close() }()
 	for {
@@ -692,6 +702,7 @@ func (s *Server) handleTCPConnection(ctx context.Context, conn net.Conn) {
 	}
 }
 
+// handleAXFR processes a DNS zone transfer (AXFR) request over TCP.
 func (s *Server) handleAXFR(ctx context.Context, conn net.Conn, request *packet.DNSPacket, rawData []byte) {
 	q := request.Questions[0]
 	if !strings.HasSuffix(q.Name, ".") {
@@ -812,6 +823,7 @@ func (s *Server) sendAXFRRecord(conn net.Conn, id uint16, q packet.DNSQuestion, 
 	packet.PutBuffer(resBuffer)
 }
 
+// sendTCPError sends a TCP DNS error response with the given RCODE.
 func (s *Server) sendTCPError(conn net.Conn, id uint16, rcode uint8) {
 	response := packet.NewDNSPacket()
 	response.Header.ID = id
@@ -826,6 +838,7 @@ func (s *Server) sendTCPError(conn net.Conn, id uint16, rcode uint8) {
 	packet.PutBuffer(resBuffer)
 }
 
+// handlePacket parses and dispatches a DNS packet to the appropriate handler.
 func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interface{}, sendFn func([]byte) error, protocol string) error {
 	start := time.Now()
 	defer func() {
@@ -1283,6 +1296,7 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 	return sendFn(resData)
 }
 
+// handleNotify processes a DNS NOTIFY (RFC 1996) and triggers a zone refresh if needed.
 func (s *Server) handleNotify(ctx context.Context, request *packet.DNSPacket, clientIP string, sendFn func([]byte) error) error {
 	if len(request.Questions) == 0 {
 		s.Logger.Warn("received NOTIFY without questions", "from", clientIP)
@@ -1322,6 +1336,7 @@ func (s *Server) handleNotify(ctx context.Context, request *packet.DNSPacket, cl
 	return s.sendUpdateResponse(response, sendFn)
 }
 
+// handleUpdate processes a DNS dynamic update (RFC 2136) request.
 func (s *Server) handleUpdate(ctx context.Context, request *packet.DNSPacket, rawData []byte, clientIP string, sendFn func([]byte) error) error {
 	s.Logger.Info("handling dynamic update", "id", request.Header.ID, "client", clientIP)
 
@@ -1438,6 +1453,7 @@ func (s *Server) handleUpdate(ctx context.Context, request *packet.DNSPacket, ra
 	return s.sendUpdateResponse(response, sendFn)
 }
 
+// handleIXFR processes an incremental zone transfer (IXFR) request over TCP.
 func (s *Server) handleIXFR(ctx context.Context, conn net.Conn, request *packet.DNSPacket, rawData []byte) {
 	q := request.Questions[0]
 	if !strings.HasSuffix(q.Name, ".") {
@@ -1682,6 +1698,7 @@ func (s *Server) handleIXFR(ctx context.Context, conn net.Conn, request *packet.
 	s.Logger.Info("IXFR completed", "zone", zone.Name)
 }
 
+// signResponse signs a DNS response with the zone's DNSSEC keys.
 func (s *Server) signResponse(ctx context.Context, zone *domain.Zone, response *packet.DNSPacket) {
 	// Sign Answers
 	if len(response.Answers) > 0 {
@@ -1860,6 +1877,7 @@ func (s *Server) fetchDNSKEYFromNetwork(_ context.Context, zoneName string) ([]p
 	return dnskeys, nil
 }
 
+// groupRecords groups DNS records by name and type for response assembly.
 func (s *Server) groupRecords(records []packet.DNSRecord) [][]packet.DNSRecord {
 	groups := make(map[string][]packet.DNSRecord)
 	var keys []string
@@ -1881,6 +1899,7 @@ func (s *Server) groupRecords(records []packet.DNSRecord) [][]packet.DNSRecord {
 	return res
 }
 
+// sendSingleRecordResponse sends a TCP DNS response containing a single resource record.
 func (s *Server) sendSingleRecordResponse(conn net.Conn, id uint16, q packet.DNSQuestion, rec packet.DNSRecord) {
 	resp := packet.NewDNSPacket()
 	resp.Header.ID = id
@@ -1899,6 +1918,7 @@ func (s *Server) sendSingleRecordResponse(conn net.Conn, id uint16, q packet.DNS
 	packet.PutBuffer(resBuffer)
 }
 
+// sendUpdateResponse serializes and sends a DNS UPDATE response.
 func (s *Server) sendUpdateResponse(resp *packet.DNSPacket, sendFn func([]byte) error) error {
 	resBuffer := packet.GetBuffer()
 	defer packet.PutBuffer(resBuffer)
@@ -1913,6 +1933,7 @@ type updateError struct {
 
 func (e updateError) Error() string { return e.msg }
 
+// checkPrerequisite evaluates a DNS UPDATE prerequisite record (RFC 2136 Section 2.4).
 func (s *Server) checkPrerequisite(ctx context.Context, pr packet.DNSRecord) error {
 	qTypeStr := queryTypeToRecordType(pr.Type)
 	records, errRecs := s.Repo.GetRecords(ctx, pr.Name, qTypeStr, "")
@@ -2024,6 +2045,7 @@ func (s *Server) prepareUpdate(zoneID string, up packet.DNSRecord) (domain.Updat
 	return op, change, nil
 }
 
+// notifySlaves sends DNS NOTIFY messages to all slave servers configured for a zone.
 func (s *Server) notifySlaves(ctx context.Context, zoneName string) {
 	select {
 	case <-ctx.Done():
@@ -2089,6 +2111,7 @@ func (s *Server) notifySlaves(ctx context.Context, zoneName string) {
 	}
 }
 
+// generateNSEC creates an NSEC record proving no records exist for a name (DNSSEC).
 func (s *Server) generateNSEC(ctx context.Context, zone *domain.Zone, queryName string) (packet.DNSRecord, error) {
 	iter, errZoneRecs := s.Repo.ListRecordsForZoneStreaming(ctx, zone.ID, zone.TenantID)
 	if errZoneRecs != nil {
@@ -2167,6 +2190,7 @@ func (s *Server) generateNSEC(ctx context.Context, zone *domain.Zone, queryName 
 	return nsec, nil
 }
 
+// generateNSEC3 creates an NSEC3 record for a query name (DNSSEC with NSEC3).
 func (s *Server) generateNSEC3(ctx context.Context, zone *domain.Zone, queryName string, wildcardName string) (packet.DNSRecord, error) {
 	params, errParams := s.Repo.GetRecords(ctx, zone.Name, "NSEC3PARAM", "")
 	if errParams != nil || len(params) == 0 {
@@ -2331,6 +2355,7 @@ type hashEntry struct {
 	hash []byte
 }
 
+// generateTypeBitMap creates the NSEC3 type bitmap window blocks.
 func (s *Server) generateTypeBitMap(types []domain.RecordType) []byte {
 	bits := make([]byte, 32)
 	maxType := 0
@@ -2362,6 +2387,7 @@ func (s *Server) generateTypeBitMap(types []domain.RecordType) []byte {
 	return res
 }
 
+// queryTypeToRecordType converts a packet query type to a domain record type.
 func queryTypeToRecordType(qType packet.QueryType) domain.RecordType {
 	switch qType {
 	case packet.A:

@@ -13,6 +13,7 @@ import (
 	"github.com/poyrazK/cloudDNS/internal/dns/packet"
 )
 
+// refreshZone initiates a zone refresh for a slave zone by querying the master for SOA.
 func (s *Server) refreshZone(ctx context.Context, zone *domain.Zone) {
 	if zone.MasterServer == "" {
 		s.Logger.Warn("slave zone has no master server configured", "zone", zone.Name)
@@ -80,6 +81,7 @@ func (s *Server) refreshZone(ctx context.Context, zone *domain.Zone) {
 	}
 }
 
+// performIXFR performs an incremental zone transfer from the master server.
 func (s *Server) performIXFR(ctx context.Context, zone *domain.Zone, masterAddr string, localSerial uint32) error {
 	conn, err := net.DialTimeout("tcp", masterAddr, 10*time.Second)
 	if err != nil {
@@ -257,6 +259,7 @@ func (s *Server) performIXFR(ctx context.Context, zone *domain.Zone, masterAddr 
 	return nil
 }
 
+// performAXFR performs a full zone transfer from the master server.
 func (s *Server) performAXFR(ctx context.Context, zone *domain.Zone, masterAddr string) error {
 	s.Logger.Info("starting AXFR", "zone", zone.Name, "master", masterAddr)
 

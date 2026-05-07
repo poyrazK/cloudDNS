@@ -22,6 +22,7 @@ type recursiveResolver struct {
 // Defaults to 30s but can be overridden in tests.
 var recursiveTimeout = 30 * time.Second
 
+// newRecursiveResolver creates a recursive resolver with IANA root server hints and fallback resolvers.
 func newRecursiveResolver() *recursiveResolver {
 	return &recursiveResolver{
 		rootHints: []string{
@@ -46,6 +47,7 @@ func newRecursiveResolver() *recursiveResolver {
 	}
 }
 
+// getShuffledRoots returns root hints rotated by a random offset for unpredictable ordering.
 func (r *recursiveResolver) getShuffledRoots() []string {
 	shuffled := make([]string, len(r.rootHints))
 	copy(shuffled, r.rootHints)
@@ -59,6 +61,7 @@ func (r *recursiveResolver) getShuffledRoots() []string {
 	return result
 }
 
+// resolveRecursive performs iterative DNS resolution starting from root servers.
 func (s *Server) resolveRecursive(name string, qType packet.QueryType) (*packet.DNSPacket, error) {
 	// Total timeout to prevent indefinite blocking on failing root servers
 	const errRecursiveTimeout = "recursive resolution timeout"
@@ -192,16 +195,19 @@ func (s *Server) resolveRecursive(name string, qType packet.QueryType) (*packet.
 	return nil, fmt.Errorf("recursion failed after trying roots and fallbacks: %w", lastErr)
 }
 
+// generateTransactionID returns a cryptographically random 16-bit DNS transaction ID.
 func generateTransactionID() uint16 {
 	var id uint16
 	_ = binary.Read(rand.Reader, binary.BigEndian, &id)
 	return id
 }
 
+// sendQuery sends a UDP DNS query to the specified server without recursion desired.
 func (s *Server) sendQuery(server string, name string, qType packet.QueryType) (*packet.DNSPacket, error) {
 	return s.sendQueryInternal(server, name, qType, false)
 }
 
+// sendQueryInternal sends a DNS query and validates the transaction ID in the response.
 func (s *Server) sendQueryInternal(server string, name string, qType packet.QueryType, recursive bool) (*packet.DNSPacket, error) {
 	conn, err := net.DialTimeout("udp", server, 5*time.Second)
 	if err != nil {
@@ -250,6 +256,7 @@ func (s *Server) sendQueryInternal(server string, name string, qType packet.Quer
 	return resp, nil
 }
 
+// sendTCPQuery sends a TCP DNS query with a 2-byte length prefix.
 func (s *Server) sendTCPQuery(server string, name string, qType packet.QueryType) (*packet.DNSPacket, error) {
 	conn, err := net.DialTimeout("tcp", server, 5*time.Second)
 	if err != nil {
@@ -297,6 +304,7 @@ func (s *Server) sendTCPQuery(server string, name string, qType packet.QueryType
 	return resp, nil
 }
 
+// findNextNS extracts the next nameserver address from a DNS response's authority and additional sections.
 func (s *Server) findNextNS(resp *packet.DNSPacket) (string, bool) {
 	// 1. Look for NS records in the Authority section and their corresponding glue in Additional
 	for _, auth := range resp.Authorities {
