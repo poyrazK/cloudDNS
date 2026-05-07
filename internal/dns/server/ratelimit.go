@@ -47,6 +47,7 @@ func (h *bucketIdleHeap) Pop() any {
 	return item
 }
 
+// newRateLimiter creates a new rate limiter with the given token rate, burst, and max bucket count.
 func newRateLimiter(rate float64, burst int, maxBuckets int) *rateLimiter {
 	h := bucketIdleHeap{}
 	heap.Init(&h)
@@ -59,6 +60,7 @@ func newRateLimiter(rate float64, burst int, maxBuckets int) *rateLimiter {
 	}
 }
 
+// Allow checks if a request from the given IP is allowed under the token bucket limits.
 func (rl *rateLimiter) Allow(ip string) bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
