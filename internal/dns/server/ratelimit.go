@@ -3,7 +3,10 @@ package server
 import (
 	"container/heap"
 	"sync"
+	"sync/atomic"
 	"time"
+
+	"github.com/poyrazK/cloudDNS/internal/infrastructure/metrics"
 )
 
 // rateLimiter implements a simple per-IP token bucket with O(1) eviction.
@@ -14,6 +17,7 @@ type rateLimiter struct {
 	burst      int     // max tokens
 	maxBuckets int     // maximum buckets to store (bounds memory)
 	idleHeap   bucketIdleHeap
+	rateLimited atomic.Uint64
 }
 
 type bucket struct {
@@ -99,6 +103,8 @@ func (rl *rateLimiter) Allow(ip string) bool {
 		return true
 	}
 
+	rl.rateLimited.Add(1)
+	metrics.RateLimitedTotal.Inc()
 	return false
 }
 
@@ -145,4 +151,9 @@ func (rl *rateLimiter) CleanupLoop(done <-chan struct{}) {
 			rl.Cleanup()
 		}
 	}
+}
+
+// RateLimited returns the total number of queries rejected by rate limiting.
+func (rl *rateLimiter) RateLimited() uint64 {
+	return rl.rateLimited.Load()
 }
