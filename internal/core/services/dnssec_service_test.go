@@ -13,8 +13,11 @@ import (
 )
 
 type mockDNSSECRepo struct {
-	keys []domain.DNSSECKey
-	err  error
+	keys     []domain.DNSSECKey
+	zones    []domain.Zone
+	err      error
+	keysErr  error
+	listErr  error
 }
 
 func (m *mockDNSSECRepo) GetRecords(_ context.Context, _ string, _ domain.RecordType, _ string) ([]domain.Record, error) {
@@ -44,7 +47,10 @@ func (m *mockDNSSECRepo) CreateZoneWithRecords(_ context.Context, _ *domain.Zone
 func (m *mockDNSSECRepo) CreateRecord(_ context.Context, _ *domain.Record) error        { return nil }
 func (m *mockDNSSECRepo) BatchCreateRecords(_ context.Context, _ []domain.Record) error { return nil }
 func (m *mockDNSSECRepo) ListZones(_ context.Context, _ string) ([]domain.Zone, error) {
-	return nil, nil
+	if m.listErr != nil {
+		return nil, m.listErr
+	}
+	return m.zones, nil
 }
 func (m *mockDNSSECRepo) DeleteZone(_ context.Context, _, _ string) error      { return nil }
 func (m *mockDNSSECRepo) DeleteRecord(_ context.Context, _, _, _ string) error { return nil }
@@ -90,8 +96,8 @@ func (m *mockDNSSECRepo) CreateKey(_ context.Context, key *domain.DNSSECKey) err
 }
 
 func (m *mockDNSSECRepo) ListKeysForZone(_ context.Context, zoneID string) ([]domain.DNSSECKey, error) {
-	if m.err != nil {
-		return nil, m.err
+	if m.keysErr != nil {
+		return nil, m.keysErr
 	}
 	var result []domain.DNSSECKey
 	for _, k := range m.keys {
@@ -289,6 +295,55 @@ func TestSignRRSet(t *testing.T) {
 	_, err = svc.SignRRSet(ctx, "e.com.", "unknown", records)
 	if err == nil {
 		t.Errorf("Expected error when no active key found")
+	}
+}
+
+// TestCollectKeyStats_AllZonesFail verifies that CollectKeyStats returns an
+// empty slice (not an error) when ListZones succeeds but all ListKeysForZone
+// calls fail. This is the "all-zones-fail" edge case.
+func TestCollectKeyStats_AllZonesFail(t *testing.T) {
+	repo := &mockDNSSECRepo{
+		zones: []domain.Zone{
+			{ID: "z1", Name: "example.com."},
+			{ID: "z2", Name: "test.com."},
+		},
+		keysErr: errors.New("db error on ListKeysForZone"),
+	}
+	svc := NewDNSSECService(repo)
+	ctx := context.Background()
+
+	stats, err := svc.CollectKeyStats(ctx)
+	if err != nil {
+		t.Fatalf("CollectKeyStats should not return error on ListKeysForZone failure, got: %v", err)
+	}
+	if len(stats) != 0 {
+		t.Errorf("Expected empty stats slice when all zones fail, got %d", len(stats))
+	}
+}
+
+// TestCollectKeyStats_Normal verifies CollectKeyStats returns correct stats
+// when keys exist for zones.
+func TestCollectKeyStats_Normal(t *testing.T) {
+	repo := &mockDNSSECRepo{
+		zones: []domain.Zone{
+			{ID: "z1", Name: "example.com."},
+		},
+		keys: []domain.DNSSECKey{
+			{ID: "k1", ZoneID: "z1", KeyType: "ZSK", Active: true, Algorithm: 13, CreatedAt: time.Now()},
+		},
+	}
+	svc := NewDNSSECService(repo)
+	ctx := context.Background()
+
+	stats, err := svc.CollectKeyStats(ctx)
+	if err != nil {
+		t.Fatalf("CollectKeyStats failed: %v", err)
+	}
+	if len(stats) != 1 {
+		t.Errorf("Expected 1 stat, got %d", len(stats))
+	}
+	if stats[0].KeyType != "zsk" {
+		t.Errorf("Expected key type 'zsk', got %s", stats[0].KeyType)
 	}
 }
 

@@ -1,8 +1,11 @@
 package metrics
 
 import (
+	"context"
 	"testing"
 	"time"
+
+	"github.com/poyrazK/cloudDNS/internal/core/domain"
 )
 
 func TestMetricsDeclarations(t *testing.T) {
@@ -111,4 +114,77 @@ func TestDerivedMetricCollector_Stop(t *testing.T) {
 	collector := NewDerivedMetricCollector(time.Hour)
 	collector.Stop()
 	// Should not hang or panic
+}
+
+// mockZoneRecordRepo is a mock implementation of ZoneRecordRepo for testing.
+type mockZoneRecordRepo struct {
+	zones   []domain.Zone
+	records map[string][]domain.Record // keyed by zoneID
+}
+
+func (m *mockZoneRecordRepo) ListZones(_ context.Context, _ string) ([]domain.Zone, error) {
+	return m.zones, nil
+}
+
+func (m *mockZoneRecordRepo) ListRecordsForZone(_ context.Context, zoneID string, _ string) ([]domain.Record, error) {
+	if recs, ok := m.records[zoneID]; ok {
+		return recs, nil
+	}
+	return nil, nil
+}
+
+func TestZoneRecordCounter(t *testing.T) {
+	repo := &mockZoneRecordRepo{
+		zones: []domain.Zone{
+			{ID: "z1", Name: "example.com."},
+			{ID: "z2", Name: "test.com."},
+		},
+		records: map[string][]domain.Record{
+			"z1": {
+				{ID: "r1", ZoneID: "z1", Name: "www.example.com.", Type: "A"},
+				{ID: "r2", ZoneID: "z1", Name: "www.example.com.", Type: "AAAA"},
+			},
+			"z2": {
+				{ID: "r3", ZoneID: "z2", Name: "test.com.", Type: "MX"},
+			},
+		},
+	}
+
+	counter := NewZoneRecordCounter(repo, 50*time.Millisecond)
+	ctx := context.Background()
+
+	counter.Start(ctx)
+
+	// Let it collect at least once
+	time.Sleep(100 * time.Millisecond)
+	counter.Stop()
+	// Should not hang or panic
+}
+
+func TestZoneRecordCounter_EmptyZones(t *testing.T) {
+	repo := &mockZoneRecordRepo{
+		zones:   []domain.Zone{},
+		records: map[string][]domain.Record{},
+	}
+
+	counter := NewZoneRecordCounter(repo, 50*time.Millisecond)
+	ctx := context.Background()
+
+	counter.Start(ctx)
+	time.Sleep(100 * time.Millisecond)
+	counter.Stop()
+}
+
+func TestZoneRecordCounter_ZonesWithNoRecords(t *testing.T) {
+	repo := &mockZoneRecordRepo{
+		zones:   []domain.Zone{{ID: "z1", Name: "empty.com."}},
+		records: map[string][]domain.Record{}, // no records for z1
+	}
+
+	counter := NewZoneRecordCounter(repo, 50*time.Millisecond)
+	ctx := context.Background()
+
+	counter.Start(ctx)
+	time.Sleep(100 * time.Millisecond)
+	counter.Stop()
 }
