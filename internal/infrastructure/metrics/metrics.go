@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/poyrazK/cloudDNS/internal/core/domain"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
@@ -246,8 +247,8 @@ type ZoneRecordCounter struct {
 
 // ZoneRecordRepo is the interface for fetching zone and record counts.
 type ZoneRecordRepo interface {
-	ListZones(ctx context.Context, tenantID string) ([]interface{}, error)
-	ListRecordsForZone(ctx context.Context, zoneID string, tenantID string) ([]interface{}, error)
+	ListZones(ctx context.Context, tenantID string) ([]domain.Zone, error)
+	ListRecordsForZone(ctx context.Context, zoneID string, tenantID string) ([]domain.Record, error)
 }
 
 // NewZoneRecordCounter creates a counter that updates zone/record metrics periodically.

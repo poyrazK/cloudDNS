@@ -111,3 +111,22 @@ func TestRateLimiter_MaxBuckets(t *testing.T) {
 		t.Errorf("Should still have 5 buckets after eviction, got %d", bucketCount)
 	}
 }
+
+func TestRateLimiter_RateLimited(t *testing.T) {
+	rl := newRateLimiter(1.0, 1, 100) // 1 token/sec, burst 1
+
+	// First request should succeed (bucket just created with full burst)
+	if !rl.Allow("192.168.1.1") {
+		t.Fatal("first request should be allowed")
+	}
+
+	// Exhaust the bucket
+	if rl.Allow("192.168.1.1") {
+		t.Fatal("second request should be rate limited")
+	}
+
+	// Now RateLimited() should be > 0
+	if rl.RateLimited() == 0 {
+		t.Errorf("expected rate limited count > 0 after exhaustion")
+	}
+}

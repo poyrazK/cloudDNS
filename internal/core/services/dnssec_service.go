@@ -201,8 +201,8 @@ func (s *DNSSECService) SignRRSet(ctx context.Context, zoneName string, zoneID s
 	return sigs, nil
 }
 
-// KeyStats holds DNSSEC key statistics for metrics.
-type KeyStats struct {
+// keyStats holds DNSSEC key statistics for metrics.
+type keyStats struct {
 	ZoneID     string
 	ZoneName   string
 	KeyType    string
@@ -212,13 +212,13 @@ type KeyStats struct {
 
 // CollectKeyStats returns statistics for all active DNSSEC keys.
 // Used by the metrics collector to update DNSSEC key age metrics.
-func (s *DNSSECService) CollectKeyStats(ctx context.Context) ([]KeyStats, error) {
+func (s *DNSSECService) CollectKeyStats(ctx context.Context) ([]keyStats, error) {
 	zones, err := s.repo.ListZones(ctx, "")
 	if err != nil {
 		return nil, err
 	}
 
-	var stats []KeyStats
+	var stats []keyStats
 	now := time.Now()
 	for _, zone := range zones {
 		keys, err := s.repo.ListKeysForZone(ctx, zone.ID)
@@ -229,7 +229,7 @@ func (s *DNSSECService) CollectKeyStats(ctx context.Context) ([]KeyStats, error)
 			if !k.Active {
 				continue
 			}
-			stats = append(stats, KeyStats{
+			stats = append(stats, keyStats{
 				ZoneID:     zone.ID,
 				ZoneName:   zone.Name,
 				KeyType:    strings.ToLower(k.KeyType),
