@@ -160,7 +160,7 @@ func (m *HealthMonitor) probeHTTP(ctx context.Context, target string) (domain.He
 	return domain.HealthStatusUnhealthy, fmt.Sprintf("HTTP status: %d", resp.StatusCode)
 }
 
-// probeTCP attempts a TCP connection
+// probeTCP attempts a TCP connection and returns healthy if the connection succeeds.
 func (m *HealthMonitor) probeTCP(ctx context.Context, target string) (domain.HealthStatus, string) {
 	dialer := &net.Dialer{Timeout: 3 * time.Second}
 	conn, err := dialer.DialContext(ctx, "tcp", target)
