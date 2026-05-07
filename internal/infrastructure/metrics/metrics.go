@@ -292,9 +292,10 @@ func (c *ZoneRecordCounter) Stop() {
 
 func (c *ZoneRecordCounter) collect(ctx context.Context) {
 	zones, err := c.repo.ListZones(ctx, "")
-	if err == nil {
-		ZonesTotal.Set(float64(len(zones)))
+	if err != nil {
+		return
 	}
+	ZonesTotal.Set(float64(len(zones)))
 
 	// Count records across all zones
 	var totalRecords int

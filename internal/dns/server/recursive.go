@@ -175,6 +175,7 @@ func (s *Server) resolveRecursive(name string, qType packet.QueryType) (*packet.
 	// Check total resolution timeout before attempting fallbacks
 	if time.Since(resolveStart) >= recursiveTimeout {
 		s.Logger.Warn("recursive resolution timed out before fallback", "name", name)
+		metrics.RecursiveResolutionsTotal.WithLabelValues("timeout").Inc()
 		return nil, errors.New(errRecursiveTimeout)
 	}
 	s.Logger.Info("iterative resolution failed or inconclusive, trying fallbacks", "name", name)
@@ -188,8 +189,13 @@ func (s *Server) resolveRecursive(name string, qType packet.QueryType) (*packet.
 		serverAddr := net.JoinHostPort(fallback, "53")
 		// Use sendQueryInternal with RecursionDesired=true for fallbacks
 		resp, err := s.sendQueryInternal(serverAddr, name, qType, true)
-		if err == nil && (resp.Header.ResCode == 0 || resp.Header.ResCode == 3) {
+		if err == nil && resp.Header.ResCode == 0 {
+			metrics.RecursiveResolutionsTotal.WithLabelValues("success").Inc()
 			s.Logger.Info("fallback resolution successful", "name", name, "fallback", fallback)
+			return resp, nil
+		}
+		if err == nil && resp.Header.ResCode == 3 {
+			metrics.RecursiveResolutionsTotal.WithLabelValues("nxdomain").Inc()
 			return resp, nil
 		}
 		if err != nil {
