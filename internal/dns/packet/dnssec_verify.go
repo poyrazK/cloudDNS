@@ -40,6 +40,10 @@ var (
 	ErrNSEC3ChainBroken = errors.New("dnssec: nsec3 chain broken")
 	// ErrNSEC3NoMatchingName indicates the NSEC3 owner name doesn't match.
 	ErrNSEC3NoMatchingName = errors.New("dnssec: nsec3 owner name hash mismatch")
+	// ErrNSEC3NoClosestEncloser indicates no closest-encloser could be found in the NSEC3 chain.
+	ErrNSEC3NoClosestEncloser = errors.New("dnssec: nsec3 no closest-encloser found")
+	// ErrNSEC3NoNextCloser indicates the next-closer proof is missing or invalid.
+	ErrNSEC3NoNextCloser = errors.New("dnssec: nsec3 no next-closer proof")
 )
 
 // writeBytes writes a byte slice to the buffer using individual byte writes.
@@ -758,7 +762,83 @@ func TypeBitMapPresent(bitmap []byte, queryType uint16) bool {
 	return false
 }
 
+// wildcardName returns the wildcard name for a given label count.
+// e.g., wildcardName("www.example.com.", 1) returns "*.example.com."
+func wildcardName(query string, labelCount int) string {
+	name := strings.TrimSuffix(query, ".")
+	labels := strings.Split(name, ".")
+	if labelCount >= len(labels) {
+		return "*."
+	}
+	// labels[0] is the deepest label; we want labelCount labels from the right
+	// e.g., labels = ["www", "example", "com"], labelCount = 1 → ["com"] → "*.com."
+	start := len(labels) - labelCount
+	return "*." + strings.Join(labels[start:], ".") + "."
+}
+
+// nsec3HashLessThan returns true if hash a < hash b lexicographically.
+func nsec3HashLessThan(a, b []byte) bool {
+	return bytes.Compare(a, b) < 0
+}
+
+// findClosestEncloserNSEC3 walks the query name labels from longest to shortest,
+// computing HashName for each ancestor until a matching NSEC3 owner is found.
+// Returns the closest-encloser NSEC3 record, its owner hash, and the query ancestor name.
+// If no NSEC3 matches any ancestor, returns (nil, nil, "").
+func findClosestEncloserNSEC3(nsec3Records []DNSRecord, queryName string, alg uint8, iterations uint16, salt []byte) (*DNSRecord, []byte, string) {
+	name := strings.TrimSuffix(queryName, ".")
+	labels := strings.Split(name, ".")
+
+	// Build ancestor names from longest to shortest (most labels to fewest)
+	// For query "www.example.com.", ancestors in order are:
+	// "www.example.com.", "example.com.", "com."
+	for i := 0; i < len(labels); i++ {
+		ancestor := strings.Join(labels[i:], ".") + "."
+		ancestorHash := HashName(ancestor, alg, iterations, salt)
+		encHashStr := string(ancestorHash)
+
+		for _, nsec3 := range nsec3Records {
+			ownerHash := decodeBase32Hash(nsec3.Name)
+			if ownerHash != nil && encHashStr == string(ownerHash) {
+				return &nsec3, ownerHash, ancestor
+			}
+		}
+	}
+	return nil, nil, ""
+}
+
+// nextCloserNSEC3 finds the NSEC3 record with the smallest hash that is strictly
+// greater than the given closestEncloserHash, wrapping at the zone boundary.
+// This provides the next-closer proof per RFC 5155 Section 7.2.1.
+func nextCloserNSEC3(nsec3Records []DNSRecord, closestEncloserHash []byte) *DNSRecord {
+	var nextCloser *DNSRecord
+	for _, nsec3 := range nsec3Records {
+		ownerHash := decodeBase32Hash(nsec3.Name)
+		if ownerHash == nil {
+			continue
+		}
+		// Must be strictly greater than closest-encloser
+		if nsec3HashLessThan(closestEncloserHash, ownerHash) {
+			if nextCloser == nil || nsec3HashLessThan(ownerHash, decodeBase32Hash(nextCloser.Name)) {
+				nextCloser = &nsec3
+			}
+		}
+	}
+	return nextCloser
+}
+
 // ValidateNSEC3Proof validates NSEC3 records for an NXDOMAIN or no-data response.
+// It implements RFC 5155 Section 7.2.1 closest-encloser + next-closer chain validation
+// and RFC 5155 Section 7.2.14 wildcard denial proof.
+//
+// For NXDOMAIN responses, the proof chain requires:
+//  1. A closest-encloser NSEC3 whose owner hash matches the hashed closest-encloser name
+//  2. A next-closer NSEC3 with a hash greater than the closest-encloser, proving
+//     no names exist between closest-encloser and query name
+//  3. A wildcard NSEC3 proving no wildcard exists at (closest-encloser + 1) label
+//
+// For no-data responses, the NSEC3 at the exact query name hash must show the
+// queried type bit is absent in its type bitmap.
 // It verifies:
 // 1. All NSEC3 records have valid format (hash algorithm = 1)
 // 2. The NSEC3 records prove the correct response (NXDOMAIN, no-data, or wildcard)
@@ -787,43 +867,69 @@ func ValidateNSEC3Proof(nsec3Records []DNSRecord, queryName string, queryType ui
 		}
 	}
 
-	// Step 3: For NXDOMAIN, we need closest-encloser proof
-	// The NSEC3 records should show:
-	// - Closest encloser: covers the query name
-	// - Next closer: shows no names between closest encloser and query
-	// For simplicity, verify at least one NSEC3 covers the query name
-
-	// Use the first NSEC3 record's parameters to hash the query name
+	// Step 3: Find closest-encloser by walking query name labels longest to shortest
 	refNSEC3 := nsec3Records[0]
-	queryHash := HashName(queryName, refNSEC3.HashAlg, refNSEC3.Iterations, refNSEC3.Salt)
-
-	// Find NSEC3 that covers the query hash
-	covered := false
-	for _, nsec3 := range nsec3Records {
-		if nsec3CoversHash(decodeBase32Hash(nsec3.Name), nsec3.NextHash, queryHash) {
-			covered = true
-			break
-		}
+	closestNSEC3, closestHash, _ := findClosestEncloserNSEC3(
+		nsec3Records, queryName, refNSEC3.HashAlg, refNSEC3.Iterations, refNSEC3.Salt,
+	)
+	if closestNSEC3 == nil {
+		return ErrNSEC3NoClosestEncloser
 	}
 
-	if !covered {
-		return ErrNSEC3InvalidProof
-	}
-
-	// Step 4: For no-data responses, verify the NSEC3 covers the type
+	// Step 4: For no-data responses (queryType != 0), check if the exact query name NSEC3
+	// proves no-data before doing the full NXDOMAIN chain validation.
+	// If the NSEC3 at the exact query name hash is the closest-encloser and the type
+	// bit is absent, it's a valid no-data proof.
 	if queryType != 0 && queryType != uint16(NSEC3) && queryType != uint16(NSEC3PARAM) {
-		// Find the NSEC3 whose owner is the exact query name hash
+		queryHash := HashName(queryName, refNSEC3.HashAlg, refNSEC3.Iterations, refNSEC3.Salt)
 		for _, nsec3 := range nsec3Records {
 			ownerHash := decodeBase32Hash(nsec3.Name)
-			if string(ownerHash) == string(queryHash) {
-				// This NSEC3 is for the exact name - check if it has the type
+			if ownerHash != nil && string(ownerHash) == string(queryHash) {
 				if TypeBitMapPresent(nsec3.TypeBitMap, queryType) {
-					return ErrNSEC3InvalidProof // Type exists, shouldn't be here
+					return ErrNSEC3InvalidProof // Type exists at name — not no-data
 				}
-				// Type not in bitmap = correct no-data proof
+				// Type not in bitmap — valid no-data proof, we're done
 				return nil
 			}
 		}
+	}
+
+	// Step 5: Find next-closer NSEC3 (smallest hash > closest-encloser hash)
+	// The next-closer proves no names exist between closest-encloser and query name
+	nextCloserNSEC3 := nextCloserNSEC3(nsec3Records, closestHash)
+	if nextCloserNSEC3 == nil {
+		// No next-closer means the zone ends after closest-encloser
+		// The closest-encloser's own NextHash must cover the query hash to prove
+		// that no names exist between closest-encloser and query
+		if !nsec3CoversHash(closestHash, closestNSEC3.NextHash, closestHash) {
+			// Self-coverage check: closest-encloser must prove the gap
+			return ErrNSEC3NoNextCloser
+		}
+	} else {
+		// Next-closer exists — verify the gap between closest-encloser and next-closer
+		// covers the query hash. The query hash must fall between closest and next.
+		// The range is: closestHash <= queryHash < nextCloserHash
+		nextHash := decodeBase32Hash(nextCloserNSEC3.Name)
+		if !nsec3CoversHash(closestHash, nextHash, closestHash) {
+			return ErrNSEC3NoNextCloser
+		}
+	}
+
+	// Step 6: Verify no wildcard exists at (closest-encloser + 1 label)
+	// e.g., for query "www.example.com." with closest-encloser "example.com.",
+	// wildcard would be "*.example.com."
+	wildcard := wildcardName(queryName, 1)
+	wildcardHash := HashName(wildcard, refNSEC3.HashAlg, refNSEC3.Iterations, refNSEC3.Salt)
+	wildcardFound := false
+	for _, nsec3 := range nsec3Records {
+		ownerHash := decodeBase32Hash(nsec3.Name)
+		if ownerHash != nil && string(ownerHash) == string(wildcardHash) {
+			wildcardFound = true
+			break
+		}
+	}
+	if wildcardFound {
+		return ErrNSEC3InvalidProof // wildcard at closest-encloser+1 exists — invalid NXDOMAIN
 	}
 
 	return nil
