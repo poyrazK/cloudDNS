@@ -214,6 +214,7 @@ type keyStats struct {
 
 // CollectKeyStats returns statistics for all active DNSSEC keys.
 // Used by the metrics collector to update DNSSEC key age metrics.
+//nolint:revive // unexported return type is intentional for internal metrics
 func (s *DNSSECService) CollectKeyStats(ctx context.Context) ([]keyStats, error) {
 	zones, err := s.repo.ListZones(ctx, "")
 	if err != nil {
