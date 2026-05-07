@@ -26,6 +26,7 @@ import (
 	"github.com/poyrazK/cloudDNS/internal/infrastructure/metrics"
 )
 
+// main is the entry point for the cloudDNS daemon.
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -36,6 +37,7 @@ func main() {
 	}
 }
 
+// run is the main entry point for the cloudDNS daemon, initializing all components.
 func run(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -352,6 +354,7 @@ func run(ctx context.Context) error {
 	return nil
 }
 
+// getEnvUint32 returns an environment variable as uint32, or a default if unset/invalid.
 func getEnvUint32(key string, def uint32) uint32 {
 	val := os.Getenv(key)
 	if val == "" {

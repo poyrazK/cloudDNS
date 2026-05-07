@@ -19,6 +19,7 @@ type commandExecutor interface {
 
 type realExecutor struct{}
 
+// Run executes a system command and returns its combined stdout/stderr output.
 func (e *realExecutor) Run(ctx context.Context, name string, arg ...string) ([]byte, error) {
 	return exec.CommandContext(ctx, name, arg...).CombinedOutput()
 }
@@ -114,6 +115,7 @@ func (a *SystemVIPAdapter) Unbind(ctx context.Context, vip, iface string) error 
 	return nil
 }
 
+// handleUnsupportedOS returns an error indicating the current OS is not supported for VIP management.
 func (a *SystemVIPAdapter) handleUnsupportedOS() error {
 	return fmt.Errorf("unsupported OS for VIP management: %s", a.os)
 }
