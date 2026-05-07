@@ -92,7 +92,20 @@ CREATE INDEX idx_dns_zones_name_lower ON dns_zones (LOWER(name));
 
 -- Expression index for efficient suffix-match zone lookup via reversed name
 -- Enables PostgreSQL to use index range scan instead of full table scan
-CREATE INDEX idx_dns_zones_name_reverse ON dns_zones (REVERSE(name));
+CREATE INDEX IF NOT EXISTS idx_dns_zones_name_reverse ON dns_zones (REVERSE(name));
+
+-- Composite indexes for split-horizon DNS queries
+-- Covers zone_id + LOWER(name) + type pattern used by DeleteRecordsByNameAndType
+CREATE INDEX IF NOT EXISTS idx_dns_records_zone_name_type ON dns_records(zone_id, LOWER(name), type);
+
+-- Covers zone_id + LOWER(name) pattern used by DeleteRecordsByName
+CREATE INDEX IF NOT EXISTS idx_dns_records_zone_name ON dns_records(zone_id, LOWER(name));
+
+-- Covers zone_id used by DeleteRecordsForZone bulk deletes
+CREATE INDEX IF NOT EXISTS idx_dns_records_zone_id ON dns_records(zone_id);
+
+-- Tenant-scoped zone listing (ListZones, tenant isolation)
+CREATE INDEX IF NOT EXISTS idx_dns_zones_tenant_id ON dns_zones(tenant_id);
 
 CREATE TABLE IF NOT EXISTS api_keys (
     id UUID PRIMARY KEY,
