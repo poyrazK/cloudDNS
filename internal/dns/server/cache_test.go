@@ -132,6 +132,9 @@ func TestCacheGetIntoShortData(t *testing.T) {
 	if !found {
 		t.Fatalf("expected to find key %s", key)
 	}
+	if len(data) == 0 {
+		t.Fatalf("expected non-empty data for key %s", key)
+	}
 	// Data should be unchanged (no injection into <2 bytes)
 	if data[0] != 1 {
 		t.Errorf("expected data[0]=1, got %d", data[0])
