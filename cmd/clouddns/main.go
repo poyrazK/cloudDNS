@@ -37,6 +37,55 @@ func main() {
 	}
 }
 
+// processDatabaseURL applies DATABASE_HOST overrides and SSL mode settings.
+// It handles both URL format (postgres://...) and DSN format (user=...).
+// Exported for testing.
+func processDatabaseURL(dbURL, hostOverride string) string {
+	if dbURL == "" {
+		dbURL = "postgres://postgres:postgres@localhost:5432/clouddns?sslmode=disable"
+	}
+
+	if hostOverride == "" {
+		return dbURL
+	}
+
+	// Detect URL format vs DSN format by checking for ://
+	isURL := strings.HasPrefix(dbURL, "postgres://") || strings.HasPrefix(dbURL, "postgresql://")
+	if isURL {
+		u, _ := url.Parse(dbURL)
+		u.Host = hostOverride
+		q := u.Query()
+		if hostOverride == "127.0.0.1" || hostOverride == "localhost" || hostOverride == "::1" {
+			q.Set("sslmode", "disable")
+		}
+		u.RawQuery = q.Encode()
+		return u.String()
+	}
+	// DSN format (user=... password=... host=... etc)
+	isLocalHost := hostOverride == "127.0.0.1" || hostOverride == "localhost" || hostOverride == "::1"
+	if isLocalHost {
+		dbURL = strings.ReplaceAll(dbURL, "sslmode=verify-full", "sslmode=disable")
+		dbURL = strings.ReplaceAll(dbURL, "sslmode=require", "sslmode=disable")
+		dbURL = strings.ReplaceAll(dbURL, "sslmode=prefer", "sslmode=disable")
+		if !strings.Contains(dbURL, "sslmode=") {
+			dbURL += " sslmode=disable"
+		}
+	}
+	if strings.Contains(dbURL, "host=") {
+		parts := strings.Split(dbURL, " ")
+		for i, p := range parts {
+			if strings.HasPrefix(p, "host=") {
+				parts[i] = "host=" + hostOverride
+			}
+		}
+		dbURL = strings.Join(parts, " ")
+	} else {
+		dbURL += " host=" + hostOverride
+	}
+
+	return dbURL
+}
+
 // run is the main entry point for the cloudDNS daemon, initializing all components.
 func run(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(ctx)
@@ -77,50 +126,7 @@ func run(ctx context.Context) error {
 
 	slog.SetDefault(logger)
 
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		dbURL = "postgres://postgres:postgres@localhost:5432/clouddns?sslmode=disable"
-	}
-
-	// Allow overriding host for Cloud SQL Proxy sidecar
-	if hostOverride := os.Getenv("DATABASE_HOST"); hostOverride != "" && dbURL != "" && dbURL != "none" {
-		if u, err := url.Parse(dbURL); err == nil {
-			u.Host = hostOverride
-			// Only disable SSL for local proxy connections (Cloud SQL Proxy on localhost).
-			// Remote hosts should respect the user's SSL mode preference.
-			q := u.Query()
-			if hostOverride == "127.0.0.1" || hostOverride == "localhost" || hostOverride == "::1" {
-				q.Set("sslmode", "disable")
-			}
-			u.RawQuery = q.Encode()
-			dbURL = u.String()
-		} else if strings.Contains(dbURL, "=") {
-			// Handle DSN format (e.g., "user=... password=...")
-			// Only disable SSL for local connections to Cloud SQL Proxy
-			isLocalHost := hostOverride == "127.0.0.1" || hostOverride == "localhost" || hostOverride == "::1"
-			if isLocalHost {
-				dbURL = strings.ReplaceAll(dbURL, "sslmode=verify-full", "sslmode=disable")
-				dbURL = strings.ReplaceAll(dbURL, "sslmode=require", "sslmode=disable")
-				dbURL = strings.ReplaceAll(dbURL, "sslmode=prefer", "sslmode=disable")
-				if !strings.Contains(dbURL, "sslmode=") {
-					dbURL += " sslmode=disable"
-				}
-			}
-			// Host override in DSN
-			if strings.Contains(dbURL, "host=") {
-				// Very basic regex-like replacement for host
-				parts := strings.Split(dbURL, " ")
-				for i, p := range parts {
-					if strings.HasPrefix(p, "host=") {
-						parts[i] = "host=" + hostOverride
-					}
-				}
-				dbURL = strings.Join(parts, " ")
-			} else {
-				dbURL += " host=" + hostOverride
-			}
-		}
-	}
+	dbURL := processDatabaseURL(os.Getenv("DATABASE_URL"), os.Getenv("DATABASE_HOST"))
 
 	if dbURL != "none" {
 		parsedURL, err := url.Parse(dbURL)
