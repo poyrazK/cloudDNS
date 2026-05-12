@@ -494,10 +494,10 @@ func (s *Server) Run(ctx context.Context) error {
 						_ = c.SetReadDeadline(time.Now().Add(udpReadDeadline))
 						continue
 					}
-					// Allocate fresh slice per packet to avoid aliasing with buf
-					packetData := make([]byte, n)
-					copy(packetData, buf[:n])
-					s.udpQueue <- udpTask{addr: addr, data: packetData, conn: c}
+					// buf[:n:n] shares the backing array — the channel send completes
+					// before the next ReadFrom, so the array is not overwritten.
+					data := buf[:n:n]
+					s.udpQueue <- udpTask{addr: addr, data: data, conn: c}
 				}
 			}
 		}(conn)
@@ -972,8 +972,8 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 		metrics.RecordCacheHit()
 		metrics.QueriesTotal.WithLabelValues(qTypeLabel, "0", protocol).Inc()
 		metrics.QueryDuration.WithLabelValues("cache_l1").Observe(time.Since(start).Seconds())
-		err := sendFn(data)
 		lock.Unlock()
+		err := sendFn(data)
 		return err
 	}
 	metrics.CacheOperations.WithLabelValues("l1", "miss").Inc()

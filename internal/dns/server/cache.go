@@ -73,10 +73,8 @@ func (c *DNSCache) Get(key string) ([]byte, bool) {
 	return item.data, true
 }
 
-// GetInto returns the cached data with the transaction ID injected into it.
-// Caller must hold the per-key lock for the duration of send to prevent
-// concurrent mutation of the shared cache entry.
-// The returned slice is the shared cache entry — do not retain after send.
+// GetInto returns a copy of the cached data with the transaction ID injected.
+// The returned slice is independent and safe to retain or mutate.
 func (c *DNSCache) GetInto(key string, txID uint16) ([]byte, bool) {
 	shard := c.getShard(key)
 	shard.mu.RLock()
@@ -91,11 +89,13 @@ func (c *DNSCache) GetInto(key string, txID uint16) ([]byte, bool) {
 		return nil, false
 	}
 
-	if len(item.data) >= 2 {
-		item.data[0] = byte(txID >> 8)
-		item.data[1] = byte(txID & 0xFF)
+	cached := make([]byte, len(item.data))
+	copy(cached, item.data)
+	if len(cached) >= 2 {
+		cached[0] = byte(txID >> 8)
+		cached[1] = byte(txID & 0xFF)
 	}
-	return item.data, true
+	return cached, true
 }
 
 // Set stores a response in the cache with a specific TTL.
