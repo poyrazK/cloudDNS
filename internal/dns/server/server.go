@@ -1173,7 +1173,7 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 			// Not authoritative for this zone - try recursive resolution if enabled
 			if s.RecursionEnabled && request.Header.RecursionDesired {
 				s.Logger.Info("fallback to recursive resolution", "name", q.Name, "type", q.QType)
-				recursiveResp, errRecurse := s.resolveRecursive(q.Name, q.QType)
+				recursiveResp, errRecurse := s.resolveRecursive(ctx, q.Name, q.QType)
 				if errRecurse == nil && recursiveResp != nil {
 					response.Header.AuthoritativeAnswer = false
 					response.Header.ResCode = recursiveResp.Header.ResCode
@@ -1901,8 +1901,11 @@ func (s *Server) validateDNSSEC(ctx context.Context, zoneName string, response *
 		response.Header.AuthedData = false
 		return nil
 	} else {
-		// Chain valid — set AD and return
-		response.Header.AuthedData = true
+		// Chain valid — but AD requires both chain AND per-RRset validation to succeed
+		if s.DNSSECMode == "strict" && !allValid {
+			return fmt.Errorf("dnssec: chain valid but per-RRset validation failed")
+		}
+		response.Header.AuthedData = allValid
 		return nil
 	}
 
@@ -1912,9 +1915,9 @@ func (s *Server) validateDNSSEC(ctx context.Context, zoneName string, response *
 
 // fetchDNSKEYFromNetwork queries DNSKEY records for a zone from the network.
 // It returns the DNSKEY records and an error if the query failed.
-func (s *Server) fetchDNSKEYFromNetwork(_ context.Context, zoneName string) ([]packet.DNSRecord, error) {
+func (s *Server) fetchDNSKEYFromNetwork(ctx context.Context, zoneName string) ([]packet.DNSRecord, error) {
 	// First try to resolve DNSKEY via recursive resolution
-	dnskeyResp, err := s.resolveRecursive(zoneName, packet.DNSKEY)
+	dnskeyResp, err := s.resolveRecursive(ctx, zoneName, packet.DNSKEY)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve DNSKEY for %s: %w", zoneName, err)
 	}
@@ -1941,9 +1944,9 @@ func (s *Server) fetchDNSKEYFromNetwork(_ context.Context, zoneName string) ([]p
 
 // fetchDSFromNetwork queries DS records for a child zone from the parent zone.
 // It also fetches the RRSIG records that sign the DS RRset.
-func (s *Server) fetchDSFromNetwork(_ context.Context, childZone, parentZone string) ([]packet.DNSRecord, []packet.DNSRecord, error) {
-	// Query parent zone for DS record of child zone
-	dsResp, err := s.resolveRecursive(parentZone, packet.DS)
+func (s *Server) fetchDSFromNetwork(ctx context.Context, childZone, parentZone string) ([]packet.DNSRecord, []packet.DNSRecord, error) {
+	// Query for the child zone's DS record (from the parent zone's authority)
+	dsResp, err := s.resolveRecursive(ctx, childZone, packet.DS)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to resolve DS for %s from %s: %w", childZone, parentZone, err)
 	}
@@ -2034,15 +2037,14 @@ func (s *Server) buildDNSSECChain(ctx context.Context, zoneName string) ([]servi
 
 // parentZoneName returns the parent zone name for a given zone.
 // e.g., "www.example.com." -> "example.com." -> "com." -> "." -> ""
-// For root zone ("root."), returns "" as root has no parent.
+// For root zone ("."), returns "" as root has no parent.
 func parentZoneName(zone string) string {
 	zone = strings.TrimSuffix(zone, ".")
+	if zone == "" {
+		return "" // Root zone has no parent
+	}
 	labels := strings.Split(zone, ".")
 	if len(labels) < 2 {
-		// Single label TLD (e.g., "com") has parent "." (root zone), but root itself has no parent
-		if zone == "root" {
-			return "" // Root zone has no parent
-		}
 		return "."
 	}
 	if len(labels) == 2 {

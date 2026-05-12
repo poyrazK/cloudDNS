@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net"
@@ -15,6 +16,7 @@ func TestResolveRecursive(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping slow recursive lookup test in short mode")
 	}
+	ctx := context.Background()
 	s := NewServer(":0", nil, nil)
 
 	// Mock queryFn to simulate iterative lookups.
@@ -51,7 +53,7 @@ func TestResolveRecursive(t *testing.T) {
 		return resp, nil
 	}
 
-	resp, err := s.resolveRecursive("test.com.", packet.A)
+	resp, err := s.resolveRecursive(ctx, "test.com.", packet.A)
 	if err != nil {
 		t.Fatalf("Recursive resolve failed: %v", err)
 	}
@@ -64,6 +66,7 @@ func TestResolveRecursive(t *testing.T) {
 }
 
 func TestResolveRecursive_NXDOMAIN(t *testing.T) {
+	ctx := context.Background()
 	s := NewServer(":0", nil, nil)
 
 	s.queryFn = func(server string, name string, qtype packet.QueryType) (*packet.DNSPacket, error) {
@@ -73,7 +76,7 @@ func TestResolveRecursive_NXDOMAIN(t *testing.T) {
 		return resp, nil
 	}
 
-	resp, err := s.resolveRecursive("nonexistent.io.", packet.A)
+	resp, err := s.resolveRecursive(ctx, "nonexistent.io.", packet.A)
 	if err != nil {
 		t.Fatalf("Expected no error for NXDOMAIN, got %v", err)
 	}
@@ -84,6 +87,7 @@ func TestResolveRecursive_NXDOMAIN(t *testing.T) {
 }
 
 func TestRecursive_NoNextNS(t *testing.T) {
+	ctx := context.Background()
 	s := NewServer(":0", nil, nil)
 
 	s.queryFn = func(server string, name string, qtype packet.QueryType) (*packet.DNSPacket, error) {
@@ -93,7 +97,7 @@ func TestRecursive_NoNextNS(t *testing.T) {
 		return resp, nil
 	}
 
-	resp, err := s.resolveRecursive("deadend.test.", packet.A)
+	resp, err := s.resolveRecursive(ctx, "deadend.test.", packet.A)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -103,6 +107,7 @@ func TestRecursive_NoNextNS(t *testing.T) {
 }
 
 func TestResolveRecursive_CNAME(t *testing.T) {
+	ctx := context.Background()
 	s := NewServer(":0", nil, nil)
 
 	// Mock queryFn to simulate CNAME referral:
@@ -133,7 +138,7 @@ func TestResolveRecursive_CNAME(t *testing.T) {
 		return resp, nil
 	}
 
-	resp, err := s.resolveRecursive("alias.test.", packet.A)
+	resp, err := s.resolveRecursive(ctx, "alias.test.", packet.A)
 	if err != nil {
 		t.Fatalf("Recursive resolve failed: %v", err)
 	}
@@ -269,6 +274,7 @@ func TestSendTCPQuery(t *testing.T) {
 }
 
 func TestResolveRecursiveFallbackTimeout(t *testing.T) {
+	ctx := context.Background()
 	// Save original timeout and restore after test
 	originalTimeout := recursiveTimeout
 	defer func() { recursiveTimeout = originalTimeout }()
@@ -286,7 +292,7 @@ func TestResolveRecursiveFallbackTimeout(t *testing.T) {
 		return nil, errors.New("should not reach here - timeout should fire first")
 	}
 
-	_, err := s.resolveRecursive("timeout.test.", packet.A)
+	_, err := s.resolveRecursive(ctx, "timeout.test.", packet.A)
 	if err == nil {
 		t.Fatalf("Expected timeout error, got nil")
 	}

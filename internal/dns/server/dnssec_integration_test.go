@@ -625,7 +625,7 @@ func TestParentZoneName(t *testing.T) {
 		{"com.", "."},
 		{"test.co.uk.", "co.uk."},
 		{"a.b.c.d.", "b.c.d."},
-		{"root.", ""}, // Single-label root returns empty (no parent)
+		{".", ""}, // Root zone "." returns "" (no parent)
 	}
 
 	for _, tt := range tests {
@@ -768,7 +768,7 @@ func TestFetchDSFromNetwork(t *testing.T) {
 		response *packet.DNSPacket
 		err      error
 	}{{
-		query:    "com.",
+		query:    "example.com.",
 		qtype:    packet.DS,
 		response: makeMockResponseWithDS("com.", "example.com.", exampleDS, rrsigDS),
 	}}
@@ -786,16 +786,15 @@ func TestFetchDSFromNetwork(t *testing.T) {
 	}
 }
 
-// TestFetchDSFromNetwork_LegacyGo tests that we handle the special case
-// where labels==2 returns last label + "." (e.g., "test.co.uk." -> "co.uk.").
+// TestParentZoneName_LegacyGo tests that we handle the special case
+// where labels==2 returns last label + "." (e.g., "example.com." -> "com.").
 func TestParentZoneName_LegacyGo(t *testing.T) {
 	// This test catches the bug where labels==2 returned wrong parent
-	result := parentZoneName("test.co.uk.")
-	// test.co.uk has 3 labels, so labels[1:] gives ["co.uk."]
-	// join -> "co.uk." + "." -> "co.uk.."
-	// But actual expected: "co.uk."
-	if result != "co.uk." {
-		t.Errorf("parentZoneName(%q) = %q, want %q", "test.co.uk.", result, "co.uk.")
+	result := parentZoneName("example.com.")
+	// example.com has 2 labels, so len(labels)==2 branch is hit
+	// expected: labels[len(labels)-1] + "." = "com" + "." = "com."
+	if result != "com." {
+		t.Errorf("parentZoneName(%q) = %q, want %q", "example.com.", result, "com.")
 	}
 }
 

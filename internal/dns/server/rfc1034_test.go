@@ -89,6 +89,7 @@ func TestRFC1034_Recursion(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping slow recursive lookup test in short mode")
 	}
+	ctx := context.Background()
 	s := NewServer(":0", nil, nil)
 
 	// Mock queryFn to simulate iterative lookups: Root -> TLD -> Authoritative
@@ -114,7 +115,7 @@ func TestRFC1034_Recursion(t *testing.T) {
 		return resp, nil
 	}
 
-	resp, err := s.resolveRecursive("test.com.", packet.A)
+	resp, err := s.resolveRecursive(ctx, "test.com.", packet.A)
 	if err != nil {
 		t.Fatalf("Recursive resolve failed: %v", err)
 	}
