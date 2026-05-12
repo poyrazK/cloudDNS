@@ -86,19 +86,25 @@ func run(ctx context.Context) error {
 	if hostOverride := os.Getenv("DATABASE_HOST"); hostOverride != "" && dbURL != "" && dbURL != "none" {
 		if u, err := url.Parse(dbURL); err == nil {
 			u.Host = hostOverride
-			// Force sslmode=disable for local proxy connections to avoid TLS handshake issues.
-			// Cloud SQL Proxy listening on 127.0.0.1 expects plain TCP from the application.
+			// Only disable SSL for local proxy connections (Cloud SQL Proxy on localhost).
+			// Remote hosts should respect the user's SSL mode preference.
 			q := u.Query()
-			q.Set("sslmode", "disable")
+			if hostOverride == "127.0.0.1" || hostOverride == "localhost" || hostOverride == "::1" {
+				q.Set("sslmode", "disable")
+			}
 			u.RawQuery = q.Encode()
 			dbURL = u.String()
 		} else if strings.Contains(dbURL, "=") {
 			// Handle DSN format (e.g., "user=... password=...")
-			dbURL = strings.ReplaceAll(dbURL, "sslmode=verify-full", "sslmode=disable")
-			dbURL = strings.ReplaceAll(dbURL, "sslmode=require", "sslmode=disable")
-			dbURL = strings.ReplaceAll(dbURL, "sslmode=prefer", "sslmode=disable")
-			if !strings.Contains(dbURL, "sslmode=") {
-				dbURL += " sslmode=disable"
+			// Only disable SSL for local connections to Cloud SQL Proxy
+			isLocalHost := hostOverride == "127.0.0.1" || hostOverride == "localhost" || hostOverride == "::1"
+			if isLocalHost {
+				dbURL = strings.ReplaceAll(dbURL, "sslmode=verify-full", "sslmode=disable")
+				dbURL = strings.ReplaceAll(dbURL, "sslmode=require", "sslmode=disable")
+				dbURL = strings.ReplaceAll(dbURL, "sslmode=prefer", "sslmode=disable")
+				if !strings.Contains(dbURL, "sslmode=") {
+					dbURL += " sslmode=disable"
+				}
 			}
 			// Host override in DSN
 			if strings.Contains(dbURL, "host=") {

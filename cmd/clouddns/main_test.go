@@ -217,12 +217,33 @@ func TestRun_ConfigPaths(t *testing.T) {
 		}
 	})
 
+	t.Run("DatabaseHostOverrideRemotePreservesSSL", func(t *testing.T) {
+		// Remote host should preserve user's sslmode (verify-full)
+		t.Setenv("DATABASE_URL", "postgres://user:pass@remote:5432/db?sslmode=verify-full")
+		t.Setenv("DATABASE_HOST", "db.example.com")
+		t.Setenv("API_ADDR", "test-exit")
+		// run() exits early due to test-exit, but sslmode must be preserved in the URL
+		if err := run(context.Background()); err != nil {
+			t.Errorf("run failed with remote host override: %v", err)
+		}
+	})
+
 	t.Run("DatabaseDSNOverride", func(t *testing.T) {
 		t.Setenv("DATABASE_URL", "user=foo password=bar host=remote port=5432 dbname=db sslmode=require")
 		t.Setenv("DATABASE_HOST", "127.0.0.1")
 		t.Setenv("API_ADDR", "test-exit")
 		if err := run(context.Background()); err != nil {
 			t.Errorf("run failed with DSN host override: %v", err)
+		}
+	})
+
+	t.Run("DatabaseDSNOverrideRemotePreservesSSL", func(t *testing.T) {
+		// Remote host should preserve user's sslmode (require)
+		t.Setenv("DATABASE_URL", "user=foo password=bar host=remote port=5432 dbname=db sslmode=require")
+		t.Setenv("DATABASE_HOST", "db.example.com")
+		t.Setenv("API_ADDR", "test-exit")
+		if err := run(context.Background()); err != nil {
+			t.Errorf("run failed with remote DSN host override: %v", err)
 		}
 	})
 
