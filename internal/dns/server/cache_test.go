@@ -99,7 +99,49 @@ func TestCacheInvalidate(t *testing.T) {
 	}
 }
 
-func TestCacheGetReturnsCopyNotReference(t *testing.T) {
+func TestCacheGetInto(t *testing.T) {
+	done := make(chan struct{})
+	t.Cleanup(func() { close(done) })
+	cache := NewDNSCache(done, nil)
+	key := "getinto.com:1"
+
+	// Set 4-byte data
+	cache.Set(key, []byte{1, 2, 3, 4}, 1*time.Hour)
+
+	// GetInto with txID injection
+	data, found := cache.GetInto(key, 0x1234)
+	if !found {
+		t.Fatalf("expected to find key %s", key)
+	}
+	// Verify txID was injected
+	if data[0] != 0x12 || data[1] != 0x34 {
+		t.Errorf("expected txID injection 0x1234, got %x", []byte{data[0], data[1]})
+	}
+}
+
+func TestCacheGetIntoShortData(t *testing.T) {
+	done := make(chan struct{})
+	t.Cleanup(func() { close(done) })
+	cache := NewDNSCache(done, nil)
+	key := "short.com:1"
+
+	// Set 1-byte data (too short for txID injection)
+	cache.Set(key, []byte{1}, 1*time.Hour)
+
+	data, found := cache.GetInto(key, 0x1234)
+	if !found {
+		t.Fatalf("expected to find key %s", key)
+	}
+	if len(data) == 0 {
+		t.Fatalf("expected non-empty data for key %s", key)
+	}
+	// Data should be unchanged (no injection into <2 bytes)
+	if data[0] != 1 {
+		t.Errorf("expected data[0]=1, got %d", data[0])
+	}
+}
+
+func TestCacheGetReturnsInternalSlice(t *testing.T) {
 	done := make(chan struct{})
 	t.Cleanup(func() { close(done) })
 	cache := NewDNSCache(done, nil)
@@ -113,17 +155,22 @@ func TestCacheGetReturnsCopyNotReference(t *testing.T) {
 		t.Fatalf("Expected to find key %s", key)
 	}
 
-	// Mutate the returned slice
+	// Mutate the returned slice — this reflects the new zero-copy behavior
 	res[0] = 0xFF
 	res[1] = 0xFF
 
-	// Get again — internal data must be unchanged
+	// Get again — data should be mutated since Get() returns the internal slice
 	res2, found := cache.Get(key)
 	if !found {
 		t.Fatalf("Expected to find key %s on second call", key)
 	}
-	if res2[0] != 1 || res2[1] != 2 {
-		t.Errorf("Internal cache data was mutated — Get() returned a reference, not a copy")
+	if res2[0] != 0xFF || res2[1] != 0xFF {
+		t.Errorf("Expected res2 to reflect mutation, got %v", res2)
+	}
+
+	// Verify the caller's original data was not affected (Set() made a copy)
+	if originalData[0] != 1 || originalData[1] != 2 {
+		t.Errorf("Caller's original data was mutated by Set()")
 	}
 }
 

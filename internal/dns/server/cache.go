@@ -55,6 +55,7 @@ func (c *DNSCache) getShard(key string) *cacheShard {
 
 // Get retrieves a response from the cache. It returns (nil, false) if the key is missing
 // or has already expired.
+// Note: callers must not retain or mutate the returned slice.
 func (c *DNSCache) Get(key string) ([]byte, bool) {
 	shard := c.getShard(key)
 	shard.mu.RLock()
@@ -65,14 +66,11 @@ func (c *DNSCache) Get(key string) ([]byte, bool) {
 		return nil, false
 	}
 
-	// Check if the item is still valid.
 	if time.Now().After(item.expiresAt) {
 		return nil, false
 	}
 
-	out := make([]byte, len(item.data))
-	copy(out, item.data)
-	return out, true
+	return item.data, true
 }
 
 // GetInto returns the cached data with the transaction ID injected into it.
@@ -101,13 +99,18 @@ func (c *DNSCache) GetInto(key string, txID uint16) ([]byte, bool) {
 }
 
 // Set stores a response in the cache with a specific TTL.
+// The input data is copied so the cache owns its own backing array.
 func (c *DNSCache) Set(key string, data []byte, ttl time.Duration) {
 	shard := c.getShard(key)
 	shard.mu.Lock()
 	defer shard.mu.Unlock()
 
+	// Copy the data so the caller can mutate their slice without affecting the cache
+	copied := make([]byte, len(data))
+	copy(copied, data)
+
 	shard.items[key] = cacheEntry{
-		data:      data,
+		data:      copied,
 		expiresAt: time.Now().Add(ttl),
 	}
 }
