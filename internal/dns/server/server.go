@@ -1892,21 +1892,18 @@ func (s *Server) validateDNSSEC(ctx context.Context, zoneName string, response *
 		if s.DNSSECMode == "strict" {
 			return fmt.Errorf("dnssec: failed to build trust chain: %w", chainErr)
 		}
+		// Non-strict: fall through to RRset result below
+	} else if validateErr := s.DNSSECValidator.ValidateChain(chain, now); validateErr != nil {
+		if s.DNSSECMode == "strict" {
+			return fmt.Errorf("dnssec: trust chain validation failed: %w", validateErr)
+		}
+		// Chain invalid in non-strict mode — AD bit must be false, not allValid
+		response.Header.AuthedData = false
+		return nil
 	} else {
-		// Validate the full chain
-		chainValid := true
-		if validateErr := s.DNSSECValidator.ValidateChain(chain, now); validateErr != nil {
-			chainValid = false
-			if s.DNSSECMode == "strict" {
-				return fmt.Errorf("dnssec: trust chain validation failed: %w", validateErr)
-			}
-		}
-		// Chain validation overrides RRset-only result for AD bit
-		if chainValid {
-			response.Header.AuthedData = true
-			return nil
-		}
-		// If chain invalid and not strict mode, fall through to RRset-based result
+		// Chain valid — set AD and return
+		response.Header.AuthedData = true
+		return nil
 	}
 
 	response.Header.AuthedData = allValid
