@@ -494,8 +494,10 @@ func (s *Server) Run(ctx context.Context) error {
 						_ = c.SetReadDeadline(time.Now().Add(udpReadDeadline))
 						continue
 					}
-					data := buf[:n:n]
-					s.udpQueue <- udpTask{addr: addr, data: data, conn: c}
+					// Allocate fresh slice per packet to avoid aliasing with buf
+					packetData := make([]byte, n)
+					copy(packetData, buf[:n])
+					s.udpQueue <- udpTask{addr: addr, data: packetData, conn: c}
 				}
 			}
 		}(conn)

@@ -99,6 +99,45 @@ func TestCacheInvalidate(t *testing.T) {
 	}
 }
 
+func TestCacheGetInto(t *testing.T) {
+	done := make(chan struct{})
+	t.Cleanup(func() { close(done) })
+	cache := NewDNSCache(done, nil)
+	key := "getinto.com:1"
+
+	// Set 4-byte data
+	cache.Set(key, []byte{1, 2, 3, 4}, 1*time.Hour)
+
+	// GetInto with txID injection
+	data, found := cache.GetInto(key, 0x1234)
+	if !found {
+		t.Fatalf("expected to find key %s", key)
+	}
+	// Verify txID was injected
+	if data[0] != 0x12 || data[1] != 0x34 {
+		t.Errorf("expected txID injection 0x1234, got %x", []byte{data[0], data[1]})
+	}
+}
+
+func TestCacheGetIntoShortData(t *testing.T) {
+	done := make(chan struct{})
+	t.Cleanup(func() { close(done) })
+	cache := NewDNSCache(done, nil)
+	key := "short.com:1"
+
+	// Set 1-byte data (too short for txID injection)
+	cache.Set(key, []byte{1}, 1*time.Hour)
+
+	data, found := cache.GetInto(key, 0x1234)
+	if !found {
+		t.Fatalf("expected to find key %s", key)
+	}
+	// Data should be unchanged (no injection into <2 bytes)
+	if data[0] != 1 {
+		t.Errorf("expected data[0]=1, got %d", data[0])
+	}
+}
+
 func TestCacheGetReturnsInternalSlice(t *testing.T) {
 	done := make(chan struct{})
 	t.Cleanup(func() { close(done) })
