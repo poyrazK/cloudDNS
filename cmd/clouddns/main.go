@@ -37,6 +37,74 @@ func main() {
 	}
 }
 
+// replaceSSLMode replaces sslmode values in DSN format string with the given mode.
+// Only matches space-delimited parameters to avoid matching sslmode within values.
+func replaceSSLMode(dbURL, mode string) string {
+	// Replace existing sslmode values (only as separate space-delimited params)
+	dbURL = replaceDSNParam(dbURL, "sslmode", mode)
+	if !strings.Contains(dbURL, "sslmode=") {
+		dbURL += " sslmode=" + mode
+	}
+	return dbURL
+}
+
+// replaceDSNParam replaces a parameter in DSN format (space-separated key=value pairs).
+// Only replaces exact param matches to avoid matching within values.
+func replaceDSNParam(dbURL, param, value string) string {
+	parts := strings.Fields(dbURL)
+	for i, p := range parts {
+		if strings.HasPrefix(p, param+"=") {
+			parts[i] = param + "=" + value
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// processDatabaseURL applies DATABASE_HOST overrides and SSL mode settings.
+// It handles both URL format (postgres://...) and DSN format (user=...).
+// Exported for testing.
+func processDatabaseURL(dbURL, hostOverride string) string {
+	if dbURL == "" {
+		dbURL = "postgres://postgres:postgres@localhost:5432/clouddns?sslmode=disable"
+	}
+
+	if hostOverride == "" {
+		return dbURL
+	}
+
+	// Detect URL format vs DSN format by checking for postgres:// prefix
+	isURL := strings.HasPrefix(dbURL, "postgres://") || strings.HasPrefix(dbURL, "postgresql://")
+	if isURL {
+		// url.Parse won't fail on valid postgres:// URLs; safe to ignore error due to isURL guard
+		u, _ := url.Parse(dbURL)
+		u.Host = hostOverride
+		q := u.Query()
+		if hostOverride == "127.0.0.1" || hostOverride == "localhost" || hostOverride == "::1" {
+			q.Set("sslmode", "disable")
+		}
+		u.RawQuery = q.Encode()
+		return u.String()
+	}
+	// DSN format (user=... password=... host=... etc)
+	isLocalHost := hostOverride == "127.0.0.1" || hostOverride == "localhost" || hostOverride == "::1"
+	if isLocalHost {
+		dbURL = replaceSSLMode(dbURL, "disable")
+	}
+	if strings.Contains(dbURL, "host=") {
+		parts := strings.Split(dbURL, " ")
+		for i, p := range parts {
+			if strings.HasPrefix(p, "host=") {
+				parts[i] = "host=" + hostOverride
+			}
+		}
+		dbURL = strings.Join(parts, " ")
+	} else {
+		dbURL += " host=" + hostOverride
+	}
+
+	return dbURL
+}
+
 // run is the main entry point for the cloudDNS daemon, initializing all components.
 func run(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(ctx)
@@ -77,44 +145,7 @@ func run(ctx context.Context) error {
 
 	slog.SetDefault(logger)
 
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		dbURL = "postgres://postgres:postgres@localhost:5432/clouddns?sslmode=disable"
-	}
-
-	// Allow overriding host for Cloud SQL Proxy sidecar
-	if hostOverride := os.Getenv("DATABASE_HOST"); hostOverride != "" && dbURL != "" && dbURL != "none" {
-		if u, err := url.Parse(dbURL); err == nil {
-			u.Host = hostOverride
-			// Force sslmode=disable for local proxy connections to avoid TLS handshake issues.
-			// Cloud SQL Proxy listening on 127.0.0.1 expects plain TCP from the application.
-			q := u.Query()
-			q.Set("sslmode", "disable")
-			u.RawQuery = q.Encode()
-			dbURL = u.String()
-		} else if strings.Contains(dbURL, "=") {
-			// Handle DSN format (e.g., "user=... password=...")
-			dbURL = strings.ReplaceAll(dbURL, "sslmode=verify-full", "sslmode=disable")
-			dbURL = strings.ReplaceAll(dbURL, "sslmode=require", "sslmode=disable")
-			dbURL = strings.ReplaceAll(dbURL, "sslmode=prefer", "sslmode=disable")
-			if !strings.Contains(dbURL, "sslmode=") {
-				dbURL += " sslmode=disable"
-			}
-			// Host override in DSN
-			if strings.Contains(dbURL, "host=") {
-				// Very basic regex-like replacement for host
-				parts := strings.Split(dbURL, " ")
-				for i, p := range parts {
-					if strings.HasPrefix(p, "host=") {
-						parts[i] = "host=" + hostOverride
-					}
-				}
-				dbURL = strings.Join(parts, " ")
-			} else {
-				dbURL += " host=" + hostOverride
-			}
-		}
-	}
+	dbURL := processDatabaseURL(os.Getenv("DATABASE_URL"), os.Getenv("DATABASE_HOST"))
 
 	if dbURL != "none" {
 		parsedURL, err := url.Parse(dbURL)

@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -217,12 +219,33 @@ func TestRun_ConfigPaths(t *testing.T) {
 		}
 	})
 
+	t.Run("DatabaseHostOverrideRemotePreservesSSL", func(t *testing.T) {
+		// Remote host should preserve user's sslmode (verify-full)
+		t.Setenv("DATABASE_URL", "postgres://user:pass@remote:5432/db?sslmode=verify-full")
+		t.Setenv("DATABASE_HOST", "db.example.com")
+		t.Setenv("API_ADDR", "test-exit")
+		// run() exits early due to test-exit, but sslmode must be preserved in the URL
+		if err := run(context.Background()); err != nil {
+			t.Errorf("run failed with remote host override: %v", err)
+		}
+	})
+
 	t.Run("DatabaseDSNOverride", func(t *testing.T) {
 		t.Setenv("DATABASE_URL", "user=foo password=bar host=remote port=5432 dbname=db sslmode=require")
 		t.Setenv("DATABASE_HOST", "127.0.0.1")
 		t.Setenv("API_ADDR", "test-exit")
 		if err := run(context.Background()); err != nil {
 			t.Errorf("run failed with DSN host override: %v", err)
+		}
+	})
+
+	t.Run("DatabaseDSNOverrideRemotePreservesSSL", func(t *testing.T) {
+		// Remote host should preserve user's sslmode (require)
+		t.Setenv("DATABASE_URL", "user=foo password=bar host=remote port=5432 dbname=db sslmode=require")
+		t.Setenv("DATABASE_HOST", "db.example.com")
+		t.Setenv("API_ADDR", "test-exit")
+		if err := run(context.Background()); err != nil {
+			t.Errorf("run failed with remote DSN host override: %v", err)
 		}
 	})
 
@@ -318,4 +341,129 @@ func TestDatabasePoolConfigEnvVars(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestProcessDatabaseURL(t *testing.T) {
+	tests := []struct {
+		name         string
+		dbURL        string
+		hostOverride string
+		wantSSLMode  string
+	}{
+		// URL format with localhost - should disable SSL
+		{
+			name:         "URL localhost disables SSL via 127.0.0.1",
+			dbURL:        "postgres://user:pass@remote:5432/db?sslmode=verify-full",
+			hostOverride: "127.0.0.1",
+			wantSSLMode:  "disable",
+		},
+		{
+			name:         "URL localhost disables SSL via localhost",
+			dbURL:        "postgres://user:pass@remote:5432/db?sslmode=require",
+			hostOverride: "localhost",
+			wantSSLMode:  "disable",
+		},
+		{
+			name:         "URL IPv6 localhost disables SSL",
+			dbURL:        "postgres://user:pass@remote:5432/db?sslmode=require",
+			hostOverride: "::1",
+			wantSSLMode:  "disable",
+		},
+		// URL format with remote host - should preserve SSL
+		{
+			name:         "URL remote host preserves SSL verify-full",
+			dbURL:        "postgres://user:pass@remote:5432/db?sslmode=verify-full",
+			hostOverride: "db.example.com",
+			wantSSLMode:  "verify-full",
+		},
+		{
+			name:         "URL remote host preserves SSL require",
+			dbURL:        "postgres://user:pass@remote:5432/db?sslmode=require",
+			hostOverride: "db.example.com",
+			wantSSLMode:  "require",
+		},
+		// No host override - preserve original
+		{
+			name:         "URL no override preserves original SSL",
+			dbURL:        "postgres://user:pass@remote:5432/db?sslmode=verify-full",
+			hostOverride: "",
+			wantSSLMode:  "verify-full",
+		},
+		// Default URL when empty
+		{
+			name:         "Empty URL uses default with disable",
+			dbURL:        "",
+			hostOverride: "127.0.0.1",
+			wantSSLMode:  "disable",
+		},
+		// DSN format - localhost disables SSL
+		{
+			name:         "DSN localhost disables SSL",
+			dbURL:        "user=foo password=bar host=remote port=5432 dbname=db sslmode=verify-full",
+			hostOverride: "127.0.0.1",
+			wantSSLMode:  "disable",
+		},
+		// DSN format - remote host preserves SSL
+		{
+			name:         "DSN remote host preserves SSL require",
+			dbURL:        "user=foo password=bar host=remote port=5432 dbname=db sslmode=require",
+			hostOverride: "db.example.com",
+			wantSSLMode:  "require",
+		},
+		// DSN format - no sslmode specified, localhost adds disable
+		{
+			name:         "DSN localhost adds sslmode disable when missing",
+			dbURL:        "user=foo password=bar host=remote port=5432 dbname=db",
+			hostOverride: "localhost",
+			wantSSLMode:  "disable",
+		},
+		// DSN format - remote host preserves SSL when sslmode missing
+		{
+			name:         "DSN remote host preserves no sslmode when missing",
+			dbURL:        "user=foo password=bar host=remote port=5432 dbname=db",
+			hostOverride: "db.example.com",
+			wantSSLMode:  "", // no sslmode set for remote
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := processDatabaseURL(tt.dbURL, tt.hostOverride)
+			got := extractSSLMode(result)
+			if got != tt.wantSSLMode {
+				t.Errorf("sslmode = %q, want %q", got, tt.wantSSLMode)
+			}
+		})
+	}
+}
+
+// extractSSLMode extracts sslmode from both URL format (?sslmode=) and DSN format (sslmode=).
+func extractSSLMode(s string) string {
+	// Try URL/scheme-relative format first
+	if strings.Contains(s, "://") || strings.HasPrefix(s, "//") {
+		if u, err := url.Parse(s); err == nil {
+			// Check query string first
+			if mode := u.Query().Get("sslmode"); mode != "" {
+				return mode
+			}
+			// For scheme-relative URLs (//host/path), sslmode may be in the path if it came from DSN
+			if strings.HasPrefix(s, "//") && u.Path != "" {
+				if idx := strings.Index(u.Path, "sslmode="); idx >= 0 {
+					rest := u.Path[idx+len("sslmode="):]
+					end := strings.IndexAny(rest, " ")
+					if end < 0 {
+						end = len(rest)
+					}
+					return rest[:end]
+				}
+			}
+		}
+	}
+	// DSN format: look for sslmode= in space-separated params
+	for _, part := range strings.Split(s, " ") {
+		if strings.HasPrefix(part, "sslmode=") {
+			return strings.TrimPrefix(part, "sslmode=")
+		}
+	}
+	return ""
 }
