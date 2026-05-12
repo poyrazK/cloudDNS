@@ -37,6 +37,29 @@ func main() {
 	}
 }
 
+// replaceSSLMode replaces sslmode values in DSN format string with the given mode.
+// Only matches space-delimited parameters to avoid matching sslmode within values.
+func replaceSSLMode(dbURL, mode string) string {
+	// Replace existing sslmode values (only as separate space-delimited params)
+	dbURL = replaceDSNParam(dbURL, "sslmode", mode)
+	if !strings.Contains(dbURL, "sslmode=") {
+		dbURL += " sslmode=" + mode
+	}
+	return dbURL
+}
+
+// replaceDSNParam replaces a parameter in DSN format (space-separated key=value pairs).
+// Only replaces exact param matches to avoid matching within values.
+func replaceDSNParam(dbURL, param, value string) string {
+	parts := strings.Fields(dbURL)
+	for i, p := range parts {
+		if strings.HasPrefix(p, param+"=") {
+			parts[i] = param + "=" + value
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
 // processDatabaseURL applies DATABASE_HOST overrides and SSL mode settings.
 // It handles both URL format (postgres://...) and DSN format (user=...).
 // Exported for testing.
@@ -49,9 +72,10 @@ func processDatabaseURL(dbURL, hostOverride string) string {
 		return dbURL
 	}
 
-	// Detect URL format vs DSN format by checking for ://
+	// Detect URL format vs DSN format by checking for postgres:// prefix
 	isURL := strings.HasPrefix(dbURL, "postgres://") || strings.HasPrefix(dbURL, "postgresql://")
 	if isURL {
+		// url.Parse won't fail on valid postgres:// URLs; safe to ignore error due to isURL guard
 		u, _ := url.Parse(dbURL)
 		u.Host = hostOverride
 		q := u.Query()
@@ -64,12 +88,7 @@ func processDatabaseURL(dbURL, hostOverride string) string {
 	// DSN format (user=... password=... host=... etc)
 	isLocalHost := hostOverride == "127.0.0.1" || hostOverride == "localhost" || hostOverride == "::1"
 	if isLocalHost {
-		dbURL = strings.ReplaceAll(dbURL, "sslmode=verify-full", "sslmode=disable")
-		dbURL = strings.ReplaceAll(dbURL, "sslmode=require", "sslmode=disable")
-		dbURL = strings.ReplaceAll(dbURL, "sslmode=prefer", "sslmode=disable")
-		if !strings.Contains(dbURL, "sslmode=") {
-			dbURL += " sslmode=disable"
-		}
+		dbURL = replaceSSLMode(dbURL, "disable")
 	}
 	if strings.Contains(dbURL, "host=") {
 		parts := strings.Split(dbURL, " ")
