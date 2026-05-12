@@ -1315,10 +1315,11 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 	}
 
 	// RFC 2308: For NXDOMAIN, use SOA MINIMUM field as TTL for negative caching
+	// Use min(MINIMUM, TTL) to cap negative cache TTL by SOA RR TTL; allow MINIMUM=0
 	if response.Header.ResCode == 3 {
 		for _, auth := range response.Authorities {
-			if auth.Type == packet.SOA && auth.Minimum > 0 {
-				ttl = auth.Minimum
+			if auth.Type == packet.SOA {
+				ttl = min(auth.Minimum, auth.TTL)
 				break
 			}
 		}
