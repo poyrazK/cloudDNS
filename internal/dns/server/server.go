@@ -2033,12 +2033,17 @@ func (s *Server) buildDNSSECChain(ctx context.Context, zoneName string) ([]servi
 }
 
 // parentZoneName returns the parent zone name for a given zone.
-// e.g., "www.example.com." -> "example.com." -> "com." -> "."
+// e.g., "www.example.com." -> "example.com." -> "com." -> "." -> ""
+// For root zone ("root."), returns "" as root has no parent.
 func parentZoneName(zone string) string {
 	zone = strings.TrimSuffix(zone, ".")
 	labels := strings.Split(zone, ".")
 	if len(labels) < 2 {
-		return ""
+		// Single label TLD (e.g., "com") has parent "." (root zone), but root itself has no parent
+		if zone == "root" {
+			return "" // Root zone has no parent
+		}
+		return "."
 	}
 	if len(labels) == 2 {
 		return labels[len(labels)-1] + "."
