@@ -257,7 +257,7 @@ func TestRateLimiter_ShardDistribution(t *testing.T) {
 
 	// Find two IPs that hash to the same shard
 	var sameShardIPs [2]string
-	var diffShardIPs [2]string
+	var diffShardIP string
 
 	// Use a fixed set of IPs to find same shard
 	candidates := []string{
@@ -271,11 +271,10 @@ Outer:
 			if rl.shard(candidates[i]) == rl.shard(candidates[j]) {
 				sameShardIPs[0] = candidates[i]
 				sameShardIPs[1] = candidates[j]
-				// Find a different shard for diffShardIPs
+				// Find a different shard for diffShardIP
 				for k := 0; k < len(candidates); k++ {
-					if k != i && k != j && rl.shard(candidates[k]) != rl.shard(candidates[i]) {
-						diffShardIPs[0] = candidates[i]
-						diffShardIPs[1] = candidates[k]
+					if rl.shard(candidates[k]) != rl.shard(candidates[i]) {
+						diffShardIP = candidates[k]
 						break Outer
 					}
 				}
@@ -286,6 +285,9 @@ Outer:
 	if sameShardIPs[0] == "" {
 		t.Skip("could not find two IPs in same shard in test set")
 	}
+	if diffShardIP == "" {
+		t.Fatal("could not find IP in different shard from same-shard pair")
+	}
 
 	// Same shard: exhausting one should affect the other
 	rl.Allow(sameShardIPs[0])
@@ -293,8 +295,8 @@ Outer:
 	rl.Allow(sameShardIPs[0]) // still exhausted
 
 	// Different shard: exhausting one should NOT affect the other
-	if !rl.Allow(diffShardIPs[0]) {
-		t.Errorf("diff shard ip should be allowed (different shard)")
+	if !rl.Allow(diffShardIP) {
+		t.Errorf("diff shard IP %s should be allowed (independent shard)", diffShardIP)
 	}
 }
 
@@ -337,18 +339,28 @@ func TestRateLimiter_Concurrent(t *testing.T) {
 }
 
 func TestRateLimiter_MaxBucketsSmall(t *testing.T) {
-	// Verify perShard floor works when maxBuckets < numShards
-	rl := newRateLimiter(10, 1, 10) // 10 max buckets, 256 shards → perShard=1
+	// Verify perShard distribution works when maxBuckets < numShards
+	// maxBuckets=10, numShards=256: base=0, remainder=10 → first 10 shards get maxBuckets=1, rest get 0
+	rl := newRateLimiter(10, 1, 10)
 
-	// Add 10 IPs to 10 different shards, all within their per-shard limit
+	// Add 10 IPs and track which shards they landed in
+	ips := make([]string, 10)
+	uniqueShards := make(map[uint64]bool)
 	for i := 0; i < 10; i++ {
 		ip := fmt.Sprintf("50.60.70.%d", i)
 		if !rl.Allow(ip) {
 			t.Errorf("Should allow IP %s", ip)
 		}
+		ips[i] = ip
+		uniqueShards[hashIP(ip)%numShards] = true
 	}
 
-	// Verify no evictions happened (each IP in its own shard with limit=1)
+	// Assert IPs landed in 10 distinct shards (required for this test's premise)
+	if len(uniqueShards) != 10 {
+		t.Skipf("test requires 10 IPs in 10 distinct shards, got %d", len(uniqueShards))
+	}
+
+	// Verify total buckets = 10 (no evictions since each IP is in its own shard)
 	total := 0
 	for i := range rl.shards {
 		rl.shards[i].mu.Lock()

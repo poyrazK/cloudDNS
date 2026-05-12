@@ -3,7 +3,6 @@ package server
 import (
 	"container/heap"
 	"hash/fnv"
-	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -51,15 +50,19 @@ func (h bucketIdleHeap) Less(i, j int) bool {
 }
 func (h bucketIdleHeap) Swap(i, j int) {
 	h[i], h[j] = h[j], h[i]
+	h[i].b.heapIdx = i
+	h[j].b.heapIdx = j
 }
 func (h *bucketIdleHeap) Push(x any) {
 	*h = append(*h, x.(*bucketIdleEntry))
+	(*h)[len(*h)-1].b.heapIdx = len(*h) - 1
 }
 func (h *bucketIdleHeap) Pop() any {
 	old := *h
 	n := len(old)
 	item := old[n-1]
 	*h = old[:n-1]
+	item.b.heapIdx = -1
 	return item
 }
 
@@ -82,12 +85,20 @@ func newRateLimiter(rate float64, burst int, maxBuckets int) *rateLimiter {
 		burst:      burst,
 		maxBuckets: maxBuckets,
 	}
-	perShard := int(math.Max(1, float64(maxBuckets/numShards)))
+	// Distribute maxBuckets evenly across shards, giving any remainder to the first shards.
+	// This ensures the sum of per-shard caps never exceeds maxBuckets.
+	base := maxBuckets / numShards
+	remainder := maxBuckets % numShards
 	for i := range rl.shards {
 		rl.shards[i].buckets = make(map[string]*bucket)
 		rl.shards[i].rate = rate
 		rl.shards[i].burst = burst
-		rl.shards[i].maxBuckets = perShard
+		// First 'remainder' shards get one extra bucket slot.
+		if i < remainder {
+			rl.shards[i].maxBuckets = base + 1
+		} else {
+			rl.shards[i].maxBuckets = base
+		}
 		heap.Init(&rl.shards[i].idleHeap)
 	}
 	return rl
