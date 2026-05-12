@@ -1886,6 +1886,29 @@ func (s *Server) validateDNSSEC(ctx context.Context, zoneName string, response *
 		}
 	}
 
+	// Build and validate the trust chain from leaf to trust anchor
+	chain, chainErr := s.buildDNSSECChain(ctx, zoneName)
+	if chainErr != nil {
+		if s.DNSSECMode == "strict" {
+			return fmt.Errorf("dnssec: failed to build trust chain: %w", chainErr)
+		}
+	} else {
+		// Validate the full chain
+		chainValid := true
+		if validateErr := s.DNSSECValidator.ValidateChain(chain, now); validateErr != nil {
+			chainValid = false
+			if s.DNSSECMode == "strict" {
+				return fmt.Errorf("dnssec: trust chain validation failed: %w", validateErr)
+			}
+		}
+		// Chain validation overrides RRset-only result for AD bit
+		if chainValid {
+			response.Header.AuthedData = true
+			return nil
+		}
+		// If chain invalid and not strict mode, fall through to RRset-based result
+	}
+
 	response.Header.AuthedData = allValid
 	return nil
 }
@@ -1917,6 +1940,113 @@ func (s *Server) fetchDNSKEYFromNetwork(_ context.Context, zoneName string) ([]p
 		return nil, fmt.Errorf("no DNSKEY records found for %s", zoneName)
 	}
 	return dnskeys, nil
+}
+
+// fetchDSFromNetwork queries DS records for a child zone from the parent zone.
+// It also fetches the RRSIG records that sign the DS RRset.
+func (s *Server) fetchDSFromNetwork(ctx context.Context, childZone, parentZone string) ([]packet.DNSRecord, []packet.DNSRecord, error) {
+	// Query parent zone for DS record of child zone
+	dsResp, err := s.resolveRecursive(parentZone, packet.DS)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to resolve DS for %s from %s: %w", childZone, parentZone, err)
+	}
+
+	var dsRecords []packet.DNSRecord
+	var rrsigDSRecords []packet.DNSRecord
+
+	// Collect DS records matching the child zone
+	for _, rec := range dsResp.Answers {
+		if rec.Type == packet.DS && strings.EqualFold(rec.Name, childZone) {
+			dsRecords = append(dsRecords, rec)
+		}
+		if rec.Type == packet.RRSIG && rec.TypeCovered == uint16(packet.DS) {
+			rrsigDSRecords = append(rrsigDSRecords, rec)
+		}
+	}
+
+	// RRSIG_DS may also be in authorities section
+	for _, rec := range dsResp.Authorities {
+		if rec.Type == packet.RRSIG && rec.TypeCovered == uint16(packet.DS) {
+			rrsigDSRecords = append(rrsigDSRecords, rec)
+		}
+	}
+
+	return dsRecords, rrsigDSRecords, nil
+}
+
+// buildDNSSECChain builds a trust chain from leaf zone to trust anchor by walking
+// parent zones and collecting DNSKEYs, DS records, and RRSIG_DS records.
+// It stops when it reaches a zone that matches a configured trust anchor.
+func (s *Server) buildDNSSECChain(ctx context.Context, zoneName string) ([]services.ChainLink, error) {
+	if s.DNSSECValidator == nil {
+		return nil, fmt.Errorf("dnssec: no validator configured")
+	}
+
+	var chain []services.ChainLink
+	currentZone := zoneName
+
+	// Max depth to prevent infinite loops (root + 2-3 levels of typical delegation)
+	const maxDepth = 10
+
+	for len(chain) < maxDepth {
+		// Fetch DNSKEYs for current zone
+		dnskeyRecs, err := s.fetchDNSKEYFromNetwork(ctx, currentZone)
+		if err != nil {
+			return nil, fmt.Errorf("buildDNSSECChain: failed to fetch DNSKEYs for %s: %w", currentZone, err)
+		}
+
+		link := services.ChainLink{
+			Zone:    currentZone,
+			DNSKEYs: dnskeyRecs,
+		}
+
+		// If we have a parent, fetch DS + RRSIG_DS from parent
+		parentZone := parentZoneName(currentZone)
+		if parentZone != "" && parentZone != "." {
+			dsRecs, rrsigDSRecs, dsErr := s.fetchDSFromNetwork(ctx, currentZone, parentZone)
+			if dsErr != nil {
+				return nil, fmt.Errorf("buildDNSSECChain: failed to fetch DS for %s from %s: %w", currentZone, parentZone, dsErr)
+			}
+			// Take the first DS record (zones typically have one DS per signing key)
+			if len(dsRecs) > 0 {
+				link.DS = dsRecs[0]
+			}
+			link.RRSIGsDS = rrsigDSRecs
+		}
+
+		chain = append(chain, link)
+
+		// Check if current zone is a trust anchor
+		if s.DNSSECValidator.GetTrustAnchor(currentZone) != nil {
+			break
+		}
+
+		// Move to parent zone
+		if parentZone == "" || parentZone == "." {
+			break
+		}
+		currentZone = parentZone
+	}
+
+	if len(chain) == 0 {
+		return nil, fmt.Errorf("buildDNSSECChain: could not build chain for %s", zoneName)
+	}
+
+	return chain, nil
+}
+
+// parentZoneName returns the parent zone name for a given zone.
+// e.g., "www.example.com." -> "example.com." -> "com." -> "."
+func parentZoneName(zone string) string {
+	zone = strings.TrimSuffix(zone, ".")
+	labels := strings.Split(zone, ".")
+	if len(labels) < 2 {
+		return ""
+	}
+	if len(labels) == 2 {
+		return labels[len(labels)-1] + "."
+	}
+	return strings.Join(labels[1:], ".") + "."
 }
 
 // groupRecords groups DNS records by name and type for response assembly.
