@@ -33,7 +33,7 @@ type singleMutexRateLimiter struct {
 
 type singleBucket struct {
 	tokens  float64
-	last   int64 // UnixNano for faster access
+	last   time.Time
 	heapIdx int
 }
 
@@ -45,7 +45,7 @@ type singleBucketIdleEntry struct {
 type singleBucketIdleHeap []*singleBucketIdleEntry
 
 func (h singleBucketIdleHeap) Len() int            { return len(h) }
-func (h singleBucketIdleHeap) Less(i, j int) bool   { return h[i].b.last < h[j].b.last }
+func (h singleBucketIdleHeap) Less(i, j int) bool { return h[i].b.last.Before(h[j].b.last) }
 func (h singleBucketIdleHeap) Swap(i, j int)       { h[i], h[j] = h[j], h[i] }
 func (h *singleBucketIdleHeap) Push(x any)         { *h = append(*h, x.(*singleBucketIdleEntry)) }
 func (h *singleBucketIdleHeap) Pop() any {
@@ -71,7 +71,7 @@ func (rl *singleMutexRateLimiter) Allow(ip string) bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
-	now := time.Now().UnixNano()
+	now := time.Now()
 	b, exists := rl.buckets[ip]
 	if !exists {
 		if len(rl.buckets) >= rl.maxBuckets {
@@ -84,7 +84,7 @@ func (rl *singleMutexRateLimiter) Allow(ip string) bool {
 		rl.buckets[ip] = b
 	}
 
-	elapsed := float64(now-b.last) / 1e9
+	elapsed := now.Sub(b.last).Seconds()
 	b.last = now
 	b.tokens += elapsed * rl.rate
 	if b.tokens > float64(rl.burst) {

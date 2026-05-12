@@ -308,7 +308,8 @@ func TestRateLimiter_Concurrent(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			// 50 IPs shared across 100 goroutines — some will contend on same shard
+			// 50 IPs shared across 100 goroutines (i%50 = 0..49 repeated twice each)
+			// burst=1 per IP, so first request succeeds, second is blocked
 			ip := fmt.Sprintf("1.2.3.%d", i%50)
 			if rl.Allow(ip) {
 				allowed.Add(1)
@@ -319,13 +320,19 @@ func TestRateLimiter_Concurrent(t *testing.T) {
 	}
 	wg.Wait()
 
-	// Should have roughly 50 allowed (one burst each) and 50 blocked
-	// Allow some variance since shard distribution affects exact counts
-	if allowed.Load() == 0 {
-		t.Errorf("expected at least some requests to succeed, got 0")
+	total := allowed.Load() + blocked.Load()
+	if total != 100 {
+		t.Errorf("expected 100 total decisions, got %d", total)
 	}
-	if blocked.Load() == 0 {
-		t.Errorf("expected at least some requests to be blocked, got 0")
+	// 50 IPs × 2 goroutines each = 50 allowed (first per IP) + 50 blocked (second per IP)
+	if allowed.Load() != 50 {
+		t.Errorf("expected 50 allowed, got %d", allowed.Load())
+	}
+	if blocked.Load() != 50 {
+		t.Errorf("expected 50 blocked, got %d", blocked.Load())
+	}
+	if uint64(blocked.Load()) != rl.RateLimited() {
+		t.Errorf("RateLimited() = %d, want %d (blocked count)", rl.RateLimited(), blocked.Load())
 	}
 }
 
