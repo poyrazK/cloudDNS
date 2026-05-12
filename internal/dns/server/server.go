@@ -1173,7 +1173,7 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 			// Not authoritative for this zone - try recursive resolution if enabled
 			if s.RecursionEnabled && request.Header.RecursionDesired {
 				s.Logger.Info("fallback to recursive resolution", "name", q.Name, "type", q.QType)
-				recursiveResp, errRecurse := s.resolveRecursive(q.Name, q.QType)
+				recursiveResp, errRecurse := s.resolveRecursive(ctx, q.Name, q.QType)
 				if errRecurse == nil && recursiveResp != nil {
 					response.Header.AuthoritativeAnswer = false
 					response.Header.ResCode = recursiveResp.Header.ResCode
@@ -1886,15 +1886,38 @@ func (s *Server) validateDNSSEC(ctx context.Context, zoneName string, response *
 		}
 	}
 
+	// Build and validate the trust chain from leaf to trust anchor
+	chain, chainErr := s.buildDNSSECChain(ctx, zoneName)
+	if chainErr != nil {
+		if s.DNSSECMode == "strict" {
+			return fmt.Errorf("dnssec: failed to build trust chain: %w", chainErr)
+		}
+		// Non-strict: fall through to RRset result below
+	} else if validateErr := s.DNSSECValidator.ValidateChain(chain, now); validateErr != nil {
+		if s.DNSSECMode == "strict" {
+			return fmt.Errorf("dnssec: trust chain validation failed: %w", validateErr)
+		}
+		// Chain invalid in non-strict mode — AD bit must be false, not allValid
+		response.Header.AuthedData = false
+		return nil
+	} else {
+		// Chain valid — but AD requires both chain AND per-RRset validation to succeed
+		if s.DNSSECMode == "strict" && !allValid {
+			return fmt.Errorf("dnssec: chain valid but per-RRset validation failed")
+		}
+		response.Header.AuthedData = allValid
+		return nil
+	}
+
 	response.Header.AuthedData = allValid
 	return nil
 }
 
 // fetchDNSKEYFromNetwork queries DNSKEY records for a zone from the network.
 // It returns the DNSKEY records and an error if the query failed.
-func (s *Server) fetchDNSKEYFromNetwork(_ context.Context, zoneName string) ([]packet.DNSRecord, error) {
+func (s *Server) fetchDNSKEYFromNetwork(ctx context.Context, zoneName string) ([]packet.DNSRecord, error) {
 	// First try to resolve DNSKEY via recursive resolution
-	dnskeyResp, err := s.resolveRecursive(zoneName, packet.DNSKEY)
+	dnskeyResp, err := s.resolveRecursive(ctx, zoneName, packet.DNSKEY)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve DNSKEY for %s: %w", zoneName, err)
 	}
@@ -1917,6 +1940,117 @@ func (s *Server) fetchDNSKEYFromNetwork(_ context.Context, zoneName string) ([]p
 		return nil, fmt.Errorf("no DNSKEY records found for %s", zoneName)
 	}
 	return dnskeys, nil
+}
+
+// fetchDSFromNetwork queries DS records for a child zone from the parent zone.
+// It also fetches the RRSIG records that sign the DS RRset.
+func (s *Server) fetchDSFromNetwork(ctx context.Context, childZone, parentZone string) ([]packet.DNSRecord, []packet.DNSRecord, error) {
+	// Query for the child zone's DS record (from the parent zone's authority)
+	dsResp, err := s.resolveRecursive(ctx, childZone, packet.DS)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to resolve DS for %s from %s: %w", childZone, parentZone, err)
+	}
+
+	var dsRecords []packet.DNSRecord
+	var rrsigDSRecords []packet.DNSRecord
+
+	// Collect DS records matching the child zone
+	for _, rec := range dsResp.Answers {
+		if rec.Type == packet.DS && strings.EqualFold(rec.Name, childZone) {
+			dsRecords = append(dsRecords, rec)
+		}
+		if rec.Type == packet.RRSIG && rec.TypeCovered == uint16(packet.DS) {
+			rrsigDSRecords = append(rrsigDSRecords, rec)
+		}
+	}
+
+	// RRSIG_DS may also be in authorities section
+	for _, rec := range dsResp.Authorities {
+		if rec.Type == packet.RRSIG && rec.TypeCovered == uint16(packet.DS) {
+			rrsigDSRecords = append(rrsigDSRecords, rec)
+		}
+	}
+
+	return dsRecords, rrsigDSRecords, nil
+}
+
+// buildDNSSECChain builds a trust chain from leaf zone to trust anchor by walking
+// parent zones and collecting DNSKEYs, DS records, and RRSIG_DS records.
+// It stops when it reaches a zone that matches a configured trust anchor.
+func (s *Server) buildDNSSECChain(ctx context.Context, zoneName string) ([]services.ChainLink, error) {
+	if s.DNSSECValidator == nil {
+		return nil, fmt.Errorf("dnssec: no validator configured")
+	}
+
+	var chain []services.ChainLink
+	currentZone := zoneName
+
+	// Max depth to prevent infinite loops (root + 2-3 levels of typical delegation)
+	const maxDepth = 10
+
+	for len(chain) < maxDepth {
+		// Fetch DNSKEYs for current zone
+		dnskeyRecs, err := s.fetchDNSKEYFromNetwork(ctx, currentZone)
+		if err != nil {
+			return nil, fmt.Errorf("buildDNSSECChain: failed to fetch DNSKEYs for %s: %w", currentZone, err)
+		}
+
+		link := services.ChainLink{
+			Zone:    currentZone,
+			DNSKEYs: dnskeyRecs,
+		}
+
+		// If we have a parent, fetch DS + RRSIG_DS from parent
+		parentZone := parentZoneName(currentZone)
+		if parentZone != "" && parentZone != "." {
+			dsRecs, rrsigDSRecs, dsErr := s.fetchDSFromNetwork(ctx, currentZone, parentZone)
+			if dsErr != nil {
+				return nil, fmt.Errorf("buildDNSSECChain: failed to fetch DS for %s from %s: %w", currentZone, parentZone, dsErr)
+			}
+			// Take the first DS record (zones typically have one DS per signing key)
+			if len(dsRecs) > 0 {
+				link.DS = dsRecs[0]
+			}
+			link.RRSIGsDS = rrsigDSRecs
+		}
+
+		chain = append(chain, link)
+
+		// Check if current zone is a trust anchor
+		if s.DNSSECValidator.GetTrustAnchor(currentZone) != nil {
+			break
+		}
+
+		// Move to parent zone
+		if parentZone == "" || parentZone == "." {
+			break
+		}
+		currentZone = parentZone
+	}
+
+	if len(chain) == 0 {
+		return nil, fmt.Errorf("buildDNSSECChain: could not build chain for %s", zoneName)
+	}
+
+	return chain, nil
+}
+
+// parentZoneName returns the parent zone name for a given zone.
+// e.g., "www.example.com." -> "example.com." -> "com." -> "." -> ""
+// For root zone ("."), returns "" as root has no parent.
+func parentZoneName(zone string) string {
+	zone = strings.TrimSuffix(zone, ".")
+	if zone == "" {
+		return "" // Root zone has no parent
+	}
+	labels := strings.Split(zone, ".")
+	if len(labels) < 2 {
+		return "."
+	}
+	if len(labels) == 2 {
+		return labels[len(labels)-1] + "."
+	}
+	return strings.Join(labels[1:], ".") + "."
 }
 
 // groupRecords groups DNS records by name and type for response assembly.

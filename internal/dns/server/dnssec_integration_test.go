@@ -5,6 +5,8 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"fmt"
+	"log/slog"
 	"net"
 	"testing"
 	"time"
@@ -609,6 +611,211 @@ func TestDNSSEC_ValidateChain_DSAlgorithmMismatch(t *testing.T) {
 	err := validator.ValidateChain(chain, uint32(1000))
 	if err == nil {
 		t.Error("Expected error for algorithm mismatch")
+	}
+}
+
+// TestParentZoneName tests the parentZoneName helper function.
+func TestParentZoneName(t *testing.T) {
+	tests := []struct {
+		zone     string
+		expected string
+	}{
+		{"www.example.com.", "example.com."},
+		{"example.com.", "com."},
+		{"com.", "."},
+		{"test.co.uk.", "co.uk."},
+		{"a.b.c.d.", "b.c.d."},
+		{".", ""}, // Root zone "." returns "" (no parent)
+	}
+
+	for _, tt := range tests {
+		got := parentZoneName(tt.zone)
+		if got != tt.expected {
+			t.Errorf("parentZoneName(%q) = %q, want %q", tt.zone, got, tt.expected)
+		}
+	}
+}
+
+// mockDNSSECServer creates a test server with a mockable queryFn for testing buildDNSSECChain.
+func mockDNSSECServer(t *testing.T) (*Server, *[]struct {
+	query    string
+	qtype    packet.QueryType
+	response *packet.DNSPacket
+	err      error
+}) {
+	t.Helper()
+
+	queries := &[]struct {
+		query    string
+		qtype    packet.QueryType
+		response *packet.DNSPacket
+		err      error
+	}{}
+
+	queryFn := func(server string, name string, qtype packet.QueryType) (*packet.DNSPacket, error) {
+		for _, q := range *queries {
+			if q.query == name && q.qtype == qtype {
+				if q.err != nil {
+					return nil, q.err
+				}
+				return q.response, nil
+			}
+		}
+		return nil, fmt.Errorf("mock: unexpected query %s (type %v)", name, qtype)
+	}
+
+	srv := &Server{
+		Logger:          slog.Default(),
+		queryFn:         queryFn,
+		DNSSECValidator: services.NewDNSSECValidator(nil),
+	}
+	return srv, queries
+}
+
+// TestBuildDNSSECChain_SingleZone tests buildDNSSECChain with a single zone and trust anchor.
+func TestBuildDNSSECChain_SingleZone(t *testing.T) {
+	srv, queriesPtr := mockDNSSECServer(t)
+
+	// Create a DNSKEY for example.com and set it as trust anchor
+	dnskey, _ := makeTestDNSKEYWithName(t, "example.com.")
+	anchors := map[string]packet.DNSRecord{"example.com.": dnskey}
+	srv.DNSSECValidator = services.NewDNSSECValidator(anchors)
+
+	*queriesPtr = []struct {
+		query    string
+		qtype    packet.QueryType
+		response *packet.DNSPacket
+		err      error
+	}{{
+		query:    "example.com.",
+		qtype:    packet.DNSKEY,
+		response: makeMockResponse("example.com.", []packet.DNSRecord{dnskey}, nil),
+	}}
+
+	ctx := context.Background()
+	chain, err := srv.buildDNSSECChain(ctx, "example.com.")
+	if err != nil {
+		t.Fatalf("buildDNSSECChain failed: %v", err)
+	}
+	if len(chain) != 1 {
+		t.Errorf("expected 1 link, got %d", len(chain))
+	}
+	if chain[0].Zone != "example.com." {
+		t.Errorf("expected zone example.com., got %s", chain[0].Zone)
+	}
+}
+
+// TestBuildDNSSECChain_WithDS tests buildDNSSECChain fetching DS from parent.
+func TestBuildDNSSECChain_WithDS(t *testing.T) {
+	srv, queries := mockDNSSECServer(t)
+
+	// Create DNSKEYs for example.com and com
+	exampleDNSKEY, _ := makeTestDNSKEYWithName(t, "example.com.")
+	comDNSKEY, comPrivKey := makeTestDNSKEYWithName(t, "com.")
+
+	// Create DS for example.com signed by com's key
+	exampleDS, _ := exampleDNSKEY.ComputeDS(2)
+	now := uint32(1000)
+	rrsigDS, _ := packet.SignRRSet([]packet.DNSRecord{exampleDS}, comPrivKey, packet.AlgorithmECDSAP256, "com.", comDNSKEY.ComputeKeyTag(), now-60, now+3600)
+
+	// Set up trust anchor for com. (parent zone has a trust anchor configured)
+	anchors := map[string]packet.DNSRecord{"com.": comDNSKEY}
+	srv.DNSSECValidator = services.NewDNSSECValidator(anchors)
+
+	*queries = []struct {
+		query    string
+		qtype    packet.QueryType
+		response *packet.DNSPacket
+		err      error
+	}{{
+		query:    "example.com.",
+		qtype:    packet.DNSKEY,
+		response: makeMockResponse("example.com.", []packet.DNSRecord{exampleDNSKEY}, nil),
+	}, {
+		query:    "com.",
+		qtype:    packet.DNSKEY,
+		response: makeMockResponse("com.", []packet.DNSRecord{comDNSKEY}, nil),
+	}, {
+		query:    "com.",
+		qtype:    packet.DS,
+		response: makeMockResponseWithDS("com.", "example.com.", exampleDS, rrsigDS),
+	}}
+
+	ctx := context.Background()
+	chain, err := srv.buildDNSSECChain(ctx, "example.com.")
+	if err != nil {
+		t.Fatalf("buildDNSSECChain failed: %v", err)
+	}
+	if len(chain) != 2 {
+		t.Errorf("expected 2 links, got %d", len(chain))
+	}
+}
+
+// TestFetchDSFromNetwork tests fetching DS records from parent zone.
+func TestFetchDSFromNetwork(t *testing.T) {
+	srv, queries := mockDNSSECServer(t)
+
+	exampleDNSKEY, comPrivKey := makeTestDNSKEYWithName(t, "example.com.")
+	comDNSKEY, _ := makeTestDNSKEYWithName(t, "com.")
+
+	exampleDS, _ := exampleDNSKEY.ComputeDS(2)
+	now := uint32(1000)
+	rrsigDS, _ := packet.SignRRSet([]packet.DNSRecord{exampleDS}, comPrivKey, packet.AlgorithmECDSAP256, "com.", comDNSKEY.ComputeKeyTag(), now-60, now+3600)
+
+	*queries = []struct {
+		query    string
+		qtype    packet.QueryType
+		response *packet.DNSPacket
+		err      error
+	}{{
+		query:    "example.com.",
+		qtype:    packet.DS,
+		response: makeMockResponseWithDS("com.", "example.com.", exampleDS, rrsigDS),
+	}}
+
+	ctx := context.Background()
+	dsRecs, rrsigRecs, err := srv.fetchDSFromNetwork(ctx, "example.com.", "com.")
+	if err != nil {
+		t.Fatalf("fetchDSFromNetwork failed: %v", err)
+	}
+	if len(dsRecs) == 0 {
+		t.Error("expected at least one DS record")
+	}
+	if len(rrsigRecs) == 0 {
+		t.Error("expected at least one RRSIG_DS record")
+	}
+}
+
+// TestParentZoneName_LegacyGo tests that we handle the special case
+// where labels==2 returns last label + "." (e.g., "example.com." -> "com.").
+func TestParentZoneName_LegacyGo(t *testing.T) {
+	// This test catches the bug where labels==2 returned wrong parent
+	result := parentZoneName("example.com.")
+	// example.com has 2 labels, so len(labels)==2 branch is hit
+	// expected: labels[len(labels)-1] + "." = "com" + "." = "com."
+	if result != "com." {
+		t.Errorf("parentZoneName(%q) = %q, want %q", "example.com.", result, "com.")
+	}
+}
+
+// makeMockResponse creates a mock DNS response with the given records in Answers.
+func makeMockResponse(name string, records []packet.DNSRecord, auths []packet.DNSRecord) *packet.DNSPacket {
+	return &packet.DNSPacket{
+		Header: packet.DNSHeader{ResCode: 0},
+		Answers:    records,
+		Authorities: auths,
+		Resources:  nil,
+	}
+}
+
+// makeMockResponseWithDS creates a mock response containing DS and RRSIG_DS records.
+func makeMockResponseWithDS(parentZone, childZone string, ds packet.DNSRecord, rrsig packet.DNSRecord) *packet.DNSPacket {
+	ds.Name = childZone
+	rrsig.Name = parentZone
+	return &packet.DNSPacket{
+		Header:     packet.DNSHeader{ResCode: 0},
+		Answers:    []packet.DNSRecord{ds},
+		Authorities: []packet.DNSRecord{rrsig},
 	}
 }
 
