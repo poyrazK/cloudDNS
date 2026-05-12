@@ -1314,6 +1314,16 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 		ttl = response.Authorities[0].TTL
 	}
 
+	// RFC 2308: For NXDOMAIN, use SOA MINIMUM field as TTL for negative caching
+	if response.Header.ResCode == 3 {
+		for _, auth := range response.Authorities {
+			if auth.Type == packet.SOA && auth.Minimum > 0 {
+				ttl = auth.Minimum
+				break
+			}
+		}
+	}
+
 	if (response.Header.ResCode == 0 || response.Header.ResCode == 3) && !response.Header.TruncatedMessage {
 		cacheData := make([]byte, len(resData))
 		copy(cacheData, resData)
