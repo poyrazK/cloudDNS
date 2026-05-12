@@ -99,7 +99,7 @@ func TestCacheInvalidate(t *testing.T) {
 	}
 }
 
-func TestCacheGetReturnsCopyNotReference(t *testing.T) {
+func TestCacheGetReturnsInternalSlice(t *testing.T) {
 	done := make(chan struct{})
 	t.Cleanup(func() { close(done) })
 	cache := NewDNSCache(done, nil)
@@ -113,17 +113,22 @@ func TestCacheGetReturnsCopyNotReference(t *testing.T) {
 		t.Fatalf("Expected to find key %s", key)
 	}
 
-	// Mutate the returned slice
+	// Mutate the returned slice — this reflects the new zero-copy behavior
 	res[0] = 0xFF
 	res[1] = 0xFF
 
-	// Get again — internal data must be unchanged
+	// Get again — data should be mutated since Get() returns the internal slice
 	res2, found := cache.Get(key)
 	if !found {
 		t.Fatalf("Expected to find key %s on second call", key)
 	}
-	if res2[0] != 1 || res2[1] != 2 {
-		t.Errorf("Internal cache data was mutated — Get() returned a reference, not a copy")
+	if res2[0] != 0xFF || res2[1] != 0xFF {
+		t.Errorf("Expected res2 to reflect mutation, got %v", res2)
+	}
+
+	// Verify the caller's original data was not affected (Set() made a copy)
+	if originalData[0] != 1 || originalData[1] != 2 {
+		t.Errorf("Caller's original data was mutated by Set()")
 	}
 }
 
