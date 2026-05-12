@@ -2,6 +2,8 @@ package server
 
 import (
 	"container/heap"
+	"hash/fnv"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -9,15 +11,25 @@ import (
 	"github.com/poyrazK/cloudDNS/internal/infrastructure/metrics"
 )
 
-// rateLimiter implements a simple per-IP token bucket with O(1) eviction.
+const numShards = 256
+
+// rateLimiterShard is an independent rate limiter segment with its own lock and bucket map.
+type rateLimiterShard struct {
+	mu          sync.Mutex
+	buckets     map[string]*bucket
+	rate        float64 // tokens per second
+	burst       int     // max tokens
+	maxBuckets  int     // maximum buckets in this shard
+	idleHeap    bucketIdleHeap
+	rateLimited atomic.Uint64
+}
+
+// rateLimiter implements a sharded per-IP token bucket with O(1) eviction per shard.
 type rateLimiter struct {
-	mu         sync.Mutex
-	buckets    map[string]*bucket
+	shards     [numShards]rateLimiterShard
 	rate       float64 // tokens per second
 	burst      int     // max tokens
-	maxBuckets int     // maximum buckets to store (bounds memory)
-	idleHeap   bucketIdleHeap
-	rateLimited atomic.Uint64
+	maxBuckets int     // maximum total buckets across all shards
 }
 
 type bucket struct {
@@ -51,50 +63,68 @@ func (h *bucketIdleHeap) Pop() any {
 	return item
 }
 
+// hashIP returns a uint64 hash of an IP string using FNV32a.
+func hashIP(ip string) uint64 {
+	h := fnv.New64a()
+	h.Write([]byte(ip))
+	return h.Sum64()
+}
+
+// shard returns the rateLimiterShard for the given IP.
+func (rl *rateLimiter) shard(ip string) *rateLimiterShard {
+	return &rl.shards[hashIP(ip)%numShards]
+}
+
 // newRateLimiter creates a new rate limiter with the given token rate, burst, and max bucket count.
 func newRateLimiter(rate float64, burst int, maxBuckets int) *rateLimiter {
-	h := bucketIdleHeap{}
-	heap.Init(&h)
-	return &rateLimiter{
-		buckets:    make(map[string]*bucket),
+	rl := &rateLimiter{
 		rate:       rate,
 		burst:      burst,
 		maxBuckets: maxBuckets,
-		idleHeap:   h,
 	}
+	perShard := int(math.Max(1, float64(maxBuckets/numShards)))
+	for i := range rl.shards {
+		rl.shards[i].buckets = make(map[string]*bucket)
+		rl.shards[i].rate = rate
+		rl.shards[i].burst = burst
+		rl.shards[i].maxBuckets = perShard
+		heap.Init(&rl.shards[i].idleHeap)
+	}
+	return rl
 }
 
 // Allow checks if a request from the given IP is allowed under the token bucket limits.
 func (rl *rateLimiter) Allow(ip string) bool {
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
+	shard := rl.shard(ip)
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
 
 	now := time.Now()
-	b, exists := rl.buckets[ip]
+	b, exists := shard.buckets[ip]
 	if !exists {
-		if len(rl.buckets) >= rl.maxBuckets {
-			rl.evictOldestBucket()
+		if len(shard.buckets) >= shard.maxBuckets {
+			shard.evictOldestBucket()
 		}
 		b = &bucket{
-			tokens: float64(rl.burst),
+			tokens: float64(shard.burst),
 			last:   now,
 		}
 		entry := &bucketIdleEntry{ip: ip, b: b}
-		heap.Push(&rl.idleHeap, entry)
-		b.heapIdx = len(rl.idleHeap) - 1
-		rl.buckets[ip] = b
+		heap.Push(&shard.idleHeap, entry)
+		b.heapIdx = len(shard.idleHeap) - 1
+		shard.buckets[ip] = b
 	}
 
 	elapsed := now.Sub(b.last).Seconds()
 	b.last = now
 
 	// Update heap position after last change
-	heap.Fix(&rl.idleHeap, b.heapIdx)
+	heap.Fix(&shard.idleHeap, b.heapIdx)
 
 	// Refill
-	b.tokens += elapsed * rl.rate
-	if b.tokens > float64(rl.burst) {
-		b.tokens = float64(rl.burst)
+	b.tokens += elapsed * shard.rate
+	if b.tokens > float64(shard.burst) {
+		b.tokens = float64(shard.burst)
 	}
 
 	// Consume
@@ -103,37 +133,44 @@ func (rl *rateLimiter) Allow(ip string) bool {
 		return true
 	}
 
-	rl.rateLimited.Add(1)
+	shard.rateLimited.Add(1)
 	metrics.RateLimitedTotal.Inc()
 	return false
 }
 
-// evictOldestBucket removes the bucket with the oldest last timestamp in O(log n).
-func (rl *rateLimiter) evictOldestBucket() {
-	for len(rl.idleHeap) > 0 {
-		entry := heap.Pop(&rl.idleHeap).(*bucketIdleEntry)
+// evictOldestBucket removes the bucket with the oldest last timestamp in O(log n) within this shard.
+func (sh *rateLimiterShard) evictOldestBucket() {
+	for len(sh.idleHeap) > 0 {
+		entry := heap.Pop(&sh.idleHeap).(*bucketIdleEntry)
 		if entry == nil {
 			continue
 		}
 		// If bucket still exists in map, delete it; otherwise it was already
 		// evicted by Cleanup() and this is a stale heap entry — discard it.
-		if _, ok := rl.buckets[entry.ip]; ok {
-			delete(rl.buckets, entry.ip)
+		if _, ok := sh.buckets[entry.ip]; ok {
+			delete(sh.buckets, entry.ip)
 			return
 		}
 	}
 }
 
-// Cleanup removes old buckets to prevent memory leaks.
+// Cleanup removes old buckets from all shards to prevent memory leaks.
 func (rl *rateLimiter) Cleanup() {
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
+	for i := range rl.shards {
+		rl.shards[i].Cleanup()
+	}
+}
+
+// Cleanup removes old buckets from this shard.
+func (sh *rateLimiterShard) Cleanup() {
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
 
 	now := time.Now()
-	for ip, b := range rl.buckets {
+	for ip, b := range sh.buckets {
 		if now.Sub(b.last) > 10*time.Minute {
-			heap.Remove(&rl.idleHeap, b.heapIdx)
-			delete(rl.buckets, ip)
+			heap.Remove(&sh.idleHeap, b.heapIdx)
+			delete(sh.buckets, ip)
 		}
 	}
 }
@@ -153,7 +190,11 @@ func (rl *rateLimiter) CleanupLoop(done <-chan struct{}) {
 	}
 }
 
-// RateLimited returns the total number of queries rejected by rate limiting.
+// RateLimited returns the total number of queries rejected by rate limiting across all shards.
 func (rl *rateLimiter) RateLimited() uint64 {
-	return rl.rateLimited.Load()
+	var total uint64
+	for i := range rl.shards {
+		total += rl.shards[i].rateLimited.Load()
+	}
+	return total
 }
