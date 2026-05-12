@@ -1941,7 +1941,7 @@ func (s *Server) fetchDNSKEYFromNetwork(_ context.Context, zoneName string) ([]p
 
 // fetchDSFromNetwork queries DS records for a child zone from the parent zone.
 // It also fetches the RRSIG records that sign the DS RRset.
-func (s *Server) fetchDSFromNetwork(ctx context.Context, childZone, parentZone string) ([]packet.DNSRecord, []packet.DNSRecord, error) {
+func (s *Server) fetchDSFromNetwork(_ context.Context, childZone, parentZone string) ([]packet.DNSRecord, []packet.DNSRecord, error) {
 	// Query parent zone for DS record of child zone
 	dsResp, err := s.resolveRecursive(parentZone, packet.DS)
 	if err != nil {
