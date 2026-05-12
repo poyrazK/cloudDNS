@@ -64,7 +64,7 @@ func (r *recursiveResolver) getShuffledRoots() []string {
 }
 
 // resolveRecursive performs iterative DNS resolution starting from root servers.
-func (s *Server) resolveRecursive(ctx context.Context, name string, qType packet.QueryType) (*packet.DNSPacket, error) {
+func (s *Server) resolveRecursive(_ context.Context, name string, qType packet.QueryType) (*packet.DNSPacket, error) {
 	// Total timeout to prevent indefinite blocking on failing root servers
 	const errRecursiveTimeout = "recursive resolution timeout"
 	resolveStart := time.Now()
