@@ -287,6 +287,10 @@ func (m *mockRepo) UpdateRecordHealth(_ context.Context, _ string, _ domain.Heal
 	return m.err
 }
 
+func (m *mockRepo) UpdateRecord(_ context.Context, record *domain.Record) error {
+	return m.err
+}
+
 func TestDNSService_ExtraMethods(t *testing.T) {
 	repo := &mockRepo{}
 	svc := NewDNSService(repo, nil)

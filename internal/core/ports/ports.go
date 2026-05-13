@@ -30,6 +30,7 @@ type DNSRepository interface {
 	CreateZoneWithRecords(ctx context.Context, zone *domain.Zone, records []domain.Record) error
 	CreateRecord(ctx context.Context, record *domain.Record) error
 	BatchCreateRecords(ctx context.Context, records []domain.Record) error
+	UpdateRecord(ctx context.Context, record *domain.Record) error
 	ListZones(ctx context.Context, tenantID string) ([]domain.Zone, error)
 	DeleteZone(ctx context.Context, zoneID string, tenantID string) error
 	DeleteRecord(ctx context.Context, recordID string, zoneID string, tenantID string) error
@@ -72,6 +73,7 @@ type DNSService interface {
 	Resolve(ctx context.Context, name string, qType domain.RecordType, clientIP string) ([]domain.Record, error)
 	GetRecordsToProbeStreaming(ctx context.Context) (RecordIterator, error) // Added for Smart Engine
 	UpdateRecordHealth(ctx context.Context, recordID string, status domain.HealthStatus, errMsg string) error // Added for Smart Engine
+	UpdateRecord(ctx context.Context, record *domain.Record) error
 	ListZones(ctx context.Context, tenantID string) ([]domain.Zone, error)
 	ListRecordsForZone(ctx context.Context, zoneID string, tenantID string) ([]domain.Record, error)
 	DeleteZone(ctx context.Context, zoneID string, tenantID string) error

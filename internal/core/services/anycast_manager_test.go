@@ -62,6 +62,10 @@ func (m *mockAnycastDNSService) UpdateRecordHealth(_ context.Context, _ string, 
 	return nil
 }
 
+func (m *mockAnycastDNSService) UpdateRecord(_ context.Context, record *domain.Record) error {
+	return nil
+}
+
 func TestAnycastManager_Lifecycle(t *testing.T) {
 	dnsSvc := &mockAnycastDNSService{healthy: true}
 	routing := &testutil.MockRoutingEngine{}
@@ -160,6 +164,10 @@ func (m *mockMultiBackendService) GetRecordsToProbeStreaming(_ context.Context) 
 }
 
 func (m *mockMultiBackendService) UpdateRecordHealth(_ context.Context, _ string, _ domain.HealthStatus, _ string) error {
+	return nil
+}
+
+func (m *mockMultiBackendService) UpdateRecord(_ context.Context, record *domain.Record) error {
 	return nil
 }
 

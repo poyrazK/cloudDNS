@@ -103,6 +103,29 @@ func (s *dnsService) CreateRecord(ctx context.Context, record *domain.Record) er
 	return nil
 }
 
+// UpdateRecord updates an existing DNS record.
+func (s *dnsService) UpdateRecord(ctx context.Context, record *domain.Record) error {
+	record.UpdatedAt = time.Now()
+
+	if record.TTL < 60 {
+		record.TTL = 60
+	}
+
+	if err := s.repo.UpdateRecord(ctx, record); err != nil {
+		return err
+	}
+
+	// Invalidate cache across all nodes
+	if s.cache != nil {
+		if err := s.cache.Invalidate(ctx, record.Name, record.Type); err != nil {
+			s.logger.Warn("failed to invalidate cache after record update", "name", record.Name, "type", record.Type, "error", err)
+		}
+	}
+
+	s.audit(ctx, "unknown", "UPDATE_RECORD", "RECORD", record.ID, fmt.Sprintf("Updated %s record for %s", record.Type, record.Name))
+	return nil
+}
+
 // audit logs an action to the audit trail via the repository.
 func (s *dnsService) audit(ctx context.Context, tenantID, action, resType, resID, details string) {
 	logEntry := &domain.AuditLog{

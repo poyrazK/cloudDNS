@@ -100,6 +100,14 @@ func (m *mockDNSService) UpdateRecordHealth(_ context.Context, _ string, _ domai
 	return m.err
 }
 
+func (m *mockDNSService) UpdateRecord(_ context.Context, record *domain.Record) error {
+	if m.err != nil {
+		return m.err
+	}
+	record.ID = "rec-updated"
+	return nil
+}
+
 func (m *mockDNSService) HealthCheck(_ context.Context) map[string]error {
 	res := make(map[string]error)
 	res["postgres"] = m.err

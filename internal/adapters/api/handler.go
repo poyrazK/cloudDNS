@@ -98,6 +98,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	// Write operations - rate limited per tenant
 	mux.Handle("POST /zones", cors(auth(rateLimitWrite(admin(http.HandlerFunc(h.CreateZone))))))
 	mux.Handle("POST /zones/{id}/records", cors(auth(rateLimitWrite(RequireRole(domain.RoleAdmin, domain.RoleWriter)(http.HandlerFunc(h.CreateRecord))))))
+	mux.Handle("PUT /zones/{zone_id}/records/{id}", cors(auth(rateLimitWrite(RequireRole(domain.RoleAdmin, domain.RoleWriter)(http.HandlerFunc(h.UpdateRecord))))))
 
 	// Delete operations - more restrictive
 	mux.Handle("DELETE /zones/{id}", cors(auth(rateLimitDeleteZone(admin(http.HandlerFunc(h.DeleteZone))))))
@@ -294,6 +295,49 @@ func (h *Handler) CreateRecord(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
+	if err := json.NewEncoder(w).Encode(record); err != nil {
+		h.logger.Error("failed to encode record response", "error", err)
+	}
+}
+
+// UpdateRecord handles PUT /zones/{zone_id}/records/{id} requests.
+func (h *Handler) UpdateRecord(w http.ResponseWriter, r *http.Request) {
+	zoneID := r.PathValue("zone_id")
+	id := r.PathValue("id")
+
+	var record domain.Record
+	if !validateContentType(r) {
+		http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
+		return
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodySize)).Decode(&record); err != nil {
+		h.writeJSONError(w, http.StatusBadRequest, "Invalid request body", err)
+		return
+	}
+
+	if err := domain.ValidateRecord(&record); err != nil {
+		h.writeJSONError(w, http.StatusBadRequest, "Invalid record", err)
+		return
+	}
+
+	record.ID = id
+	record.ZoneID = zoneID
+
+	tenantID, ok := r.Context().Value(CtxTenantID).(string)
+	if !ok || tenantID == "" {
+		h.logger.Warn("UpdateRecord: missing or invalid tenant ID in context")
+		h.writeJSONError(w, http.StatusUnauthorized, "Unauthorized: missing tenant context", nil)
+		return
+	}
+	record.TenantID = tenantID
+
+	if err := h.svc.UpdateRecord(r.Context(), &record); err != nil {
+		h.writeJSONError(w, http.StatusInternalServerError, "An internal error occurred", err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(record); err != nil {
 		h.logger.Error("failed to encode record response", "error", err)
 	}
