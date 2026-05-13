@@ -117,6 +117,19 @@ func TestCacheGetInto(t *testing.T) {
 	if data[0] != 0x12 || data[1] != 0x34 {
 		t.Errorf("expected txID injection 0x1234, got %x", []byte{data[0], data[1]})
 	}
+
+	// Call again with different txID — should not corrupt the cache
+	data2, found := cache.GetInto(key, 0x5678)
+	if !found {
+		t.Fatalf("expected to find key %s on second call", key)
+	}
+	if data2[0] != 0x56 || data2[1] != 0x78 {
+		t.Errorf("expected txID injection 0x5678, got %x", []byte{data2[0], data2[1]})
+	}
+	// First call's data should be unaffected (copy semantics)
+	if data[0] != 0x12 || data[1] != 0x34 {
+		t.Errorf("first call's data was mutated by second call")
+	}
 }
 
 func TestCacheGetIntoShortData(t *testing.T) {
