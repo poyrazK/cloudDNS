@@ -1,7 +1,11 @@
 // Package server provides the core DNS server implementation.
 package server
 
-import "context"
+import (
+	"context"
+
+	"github.com/poyrazK/cloudDNS/internal/dns/packet"
+)
 
 import (
 	"hash/fnv"
@@ -73,8 +77,10 @@ func (c *DNSCache) Get(key string) ([]byte, bool) {
 	return item.data, true
 }
 
-// GetInto returns a copy of the cached data with the transaction ID injected.
-// The returned slice is independent and safe to retain or mutate.
+// GetInto returns data from the cache with the transaction ID injected.
+// For data >= 2 bytes: TXID is written at offset 0 (overwriting first 2 bytes of data).
+// For data < 2 bytes: no TXID injection (would corrupt too-short responses).
+// The returned slice is from a pooled buffer — callers must not retain or mutate it.
 func (c *DNSCache) GetInto(key string, txID uint16) ([]byte, bool) {
 	shard := c.getShard(key)
 	shard.mu.RLock()
@@ -89,13 +95,32 @@ func (c *DNSCache) GetInto(key string, txID uint16) ([]byte, bool) {
 		return nil, false
 	}
 
-	cached := make([]byte, len(item.data))
-	copy(cached, item.data)
-	if len(cached) >= 2 {
-		cached[0] = byte(txID >> 8)
-		cached[1] = byte(txID & 0xFF)
+	dataLen := len(item.data)
+
+	// For data < 2 bytes, don't inject TXID (would corrupt the response)
+	if dataLen < 2 {
+		buf := packet.GetBuffer()
+		if dataLen > packet.MaxPacketSize {
+			packet.PutBuffer(buf)
+			return nil, false
+		}
+		copy(buf.Buf, item.data)
+		return buf.Buf[:dataLen], true
 	}
-	return cached, true
+
+	// dataLen >= 2: use pooled buffer, overwrite TXID at offset 0
+	buf := packet.GetBuffer()
+	if dataLen > packet.MaxPacketSize {
+		packet.PutBuffer(buf)
+		return nil, false
+	}
+
+	// Copy cached data into pooled buffer
+	copy(buf.Buf, item.data)
+	// Overwrite TXID at offset 0 (same as original behavior, but via pooled buffer)
+	buf.Buf[0] = byte(txID >> 8)
+	buf.Buf[1] = byte(txID & 0xFF)
+	return buf.Buf[:dataLen], true
 }
 
 // SetNoCopy stores data directly without copying. The caller must not
