@@ -8,7 +8,7 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"math/big"
 	"net"
 	"os"
@@ -22,7 +22,8 @@ import (
 
 func main() {
 	if err := Run(os.Args); err != nil {
-		log.Fatalf("iana-bench failed: %v", err)
+		slog.Error("iana-bench failed", "error", err)
+		os.Exit(1)
 	}
 }
 
@@ -50,7 +51,7 @@ func Run(args []string) error {
 	}
 	defer func() {
 		if errClose := db.Close(); errClose != nil {
-			log.Printf("failed to close database: %v", errClose)
+			slog.Error("failed to close database", "error", errClose)
 		}
 	}()
 
@@ -65,7 +66,7 @@ func RunBench(db *sql.DB, target string, count, concurrency int) error {
 	}
 	defer func() {
 		if errClose := rows.Close(); errClose != nil {
-			log.Printf("failed to close rows: %v", errClose)
+			slog.Error("failed to close rows", "error", errClose)
 		}
 	}()
 
@@ -103,7 +104,7 @@ func RunBench(db *sql.DB, target string, count, concurrency int) error {
 			}
 			defer func() {
 				if errClose := conn.Close(); errClose != nil {
-					log.Printf("failed to close connection: %v", errClose)
+					slog.Error("failed to close connection", "error", errClose)
 				}
 			}()
 

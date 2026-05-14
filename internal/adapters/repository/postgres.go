@@ -9,7 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"math"
 	"net"
 	"regexp"
@@ -24,12 +24,13 @@ import (
 
 // PostgresRepository implements ports.DNSRepository using PostgreSQL.
 type PostgresRepository struct {
-	db *sql.DB
+	db     *sql.DB
+	logger *slog.Logger
 }
 
 // NewPostgresRepository creates and returns a new PostgresRepository instance.
 func NewPostgresRepository(db *sql.DB) *PostgresRepository {
-	return &PostgresRepository{db: db}
+	return &PostgresRepository{db: db, logger: slog.New(slog.NewTextHandler(nil, nil))}
 }
 
 // GetRecords implements ports.DNSRepository.
@@ -60,7 +61,7 @@ func (r *PostgresRepository) GetRecords(ctx context.Context, name string, qType 
 	}
 	defer func() {
 		if errClose := rows.Close(); errClose != nil {
-			log.Printf("failed to close rows: %v", errClose)
+			r.logger.Error("failed to close rows", "error", errClose)
 		}
 	}()
 
@@ -137,7 +138,7 @@ func (r *PostgresRepository) GetRecordsByNames(ctx context.Context, names []stri
 	}
 	defer func() {
 		if errClose := rows.Close(); errClose != nil {
-			log.Printf("failed to close rows: %v", errClose)
+			r.logger.Error("failed to close rows", "error", errClose)
 		}
 	}()
 
@@ -193,7 +194,7 @@ func (r *PostgresRepository) GetIPsForName(ctx context.Context, name string, cli
 	}
 	defer func() {
 		if errClose := rows.Close(); errClose != nil {
-			log.Printf("failed to close rows: %v", errClose)
+			r.logger.Error("failed to close rows", "error", errClose)
 		}
 	}()
 
@@ -284,7 +285,7 @@ func (r *PostgresRepository) GetDNSKEYs(ctx context.Context, zoneName string) ([
 	}
 	defer func() {
 		if errClose := rows.Close(); errClose != nil {
-			log.Printf("failed to close rows: %v", errClose)
+			r.logger.Error("failed to close rows", "error", errClose)
 		}
 	}()
 
@@ -379,7 +380,7 @@ func (r *PostgresRepository) ListRecordsForZone(ctx context.Context, zoneID stri
 	}
 	defer func() {
 		if errClose := rows.Close(); errClose != nil {
-			log.Printf("failed to close rows: %v", errClose)
+			r.logger.Error("failed to close rows", "error", errClose)
 		}
 	}()
 
@@ -531,7 +532,7 @@ func (r *PostgresRepository) CreateZoneWithRecords(ctx context.Context, zone *do
 	}
 	defer func() {
 		if errRollback := tx.Rollback(); errRollback != nil && !errors.Is(errRollback, sql.ErrTxDone) {
-			log.Printf("failed to rollback transaction: %v", errRollback)
+			r.logger.Error("failed to rollback transaction", "error", errRollback)
 		}
 	}()
 
@@ -635,7 +636,7 @@ func (r *PostgresRepository) BatchCreateRecords(ctx context.Context, records []d
 	}
 	defer func() {
 		if errRollback := tx.Rollback(); errRollback != nil && !errors.Is(errRollback, sql.ErrTxDone) {
-			log.Printf("failed to rollback batch transaction: %v", errRollback)
+			r.logger.Error("failed to rollback batch transaction", "error", errRollback)
 		}
 	}()
 
@@ -717,7 +718,7 @@ func (r *PostgresRepository) ListZones(ctx context.Context, tenantID string) ([]
 	}
 	defer func() {
 		if errClose := rows.Close(); errClose != nil {
-			log.Printf("failed to close rows: %v", errClose)
+			r.logger.Error("failed to close rows", "error", errClose)
 		}
 	}()
 
@@ -819,7 +820,7 @@ func (r *PostgresRepository) ListZoneChanges(ctx context.Context, zoneID string,
 	}
 	defer func() {
 		if errClose := rows.Close(); errClose != nil {
-			log.Printf("failed to close rows: %v", errClose)
+			r.logger.Error("failed to close rows", "error", errClose)
 		}
 	}()
 
@@ -937,7 +938,7 @@ func (r *PostgresRepository) GetAuditLogs(ctx context.Context, tenantID string) 
 	}
 	defer func() {
 		if errClose := rows.Close(); errClose != nil {
-			log.Printf("failed to close rows: %v", errClose)
+			r.logger.Error("failed to close rows", "error", errClose)
 		}
 	}()
 
@@ -967,7 +968,7 @@ func (r *PostgresRepository) ApplyZoneUpdate(ctx context.Context, zoneID string,
 	}
 	defer func() {
 		if errRollback := tx.Rollback(); errRollback != nil && !errors.Is(errRollback, sql.ErrTxDone) {
-			log.Printf("failed to rollback transaction: %v", errRollback)
+			r.logger.Error("failed to rollback transaction", "error", errRollback)
 		}
 	}()
 
@@ -990,7 +991,7 @@ func (r *PostgresRepository) ApplyZoneUpdate(ctx context.Context, zoneID string,
 	newSerial := currentSerial + 1
 	// Detect uint32 wraparound (Go doesn't panic on overflow, it wraps silently)
 	if newSerial == 0 && currentSerial != 0 {
-		log.Printf("SOA serial overflow, resetting to 0 for zone %s", zoneID)
+		r.logger.Warn("SOA serial overflow, resetting to 0", "zone_id", zoneID)
 	}
 
 	for _, op := range operations {
@@ -1060,7 +1061,7 @@ func (r *PostgresRepository) ListKeysForZone(ctx context.Context, zoneID string)
 	}
 	defer func() {
 		if errClose := rows.Close(); errClose != nil {
-			log.Printf("failed to close rows: %v", errClose)
+			r.logger.Error("failed to close rows", "error", errClose)
 		}
 	}()
 
@@ -1121,7 +1122,7 @@ func (r *PostgresRepository) ListAPIKeys(ctx context.Context, tenantID string) (
 	}
 	defer func() {
 		if cerr := rows.Close(); cerr != nil {
-			log.Printf("failed to close rows: %v", cerr)
+			r.logger.Error("failed to close rows", "error", cerr)
 		}
 	}()
 
