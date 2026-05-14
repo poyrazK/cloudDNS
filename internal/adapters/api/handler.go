@@ -332,7 +332,9 @@ func (h *Handler) UpdateRecord(w http.ResponseWriter, r *http.Request) {
 	record.TenantID = tenantID
 
 	if err := h.svc.UpdateRecord(r.Context(), &record); err != nil {
-		h.writeJSONError(w, http.StatusInternalServerError, "An internal error occurred", err)
+		// Return 404 for both "not found" and "tenant mismatch" — prevents
+		// writers from probing whether record IDs exist under other tenants.
+		h.writeJSONError(w, http.StatusNotFound, "Record not found", nil)
 		return
 	}
 

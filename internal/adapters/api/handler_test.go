@@ -469,6 +469,60 @@ func TestCreateRecordValidation(t *testing.T) {
 	}
 }
 
+func TestUpdateRecordSuccess(t *testing.T) {
+	svc := &mockDNSService{}
+	repo := &testutil.MockRepo{}
+	handler := New(svc, repo, slog.Default())
+
+	rec := domain.Record{Name: "www.test.com.", Type: domain.TypeA, Content: "5.6.7.8", TTL: 300}
+	body, _ := json.Marshal(rec)
+	req := httptest.NewRequest("PUT", "/zones/z1/records/r1", bytes.NewBuffer(body))
+	req = withTenant(req, testTenantID)
+	w := httptest.NewRecorder()
+
+	handler.UpdateRecord(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+}
+
+func TestUpdateRecordNotFound(t *testing.T) {
+	svc := &mockDNSService{err: errors.New("not found")}
+	repo := &testutil.MockRepo{}
+	handler := New(svc, repo, slog.Default())
+
+	rec := domain.Record{Name: "www.test.com.", Type: domain.TypeA, Content: "5.6.7.8", TTL: 300}
+	body, _ := json.Marshal(rec)
+	req := httptest.NewRequest("PUT", "/zones/z1/records/r1", bytes.NewBuffer(body))
+	req = withTenant(req, testTenantID)
+	w := httptest.NewRecorder()
+
+	handler.UpdateRecord(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("Expected status 404, got %d", w.Code)
+	}
+}
+
+func TestUpdateRecordMissingTenant(t *testing.T) {
+	svc := &mockDNSService{}
+	repo := &testutil.MockRepo{}
+	handler := New(svc, repo, slog.Default())
+
+	rec := domain.Record{Name: "www.test.com.", Type: domain.TypeA, Content: "5.6.7.8", TTL: 300}
+	body, _ := json.Marshal(rec)
+	req := httptest.NewRequest("PUT", "/zones/z1/records/r1", bytes.NewBuffer(body))
+	// No withTenant call — missing tenant context
+	w := httptest.NewRecorder()
+
+	handler.UpdateRecord(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("Expected status 401, got %d", w.Code)
+	}
+}
+
 func TestDeleteZoneSuccess(t *testing.T) {
 	svc := &mockDNSService{}
 	repo := &testutil.MockRepo{}
