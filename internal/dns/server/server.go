@@ -702,13 +702,11 @@ func (s *Server) handleTCPConnection(ctx context.Context, conn net.Conn) {
 		request := packet.NewDNSPacket()
 		if errFromBuf := request.FromBuffer(reqBuffer); errFromBuf == nil && len(request.Questions) > 0 {
 			if request.Questions[0].QType == packet.AXFR {
-				s.handleAXFR(ctx, conn, request, reqBuffer.Buf[:packetLen])
-				packet.PutBuffer(reqBuffer)
+				s.handleAXFR(ctx, conn, request, reqBuffer.Buf[:packetLen], reqBuffer)
 				continue
 			}
 			if request.Questions[0].QType == packet.IXFR {
-				s.handleIXFR(ctx, conn, request, reqBuffer.Buf[:packetLen])
-				packet.PutBuffer(reqBuffer)
+				s.handleIXFR(ctx, conn, request, reqBuffer.Buf[:packetLen], reqBuffer)
 				continue
 			}
 		}
@@ -726,7 +724,8 @@ func (s *Server) handleTCPConnection(ctx context.Context, conn net.Conn) {
 }
 
 // handleAXFR processes a DNS zone transfer (AXFR) request over TCP.
-func (s *Server) handleAXFR(ctx context.Context, conn net.Conn, request *packet.DNSPacket, rawData []byte) {
+func (s *Server) handleAXFR(ctx context.Context, conn net.Conn, request *packet.DNSPacket, rawData []byte, buffer *packet.BytePacketBuffer) {
+	defer packet.PutBuffer(buffer)
 	q := request.Questions[0]
 	if !strings.HasSuffix(q.Name, ".") {
 		q.Name += "."
@@ -1496,7 +1495,8 @@ func (s *Server) handleUpdate(ctx context.Context, request *packet.DNSPacket, ra
 }
 
 // handleIXFR processes an incremental zone transfer (IXFR) request over TCP.
-func (s *Server) handleIXFR(ctx context.Context, conn net.Conn, request *packet.DNSPacket, rawData []byte) {
+func (s *Server) handleIXFR(ctx context.Context, conn net.Conn, request *packet.DNSPacket, rawData []byte, buffer *packet.BytePacketBuffer) {
+	defer packet.PutBuffer(buffer)
 	q := request.Questions[0]
 	if !strings.HasSuffix(q.Name, ".") {
 		q.Name += "."
