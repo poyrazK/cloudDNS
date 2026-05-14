@@ -56,13 +56,11 @@ type CORSConfig struct {
 	MaxAge         int
 }
 
-// DefaultCORSConfig creates config from CORS_ALLOWED_ORIGINS env var (comma-separated, or "*" for all).
+// DefaultCORSConfig creates config from CORS_ALLOWED_ORIGINS env var (comma-separated).
+// When the env var is not set, no origins are allowed — operators must explicitly configure.
 func DefaultCORSConfig() *CORSConfig {
 	origins := os.Getenv("CORS_ALLOWED_ORIGINS")
-	if origins == "" {
-		origins = "*"
-	}
-	// Parse and trim each origin, ignoring empty strings
+	// No default — empty means no origins allowed (secure by default)
 	rawOrigins := strings.Split(origins, ",")
 	allowed := make([]string, 0, len(rawOrigins))
 	for _, o := range rawOrigins {
