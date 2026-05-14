@@ -587,6 +587,12 @@ func (r *PostgresRepository) CreateRecord(ctx context.Context, record *domain.Re
 	return err
 }
 
+// UpdateRecord implements ports.DNSRepository.
+func (r *PostgresRepository) UpdateRecord(ctx context.Context, record *domain.Record) error {
+	query := `UPDATE dns_records SET name = $1, type = $2, content = $3, ttl = $4, priority = $5, weight = $6, port = $7, network = $8, health_check_type = $9, health_check_target = $10, updated_at = $11 WHERE id = $12 AND tenant_id = $13 RETURNING updated_at`
+	return r.db.QueryRowContext(ctx, query, record.Name, record.Type, record.Content, record.TTL, record.Priority, record.Weight, record.Port, record.Network, record.HealthCheckType, record.HealthCheckTarget, record.UpdatedAt, record.ID, record.TenantID).Scan(&record.UpdatedAt)
+}
+
 // UpdateRecordHealth implements ports.DNSRepository.
 func (r *PostgresRepository) UpdateRecordHealth(ctx context.Context, recordID string, status domain.HealthStatus, errMsg string) error {
 	query := `

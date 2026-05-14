@@ -102,6 +102,12 @@ func (m *MockRepo) BatchCreateRecords(_ context.Context, records []domain.Record
 	return args.Error(0)
 }
 
+// UpdateRecord implements ports.DNSRepository for testing.
+func (m *MockRepo) UpdateRecord(_ context.Context, record *domain.Record) error {
+	args := m.Called(record)
+	return args.Error(0)
+}
+
 // ListZones implements ports.DNSRepository for testing.
 func (m *MockRepo) ListZones(_ context.Context, tenantID string) ([]domain.Zone, error) {
 	args := m.Called(tenantID)
@@ -317,6 +323,12 @@ func (m *MockDNSService) DeleteZone(_ context.Context, zoneID string, tenantID s
 // DeleteRecord implements ports.DNSService for testing.
 func (m *MockDNSService) DeleteRecord(_ context.Context, recordID string, zoneID string, tenantID string) error {
 	args := m.Called(recordID, zoneID, tenantID)
+	return args.Error(0)
+}
+
+// UpdateRecord implements ports.DNSService for testing.
+func (m *MockDNSService) UpdateRecord(_ context.Context, record *domain.Record) error {
+	args := m.Called(record)
 	return args.Error(0)
 }
 

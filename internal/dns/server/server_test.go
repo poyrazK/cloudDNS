@@ -291,6 +291,10 @@ func (m *mockServerRepo) UpdateRecordHealth(ctx context.Context, recordID string
 	return nil
 }
 
+func (m *mockServerRepo) UpdateRecord(ctx context.Context, record *domain.Record) error {
+	return nil
+}
+
 func (m *mockServerRepo) GetRecordsToProbe(ctx context.Context) ([]domain.Record, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
