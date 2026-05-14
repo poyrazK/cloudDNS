@@ -37,8 +37,14 @@ func (s *DNSSECService) GenerateKey(ctx context.Context, zoneID string, keyType 
 		return nil, fmt.Errorf("failed to generate key: %w", err)
 	}
 
-	privBytes, _ := x509.MarshalECPrivateKey(priv)
-	pubBytes, _ := x509.MarshalPKIXPublicKey(&priv.PublicKey)
+	privBytes, err := x509.MarshalECPrivateKey(priv)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal ECDSA private key: %w", err)
+	}
+	pubBytes, err := x509.MarshalPKIXPublicKey(&priv.PublicKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal ECDSA public key: %w", err)
+	}
 
 	key := &domain.DNSSECKey{
 		ID:         uuid.New().String(),

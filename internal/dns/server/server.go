@@ -749,7 +749,12 @@ func (s *Server) handleAXFR(ctx context.Context, conn net.Conn, request *packet.
 		}
 	}
 
-	zone, _ := s.Repo.GetZone(ctx, q.Name)
+	zone, err := s.Repo.GetZone(ctx, q.Name)
+	if err != nil {
+		s.Logger.Error("AXFR failed to look up zone", "zone", q.Name, "error", err)
+		s.sendTCPError(conn, request.Header.ID, 2) // SERVFAIL
+		return
+	}
 	if zone == nil {
 		s.Logger.Warn("AXFR requested for non-existent zone", "name", q.Name)
 		s.sendTCPError(conn, request.Header.ID, 3) // NXDOMAIN
