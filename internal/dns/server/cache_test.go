@@ -187,6 +187,65 @@ func TestCacheGetReturnsInternalSlice(t *testing.T) {
 	}
 }
 
+func TestCacheSetNoCopy(t *testing.T) {
+	done := make(chan struct{})
+	t.Cleanup(func() { close(done) })
+	cache := NewDNSCache(done, nil)
+	key := "setnocopy.com:1"
+
+	// Set via SetNoCopy (no defensive copy)
+	originalData := []byte{1, 2, 3, 4}
+	cache.SetNoCopy(key, originalData, 1*time.Hour)
+
+	// Get should return the same backing array (not a copy)
+	res, found := cache.Get(key)
+	if !found {
+		t.Fatalf("expected to find key %s", key)
+	}
+	// Get returns internal slice — verify it's the same array
+	if &res[0] != &originalData[0] {
+		t.Errorf("expected Get to return same backing array as SetNoCopy input")
+	}
+
+	// GetInto should return a copy (TX ID injection) — not the internal
+	res2, found := cache.GetInto(key, 0xABCD)
+	if !found {
+		t.Fatalf("expected to find key %s via GetInto", key)
+	}
+	if res2[0] != 0xAB || res2[1] != 0xCD {
+		t.Errorf("expected txID 0xABCD, got %x", []byte{res2[0], res2[1]})
+	}
+	// Get's result should be unaffected by GetInto's copy (Get returns internal)
+	if res[0] != 1 || res[1] != 2 {
+		t.Errorf("Get result was mutated by GetInto")
+	}
+}
+
+func TestCacheSetNoCopyExpiration(t *testing.T) {
+	done := make(chan struct{})
+	t.Cleanup(func() { close(done) })
+	cache := NewDNSCache(done, nil)
+	key := "expire-nocopy.com:1"
+
+	// Set with very short TTL
+	cache.SetNoCopy(key, []byte{9, 8, 7}, 1*time.Millisecond)
+
+	// Should be found immediately
+	_, found := cache.Get(key)
+	if !found {
+		t.Fatalf("expected to find key %s before expiry", key)
+	}
+
+	// Wait for expiry
+	time.Sleep(10 * time.Millisecond)
+
+	// Should be gone
+	_, found = cache.Get(key)
+	if found {
+		t.Errorf("expected key %s to be expired", key)
+	}
+}
+
 func TestCachePing(t *testing.T) {
 	done := make(chan struct{})
 	t.Cleanup(func() { close(done) })

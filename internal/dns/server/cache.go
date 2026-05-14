@@ -98,6 +98,20 @@ func (c *DNSCache) GetInto(key string, txID uint16) ([]byte, bool) {
 	return cached, true
 }
 
+// SetNoCopy stores data directly without copying. The caller must not
+// retain or mutate the passed slice after calling this method. Intended
+// for data that is already an independent heap copy (e.g., from Redis).
+func (c *DNSCache) SetNoCopy(key string, data []byte, ttl time.Duration) {
+	shard := c.getShard(key)
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+
+	shard.items[key] = cacheEntry{
+		data:      data,
+		expiresAt: time.Now().Add(ttl),
+	}
+}
+
 // Set stores a response in the cache with a specific TTL.
 // The input data is copied so the cache owns its own backing array.
 func (c *DNSCache) Set(key string, data []byte, ttl time.Duration) {

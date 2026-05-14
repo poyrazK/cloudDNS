@@ -995,7 +995,7 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 			} else if remainingTTL > 60*time.Second {
 				remainingTTL = 60 * time.Second
 			}
-			s.Cache.Set(cacheKey, data, remainingTTL)
+			s.Cache.SetNoCopy(cacheKey, data, remainingTTL)
 			cachedData = data
 		} else if s.Redis != nil {
 			// Redis was checked but key not found = L2 miss
