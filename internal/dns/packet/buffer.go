@@ -9,6 +9,7 @@ import (
 
 // BytePacketBuffer simplifies reading and writing the DNS packet buffer.
 type BytePacketBuffer struct {
+	mu       sync.Mutex
 	Buf      []byte
 	Pos      int
 	Len      int            // High-water mark of data loaded or written
@@ -33,17 +34,26 @@ var bufferPool = sync.Pool{
 // GetBuffer retrieves a buffer from the pool.
 func GetBuffer() *BytePacketBuffer {
 	b := bufferPool.Get().(*BytePacketBuffer)
-	b.Reset()
+	if b != nil {
+		b.Reset()
+	}
 	return b
 }
 
 // PutBuffer returns a buffer to the pool.
 func PutBuffer(b *BytePacketBuffer) {
-	bufferPool.Put(b)
+	if b != nil {
+		bufferPool.Put(b)
+	}
 }
 
 // Reset clears the buffer state for reuse.
 func (b *BytePacketBuffer) Reset() {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	b.Pos = 0
 	b.Len = 0
 	b.parsing = false
