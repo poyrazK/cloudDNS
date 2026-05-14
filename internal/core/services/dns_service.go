@@ -99,7 +99,7 @@ func (s *dnsService) CreateRecord(ctx context.Context, record *domain.Record) er
 		}
 	}
 
-	s.audit(ctx, "unknown", "CREATE_RECORD", "RECORD", record.ID, fmt.Sprintf("Created %s record for %s", record.Type, record.Name))
+	s.audit(ctx, record.TenantID, "CREATE_RECORD", "RECORD", record.ID, fmt.Sprintf("Created %s record for %s", record.Type, record.Name))
 	return nil
 }
 
@@ -122,7 +122,7 @@ func (s *dnsService) UpdateRecord(ctx context.Context, record *domain.Record) er
 		}
 	}
 
-	s.audit(ctx, "unknown", "UPDATE_RECORD", "RECORD", record.ID, fmt.Sprintf("Updated %s record for %s", record.Type, record.Name))
+	s.audit(ctx, record.TenantID, "UPDATE_RECORD", "RECORD", record.ID, fmt.Sprintf("Updated %s record for %s", record.Type, record.Name))
 	return nil
 }
 
