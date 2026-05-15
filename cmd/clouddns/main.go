@@ -246,7 +246,7 @@ func run(ctx context.Context) error {
 				redisPoolCfg.MinIdleConns = n
 			}
 		}
-		if v := os.Getenv("REDIS_IDLE_TIMEOUT_MINUTES"); v != "" {
+		if v := os.Getenv("REDIS_POOL_TIMEOUT_MINUTES"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {
 				redisPoolCfg.PoolTimeout = time.Duration(n) * time.Minute
 			}

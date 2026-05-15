@@ -158,3 +158,24 @@ func TestRedisCache_Close(t *testing.T) {
 		t.Errorf("Expected Ping to fail after Close")
 	}
 }
+
+func TestRedisCache_PoolConfig(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("Failed to run miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	cfg := RedisPoolConfig{
+		PoolSize:       50,
+		MinIdleConns:   5,
+		PoolTimeout:    30 * time.Second,
+		ConnMaxLifetime: 10 * time.Minute,
+	}
+	cache := NewRedisCache(mr.Addr(), "", 0, cfg)
+	defer cache.Close()
+
+	if err := cache.Ping(context.Background()); err != nil {
+		t.Errorf("Ping failed with pool config: %v", err)
+	}
+}
