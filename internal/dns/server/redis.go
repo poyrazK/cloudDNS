@@ -22,12 +22,24 @@ type RedisCache struct {
 	client *redis.Client
 }
 
+// RedisPoolConfig holds connection pool settings for the Redis client.
+type RedisPoolConfig struct {
+	PoolSize       int
+	MinIdleConns   int
+	PoolTimeout    time.Duration
+	ConnMaxLifetime time.Duration
+}
+
 // NewRedisCache creates a new Redis cache client.
-func NewRedisCache(addr string, password string, db int) *RedisCache {
+func NewRedisCache(addr string, password string, db int, cfg RedisPoolConfig) *RedisCache {
 	rdb := redis.NewClient(&redis.Options{
-		Addr:     addr,
-		Password: password,
-		DB:       db,
+		Addr:            addr,
+		Password:        password,
+		DB:              db,
+		PoolSize:        cfg.PoolSize,
+		MinIdleConns:    cfg.MinIdleConns,
+		PoolTimeout:     cfg.PoolTimeout,
+		ConnMaxLifetime: cfg.ConnMaxLifetime,
 	})
 	return &RedisCache{client: rdb}
 }

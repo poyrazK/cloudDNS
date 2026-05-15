@@ -17,7 +17,7 @@ func TestRedisCache(t *testing.T) {
 	defer mr.Close()
 
 	// 2. Initialize RedisCache
-	cache := NewRedisCache(mr.Addr(), "", 0)
+	cache := NewRedisCache(mr.Addr(), "", 0, RedisPoolConfig{})
 	ctx := context.Background()
 
 	// 3. Test Set and Get
@@ -49,7 +49,7 @@ func TestRedisCache_GetWithTTL(t *testing.T) {
 	}
 	defer mr.Close()
 
-	cache := NewRedisCache(mr.Addr(), "", 0)
+	cache := NewRedisCache(mr.Addr(), "", 0, RedisPoolConfig{})
 	ctx := context.Background()
 
 	key := "get-with-ttl.test."
@@ -78,7 +78,7 @@ func TestRedisCache_GetWithTTL(t *testing.T) {
 func TestRedisCache_Ping(t *testing.T) {
 	mr, _ := miniredis.Run()
 	defer mr.Close()
-	cache := NewRedisCache(mr.Addr(), "", 0)
+	cache := NewRedisCache(mr.Addr(), "", 0, RedisPoolConfig{})
 	if err := cache.Ping(context.Background()); err != nil {
 		t.Errorf("Ping failed: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestRedisCache_Ping(t *testing.T) {
 func TestRedisCache_Subscribe(t *testing.T) {
 	mr, _ := miniredis.Run()
 	defer mr.Close()
-	cache := NewRedisCache(mr.Addr(), "", 0)
+	cache := NewRedisCache(mr.Addr(), "", 0, RedisPoolConfig{})
 	ch := cache.Subscribe(context.Background())
 	if ch == nil {
 		t.Error("Subscribe returned nil channel")
@@ -101,7 +101,7 @@ func TestRedisCache_PopFromDLQ(t *testing.T) {
 	}
 	defer mr.Close()
 
-	rdb := NewRedisCache(mr.Addr(), "", 0)
+	rdb := NewRedisCache(mr.Addr(), "", 0, RedisPoolConfig{})
 	ctx := context.Background()
 
 	// Test timeout case
@@ -125,7 +125,7 @@ func TestRedisCache_DLQLen(t *testing.T) {
 	}
 	defer mr.Close()
 
-	rdb := NewRedisCache(mr.Addr(), "", 0)
+	rdb := NewRedisCache(mr.Addr(), "", 0, RedisPoolConfig{})
 	ctx := context.Background()
 
 	// Empty DLQ
@@ -149,7 +149,7 @@ func TestRedisCache_Close(t *testing.T) {
 		t.Fatalf("Failed to run miniredis: %v", err)
 	}
 	// Don't defer mr.Close() — Close should handle it
-	cache := NewRedisCache(mr.Addr(), "", 0)
+	cache := NewRedisCache(mr.Addr(), "", 0, RedisPoolConfig{})
 	if err := cache.Close(); err != nil {
 		t.Errorf("Close failed: %v", err)
 	}

@@ -1424,7 +1424,7 @@ func TestDLQRetryWorker_Shutdown(t *testing.T) {
 	}
 	defer mr.Close()
 
-	redisCache := NewRedisCache(mr.Addr(), "", 0)
+	redisCache := NewRedisCache(mr.Addr(), "", 0, RedisPoolConfig{})
 	defer redisCache.Close()
 
 	srv := &Server{

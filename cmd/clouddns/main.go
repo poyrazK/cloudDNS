@@ -230,7 +230,33 @@ func run(ctx context.Context) error {
 	redisURL := os.Getenv("REDIS_URL")
 	var redisCache *server.RedisCache
 	if redisURL != "" {
-		redisCache = server.NewRedisCache(redisURL, "", 0)
+		redisPoolCfg := server.RedisPoolConfig{
+			PoolSize:        100,
+			MinIdleConns:    0,
+			PoolTimeout:     5 * time.Minute,
+			ConnMaxLifetime: 0,
+		}
+		if v := os.Getenv("REDIS_POOL_SIZE"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				redisPoolCfg.PoolSize = n
+			}
+		}
+		if v := os.Getenv("REDIS_MIN_IDLE_CONNS"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+				redisPoolCfg.MinIdleConns = n
+			}
+		}
+		if v := os.Getenv("REDIS_IDLE_TIMEOUT_MINUTES"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				redisPoolCfg.PoolTimeout = time.Duration(n) * time.Minute
+			}
+		}
+		if v := os.Getenv("REDIS_CONN_MAX_LIFETIME_MINUTES"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				redisPoolCfg.ConnMaxLifetime = time.Duration(n) * time.Minute
+			}
+		}
+		redisCache = server.NewRedisCache(redisURL, "", 0, redisPoolCfg)
 		// Verify connectivity
 		pingCtx, cancel := context.WithTimeout(runCtx, 2*time.Second)
 		if err := redisCache.Ping(pingCtx); err != nil {
