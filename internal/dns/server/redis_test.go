@@ -178,4 +178,18 @@ func TestRedisCache_PoolConfig(t *testing.T) {
 	if err := cache.Ping(context.Background()); err != nil {
 		t.Errorf("Ping failed with pool config: %v", err)
 	}
+
+	got := cache.PoolConfig()
+	if got.PoolSize != cfg.PoolSize {
+		t.Errorf("PoolSize = %d, want %d", got.PoolSize, cfg.PoolSize)
+	}
+	if got.MinIdleConns != cfg.MinIdleConns {
+		t.Errorf("MinIdleConns = %d, want %d", got.MinIdleConns, cfg.MinIdleConns)
+	}
+	if got.PoolTimeout != cfg.PoolTimeout {
+		t.Errorf("PoolTimeout = %v, want %v", got.PoolTimeout, cfg.PoolTimeout)
+	}
+	if got.ConnMaxLifetime != cfg.ConnMaxLifetime {
+		t.Errorf("ConnMaxLifetime = %v, want %v", got.ConnMaxLifetime, cfg.ConnMaxLifetime)
+	}
 }

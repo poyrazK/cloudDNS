@@ -130,6 +130,17 @@ func (r *RedisCache) DLQLen(ctx context.Context) (int64, error) {
 	return r.client.LLen(ctx, DLQChannel).Result()
 }
 
+// PoolConfig returns the pool configuration currently applied to the client.
+func (r *RedisCache) PoolConfig() RedisPoolConfig {
+	opts := r.client.Options()
+	return RedisPoolConfig{
+		PoolSize:       opts.PoolSize,
+		MinIdleConns:   opts.MinIdleConns,
+		PoolTimeout:    opts.PoolTimeout,
+		ConnMaxLifetime: opts.ConnMaxLifetime,
+	}
+}
+
 // Close shuts down the Redis client connection.
 func (r *RedisCache) Close() error {
 	return r.client.Close()

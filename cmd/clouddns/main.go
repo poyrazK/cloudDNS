@@ -239,21 +239,29 @@ func run(ctx context.Context) error {
 		if v := os.Getenv("REDIS_POOL_SIZE"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {
 				redisPoolCfg.PoolSize = n
+			} else {
+				logger.Warn("invalid REDIS_POOL_SIZE, keeping default", "value", v, "reason", "must be a positive integer")
 			}
 		}
 		if v := os.Getenv("REDIS_MIN_IDLE_CONNS"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil && n >= 0 {
 				redisPoolCfg.MinIdleConns = n
+			} else {
+				logger.Warn("invalid REDIS_MIN_IDLE_CONNS, keeping default", "value", v, "reason", "must be a non-negative integer")
 			}
 		}
 		if v := os.Getenv("REDIS_POOL_TIMEOUT_MINUTES"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {
 				redisPoolCfg.PoolTimeout = time.Duration(n) * time.Minute
+			} else {
+				logger.Warn("invalid REDIS_POOL_TIMEOUT_MINUTES, keeping default", "value", v, "reason", "must be a positive integer")
 			}
 		}
 		if v := os.Getenv("REDIS_CONN_MAX_LIFETIME_MINUTES"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {
 				redisPoolCfg.ConnMaxLifetime = time.Duration(n) * time.Minute
+			} else {
+				logger.Warn("invalid REDIS_CONN_MAX_LIFETIME_MINUTES, keeping default", "value", v, "reason", "must be a positive integer")
 			}
 		}
 		redisCache = server.NewRedisCache(redisURL, "", 0, redisPoolCfg)
