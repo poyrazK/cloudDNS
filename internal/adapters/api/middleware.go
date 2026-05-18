@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
@@ -25,11 +26,32 @@ const CtxRole contextKey = "role"
 
 // TrustedProxyCIDRs contains CIDR ranges for trusted proxies.
 // If set, only requests from these IPs will have X-Real-IP/X-Forwarded-For honored.
-var TrustedProxyCIDRs []*net.IPNet
+// Use SetTrustedProxyCIDRs to update safely.
+var (
+	trustedProxyCIDRsMu sync.RWMutex
+	TrustedProxyCIDRs   []*net.IPNet
+)
+
+// SetTrustedProxyCIDRs updates the trusted proxy CIDRs list safely.
+func SetTrustedProxyCIDRs(cidrs []*net.IPNet) {
+	trustedProxyCIDRsMu.Lock()
+	defer trustedProxyCIDRsMu.Unlock()
+	TrustedProxyCIDRs = cidrs
+}
+
+// getTrustedProxyCIDRs returns a copy of the current trusted proxy CIDRs.
+func getTrustedProxyCIDRs() []*net.IPNet {
+	trustedProxyCIDRsMu.RLock()
+	defer trustedProxyCIDRsMu.RUnlock()
+	result := make([]*net.IPNet, len(TrustedProxyCIDRs))
+	copy(result, TrustedProxyCIDRs)
+	return result
+}
 
 // isFromTrustedProxy returns true if the remote address is from a trusted proxy.
 func isFromTrustedProxy(remoteAddr string) bool {
-	if len(TrustedProxyCIDRs) == 0 {
+	cidrs := getTrustedProxyCIDRs()
+	if len(cidrs) == 0 {
 		return false
 	}
 	ip, _, err := net.SplitHostPort(remoteAddr)
@@ -40,7 +62,7 @@ func isFromTrustedProxy(remoteAddr string) bool {
 	if parsedIP == nil {
 		return false
 	}
-	for _, cidr := range TrustedProxyCIDRs {
+	for _, cidr := range cidrs {
 		if cidr.Contains(parsedIP) {
 			return true
 		}

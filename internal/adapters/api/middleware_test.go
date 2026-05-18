@@ -167,10 +167,10 @@ func TestRequireRole(t *testing.T) {
 
 func TestClientIP(t *testing.T) {
 	// Set up trusted proxy CIDR for tests
-	originalCIDRs := TrustedProxyCIDRs
-	defer func() { TrustedProxyCIDRs = originalCIDRs }()
+	originalCIDRs := getTrustedProxyCIDRs()
+	defer SetTrustedProxyCIDRs(originalCIDRs)
 	_, trustedCIDR, _ := net.ParseCIDR("192.168.1.0/24")
-	TrustedProxyCIDRs = []*net.IPNet{trustedCIDR}
+	SetTrustedProxyCIDRs([]*net.IPNet{trustedCIDR})
 
 	tests := []struct {
 		name     string

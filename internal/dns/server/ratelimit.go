@@ -132,8 +132,10 @@ func (rl *rateLimiter) Allow(ip string) bool {
 	elapsed := now.Sub(b.last).Seconds()
 	b.last = now
 
-	// Update heap position after last change
-	heap.Fix(&shard.idleHeap, b.heapIdx)
+	// Update heap position after last change (heapIdx may be -1 if bucket was evicted by Cleanup but not yet removed from map)
+	if b.heapIdx != -1 {
+		heap.Fix(&shard.idleHeap, b.heapIdx)
+	}
 
 	// Refill tokens
 	b.tokens += uint64(elapsed * shard.rate * bucketScale)
