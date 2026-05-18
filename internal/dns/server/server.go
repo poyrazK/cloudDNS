@@ -736,7 +736,7 @@ func (s *Server) handleAXFR(ctx context.Context, conn net.Conn, request *packet.
 		tsig := request.Resources[len(request.Resources)-1]
 		secret, ok := s.TsigKeys[tsig.Name]
 		if !ok {
-			s.Logger.Warn("AXFR failed: unknown TSIG key", "key", tsig.Name, "zone", q.Name)
+			s.Logger.Debug("AXFR failed: unknown TSIG key", "key", tsig.Name, "zone", q.Name)
 			s.sendTCPError(conn, request.Header.ID, 5) // NotAuth
 			return
 		}
@@ -1461,7 +1461,7 @@ func (s *Server) handleUpdate(ctx context.Context, request *packet.DNSPacket, ra
 		tsig := request.Resources[len(request.Resources)-1]
 		secret, ok := s.TsigKeys[tsig.Name]
 		if !ok {
-			s.Logger.Warn("update failed: unknown TSIG key", "key", tsig.Name)
+			s.Logger.Debug("update failed: unknown TSIG key", "key", tsig.Name)
 			response.Header.ResCode = packet.RcodeNotAuth
 			return s.sendUpdateResponse(response, sendFn)
 		}
@@ -1577,7 +1577,7 @@ func (s *Server) handleIXFR(ctx context.Context, conn net.Conn, request *packet.
 		tsig := request.Resources[len(request.Resources)-1]
 		secret, ok := s.TsigKeys[tsig.Name]
 		if !ok {
-			s.Logger.Warn("IXFR failed: unknown TSIG key", "key", tsig.Name, "zone", q.Name)
+			s.Logger.Debug("IXFR failed: unknown TSIG key", "key", tsig.Name, "zone", q.Name)
 			s.sendTCPError(conn, request.Header.ID, 5) // NotAuth
 			return
 		}
