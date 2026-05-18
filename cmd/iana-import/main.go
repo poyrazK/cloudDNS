@@ -32,7 +32,7 @@ func main() {
 func Run([]string) error {
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
-		dbURL = "postgres://postgres:postgres@localhost:5432/clouddns?sslmode=disable"
+		return fmt.Errorf("DATABASE_URL environment variable is required")
 	}
 
 	db, err := sql.Open("pgx", dbURL)
@@ -55,8 +55,8 @@ func Run([]string) error {
 
 func RunImport(ctx context.Context, repo ports.DNSRepository, url string) error {
 	fmt.Printf("Downloading IANA root zone from %s...\n", url)
-	// #nosec G107 -- URL is trusted IANA source
-	resp, err := http.Get(url)
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get(url)
 	if err != nil {
 		return fmt.Errorf("failed to download: %w", err)
 	}

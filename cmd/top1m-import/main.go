@@ -26,7 +26,7 @@ const top1mURL = "http://s3-us-west-1.amazonaws.com/umbrella-static/top-1m.csv.z
 func main() {
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
-		dbURL = "postgres://postgres:postgres@localhost:5432/clouddns?sslmode=disable"
+		slog.Error("DATABASE_URL environment variable is required"); os.Exit(1)
 	}
 
 	db, err := sql.Open("pgx", dbURL)
@@ -40,7 +40,8 @@ func main() {
 	}()
 
 	fmt.Printf("Downloading Top 1M list from %s...\n", top1mURL)
-	resp, err := http.Get(top1mURL)
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get(top1mURL)
 	if err != nil {
 		slog.Error("failed to download", "error", err); os.Exit(1)
 	}

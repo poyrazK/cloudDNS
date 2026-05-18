@@ -65,7 +65,7 @@ func replaceDSNParam(dbURL, param, value string) string {
 // Exported for testing.
 func processDatabaseURL(dbURL, hostOverride string) string {
 	if dbURL == "" {
-		dbURL = "postgres://postgres:postgres@localhost:5432/clouddns?sslmode=disable"
+		return "" // Require explicit DATABASE_URL
 	}
 
 	if hostOverride == "" {
