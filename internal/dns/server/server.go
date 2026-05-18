@@ -494,9 +494,9 @@ func (s *Server) Run(ctx context.Context) error {
 						_ = c.SetReadDeadline(time.Now().Add(udpReadDeadline))
 						continue
 					}
-					// buf[:n:n] shares the backing array — the channel send completes
-					// before the next ReadFrom, so the array is not overwritten.
-					data := buf[:n:n]
+					// Copy buffer since the backing array is reused across ReadFrom calls.
+					data := make([]byte, n)
+					copy(data, buf[:n])
 					s.udpQueue <- udpTask{addr: addr, data: data, conn: c}
 				}
 			}
@@ -959,9 +959,10 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 	}
 	cacheKey := fmt.Sprintf("%s:%d", strings.ToLower(q.Name), q.QType)
 
-	// L1/L2 Check — acquire per-key lock only for atomic check-and-populate.
-	// Lock is NOT held during L3 resolution to avoid serializing concurrent requests
-	// that map to the same shard but have different cache keys.
+	// L1/L2 Check — acquire per-key lock for atomic check-and-populate.
+	// Lock IS held during L3 resolution to prevent cache stampede — multiple
+	// concurrent requests for the same cache key would all hit L3 if the lock
+	// were released before resolution completes.
 	lock := globalCacheLocks.lockKey(cacheKey)
 	lock.Lock()
 
@@ -1004,9 +1005,8 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 		}
 	}
 
-	lock.Unlock()
-
 	if cachedData != nil {
+		lock.Unlock()
 		return sendFn(cachedData)
 	}
 
@@ -1337,6 +1337,7 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 
 	metrics.QueriesTotal.WithLabelValues(qTypeLabel, fmt.Sprintf("%d", response.Header.ResCode), protocol).Inc()
 	s.Logger.Info("query processed", "name", q.Name, "src", source, "lat", time.Since(start).Milliseconds())
+	lock.Unlock()
 	return sendFn(resData)
 }
 
