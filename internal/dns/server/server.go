@@ -395,18 +395,26 @@ func (s *Server) Run(ctx context.Context) error {
 		close(s.done) // Signal all workers to exit (goroutines check s.done and exit via wg.Done)
 		// Close listeners to unblock Accept/ReadFrom calls
 		if s.tcpListener != nil {
-			_ = s.tcpListener.Close()
+			if err := s.tcpListener.Close(); err != nil {
+				s.Logger.Warn("failed to close TCP listener", "error", err)
+			}
 		}
 		if s.dotListener != nil {
-			_ = s.dotListener.Close()
+			if err := s.dotListener.Close(); err != nil {
+				s.Logger.Warn("failed to close DoT listener", "error", err)
+			}
 		}
 		shutdownCtx, shutdownCancel := context.WithTimeout(ctx, 5*time.Second)
 		defer shutdownCancel()
 		if s.dohServer != nil {
-			_ = s.dohServer.Shutdown(shutdownCtx)
+			if err := s.dohServer.Shutdown(shutdownCtx); err != nil {
+				s.Logger.Warn("failed to shut down DoH server", "error", err)
+			}
 		}
 		if s.doqListener != nil {
-			_ = s.doqListener.Close()
+			if err := s.doqListener.Close(); err != nil {
+				s.Logger.Warn("failed to close DoQ listener", "error", err)
+			}
 		}
 		if s.Redis != nil {
 			errCh := make(chan error, 1)
@@ -474,7 +482,9 @@ func (s *Server) Run(ctx context.Context) error {
 		s.wg.Add(1)
 		go func(c net.PacketConn) {
 			defer func() {
-				_ = c.Close()
+				if err := c.Close(); err != nil {
+					s.Logger.Warn("failed to close UDP listener", "error", err)
+				}
 			}()
 			defer s.wg.Done()
 			// Set read deadline so select can re-check s.done periodically
@@ -520,7 +530,9 @@ func (s *Server) Run(ctx context.Context) error {
 		s.wg.Add(1)
 		go func() {
 			defer func() {
-				_ = s.tcpListener.Close()
+				if err := s.tcpListener.Close(); err != nil {
+					s.Logger.Warn("failed to close TCP listener", "error", err)
+				}
 			}()
 			defer s.wg.Done()
 			for {
@@ -547,7 +559,9 @@ func (s *Server) Run(ctx context.Context) error {
 			s.wg.Add(1)
 			go func() {
 				defer func() {
-					_ = s.dotListener.Close()
+					if err := s.dotListener.Close(); err != nil {
+						s.Logger.Warn("failed to close DoT listener", "error", err)
+					}
 				}()
 				defer s.wg.Done()
 				for {

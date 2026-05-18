@@ -75,15 +75,18 @@ func processDatabaseURL(dbURL, hostOverride string) string {
 	// Detect URL format vs DSN format by checking for postgres:// prefix
 	isURL := strings.HasPrefix(dbURL, "postgres://") || strings.HasPrefix(dbURL, "postgresql://")
 	if isURL {
-		// url.Parse won't fail on valid postgres:// URLs; safe to ignore error due to isURL guard
-		u, _ := url.Parse(dbURL)
-		u.Host = hostOverride
-		q := u.Query()
-		if hostOverride == "127.0.0.1" || hostOverride == "localhost" || hostOverride == "::1" {
-			q.Set("sslmode", "disable")
+		u, err := url.Parse(dbURL)
+		if err != nil {
+			slog.Warn("failed to parse database URL", "error", err)
+		} else {
+			u.Host = hostOverride
+			q := u.Query()
+			if hostOverride == "127.0.0.1" || hostOverride == "localhost" || hostOverride == "::1" {
+				q.Set("sslmode", "disable")
+			}
+			u.RawQuery = q.Encode()
+			return u.String()
 		}
-		u.RawQuery = q.Encode()
-		return u.String()
 	}
 	// DSN format (user=... password=... host=... etc)
 	isLocalHost := hostOverride == "127.0.0.1" || hostOverride == "localhost" || hostOverride == "::1"
