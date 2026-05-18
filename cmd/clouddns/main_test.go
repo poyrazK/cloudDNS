@@ -389,12 +389,12 @@ func TestProcessDatabaseURL(t *testing.T) {
 			hostOverride: "",
 			wantSSLMode:  "verify-full",
 		},
-		// Default URL when empty
+		// Default URL when empty - now requires explicit DATABASE_URL
 		{
-			name:         "Empty URL uses default with disable",
+			name:         "Empty URL returns empty string",
 			dbURL:        "",
 			hostOverride: "127.0.0.1",
-			wantSSLMode:  "disable",
+			wantSSLMode:  "",
 		},
 		// DSN format - localhost disables SSL
 		{

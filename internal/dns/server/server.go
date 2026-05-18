@@ -1413,24 +1413,16 @@ func (s *Server) handleNotify(ctx context.Context, request *packet.DNSPacket, cl
 	response.Header.AuthoritativeAnswer = true
 	response.Questions = append(response.Questions, request.Questions[0])
 
-	// Trigger async refresh if it's a slave zone
-	if !s.DisableAsync {
-		go func(zoneName string) {
-			// Check for cancellation or shutdown before starting long-running operations.
-			select {
-			case <-ctx.Done():
-				return
-			case <-s.done:
-				return
-			default:
-			}
-			zone, err := s.Repo.GetZone(ctx, zoneName)
-			if err != nil {
-				s.Logger.Error("failed to fetch zone for notify refresh", "zone", zoneName, "error", err)
-				return
-			}
-			if zone != nil && zone.Role == "slave" {
-				// Check again before refresh to avoid unnecessary work during shutdown.
+	// For slave zones, validate source is the configured master before triggering refresh
+	zone, err := s.Repo.GetZone(ctx, request.Questions[0].Name)
+	if err != nil {
+		s.Logger.Error("failed to fetch zone for notify", "zone", request.Questions[0].Name, "error", err)
+	}
+	if zone != nil && zone.Role == "slave" && zone.MasterServer != "" {
+		if !isAuthorizedNotifier(clientIP, zone.MasterServer) {
+			s.Logger.Warn("NOTIFY rejected: unauthorized source", "from", clientIP, "master", zone.MasterServer)
+		} else if !s.DisableAsync {
+			go func(zoneName string) {
 				select {
 				case <-ctx.Done():
 					return
@@ -1438,13 +1430,40 @@ func (s *Server) handleNotify(ctx context.Context, request *packet.DNSPacket, cl
 					return
 				default:
 				}
-				s.refreshZone(ctx, zone)
-			}
-		}(request.Questions[0].Name)
+				if z, err := s.Repo.GetZone(ctx, zoneName); err == nil && z != nil {
+					s.refreshZone(ctx, z)
+				}
+			}(request.Questions[0].Name)
+		}
 	}
 
 	response.Header.ResCode = packet.RcodeNoError
 	return s.sendUpdateResponse(response, sendFn)
+}
+
+// isAuthorizedNotifier checks if the source IP is authorized to send NOTIFY for the zone.
+func isAuthorizedNotifier(clientIP, masterServer string) bool {
+	// Extract host from masterServer (may be "host:port" format)
+	masterHost, _, err := net.SplitHostPort(masterServer)
+	if err != nil {
+		masterHost = masterServer // No port in config, use as-is
+	}
+
+	// If master is an IP, compare directly
+	if net.ParseIP(masterHost) != nil {
+		return clientIP == masterHost
+	}
+
+	// Master is a hostname — resolve and compare IPs
+	addrs, err := net.ResolveTCPAddr("tcp", masterHost+":0")
+	if err != nil {
+		return false
+	}
+	clientParsed := net.ParseIP(clientIP)
+	if clientParsed == nil {
+		return false
+	}
+	return clientParsed.Equal(addrs.IP)
 }
 
 // handleUpdate processes a DNS dynamic update (RFC 2136) request.
