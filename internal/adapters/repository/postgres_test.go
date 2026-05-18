@@ -39,33 +39,47 @@ func setupTestDB(t *testing.T) (*sql.DB, func()) {
 					WithStartupTimeout(60*time.Second)),
 		)
 		if err != nil {
-			containerErr = err
+			containerErr = fmt.Errorf("failed to start postgres container: %w", err)
 			return
 		}
 
 		connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable", "default_query_exec_mode=describe_exec")
 		if err != nil {
-			containerErr = err
+			containerErr = fmt.Errorf("failed to get connection string: %w", err)
 			return
 		}
 
 		connConfig, err := pgx.ParseConfig(connStr)
 		if err != nil {
-			containerErr = err
+			containerErr = fmt.Errorf("failed to parse connection config: %w", err)
 			return
 		}
 
 		db := stdlib.OpenDB(*connConfig)
 
+		// Retry connection with backoff to handle container startup lag
+		const maxRetries = 5
+		for attempt := 1; attempt <= maxRetries; attempt++ {
+			if err := db.PingContext(ctx); err == nil {
+				break
+			}
+			if attempt == maxRetries {
+				_ = db.Close()
+				containerErr = fmt.Errorf("failed to ping database after %d attempts: %w", maxRetries, err)
+				return
+			}
+			time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
+		}
+
 		schemaPath := filepath.Join(".", "schema.sql")
 		schema, err := os.ReadFile(schemaPath) // #nosec G304
 		if err != nil {
-			containerErr = err
+			containerErr = fmt.Errorf("failed to read schema: %w", err)
 			return
 		}
 
 		if _, err := db.Exec(string(schema)); err != nil {
-			containerErr = err
+			containerErr = fmt.Errorf("failed to exec schema: %w", err)
 			return
 		}
 

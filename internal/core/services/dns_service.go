@@ -155,22 +155,26 @@ func (s *dnsService) Resolve(ctx context.Context, name string, qType domain.Reco
 	}
 
 	// 2. Wildcard Matching (*.domain.com)
-	// We iteratively strip labels from the left and replace with '*'
-	// e.g. "a.b.example.com." -> "*.b.example.com." -> "*.example.com." -> "*.com."
+	// Build all wildcard candidates upfront to batch into a single query
 	labels := strings.Split(strings.TrimSuffix(name, "."), ".")
+	wildcardNames := make([]string, 0, len(labels)-1)
 	for i := 0; i < len(labels)-1; i++ {
-		wildcardName := "*." + strings.Join(labels[i+1:], ".") + "."
+		wildcardNames = append(wildcardNames, "*."+strings.Join(labels[i+1:], ".")+".")
+	}
 
-		wildcardRecords, err := s.repo.GetRecords(ctx, wildcardName, qType, clientIP)
-		if err != nil {
-			return nil, err
-		}
-		if len(wildcardRecords) > 0 {
-			// Rewrite wildcard name to the requested name for the response
-			for j := range wildcardRecords {
-				wildcardRecords[j].Name = name
+	// Single batch query instead of N queries
+	results, err := s.repo.GetRecordsByNames(ctx, wildcardNames, qType, clientIP)
+	if err != nil {
+		return nil, err
+	}
+
+	// Return first matching wildcard (in label order, same as before)
+	for _, wname := range wildcardNames {
+		if recs, ok := results[wname]; ok && len(recs) > 0 {
+			for j := range recs {
+				recs[j].Name = name
 			}
-			return s.filterHealthy(wildcardRecords), nil
+			return s.filterHealthy(recs), nil
 		}
 	}
 

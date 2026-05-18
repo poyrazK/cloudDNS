@@ -17,7 +17,7 @@ func TestRedisCache(t *testing.T) {
 	defer mr.Close()
 
 	// 2. Initialize RedisCache
-	cache := NewRedisCache(mr.Addr(), "", 0)
+	cache := NewRedisCache(mr.Addr(), "", 0, RedisPoolConfig{})
 	ctx := context.Background()
 
 	// 3. Test Set and Get
@@ -49,7 +49,7 @@ func TestRedisCache_GetWithTTL(t *testing.T) {
 	}
 	defer mr.Close()
 
-	cache := NewRedisCache(mr.Addr(), "", 0)
+	cache := NewRedisCache(mr.Addr(), "", 0, RedisPoolConfig{})
 	ctx := context.Background()
 
 	key := "get-with-ttl.test."
@@ -78,7 +78,7 @@ func TestRedisCache_GetWithTTL(t *testing.T) {
 func TestRedisCache_Ping(t *testing.T) {
 	mr, _ := miniredis.Run()
 	defer mr.Close()
-	cache := NewRedisCache(mr.Addr(), "", 0)
+	cache := NewRedisCache(mr.Addr(), "", 0, RedisPoolConfig{})
 	if err := cache.Ping(context.Background()); err != nil {
 		t.Errorf("Ping failed: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestRedisCache_Ping(t *testing.T) {
 func TestRedisCache_Subscribe(t *testing.T) {
 	mr, _ := miniredis.Run()
 	defer mr.Close()
-	cache := NewRedisCache(mr.Addr(), "", 0)
+	cache := NewRedisCache(mr.Addr(), "", 0, RedisPoolConfig{})
 	ch := cache.Subscribe(context.Background())
 	if ch == nil {
 		t.Error("Subscribe returned nil channel")
@@ -101,7 +101,7 @@ func TestRedisCache_PopFromDLQ(t *testing.T) {
 	}
 	defer mr.Close()
 
-	rdb := NewRedisCache(mr.Addr(), "", 0)
+	rdb := NewRedisCache(mr.Addr(), "", 0, RedisPoolConfig{})
 	ctx := context.Background()
 
 	// Test timeout case
@@ -125,7 +125,7 @@ func TestRedisCache_DLQLen(t *testing.T) {
 	}
 	defer mr.Close()
 
-	rdb := NewRedisCache(mr.Addr(), "", 0)
+	rdb := NewRedisCache(mr.Addr(), "", 0, RedisPoolConfig{})
 	ctx := context.Background()
 
 	// Empty DLQ
@@ -149,12 +149,47 @@ func TestRedisCache_Close(t *testing.T) {
 		t.Fatalf("Failed to run miniredis: %v", err)
 	}
 	// Don't defer mr.Close() — Close should handle it
-	cache := NewRedisCache(mr.Addr(), "", 0)
+	cache := NewRedisCache(mr.Addr(), "", 0, RedisPoolConfig{})
 	if err := cache.Close(); err != nil {
 		t.Errorf("Close failed: %v", err)
 	}
 	// After close, Ping should fail
 	if err := cache.Ping(context.Background()); err == nil {
 		t.Errorf("Expected Ping to fail after Close")
+	}
+}
+
+func TestRedisCache_PoolConfig(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("Failed to run miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	cfg := RedisPoolConfig{
+		PoolSize:       50,
+		MinIdleConns:   5,
+		PoolTimeout:    30 * time.Second,
+		ConnMaxLifetime: 10 * time.Minute,
+	}
+	cache := NewRedisCache(mr.Addr(), "", 0, cfg)
+	defer cache.Close()
+
+	if err := cache.Ping(context.Background()); err != nil {
+		t.Errorf("Ping failed with pool config: %v", err)
+	}
+
+	got := cache.PoolConfig()
+	if got.PoolSize != cfg.PoolSize {
+		t.Errorf("PoolSize = %d, want %d", got.PoolSize, cfg.PoolSize)
+	}
+	if got.MinIdleConns != cfg.MinIdleConns {
+		t.Errorf("MinIdleConns = %d, want %d", got.MinIdleConns, cfg.MinIdleConns)
+	}
+	if got.PoolTimeout != cfg.PoolTimeout {
+		t.Errorf("PoolTimeout = %v, want %v", got.PoolTimeout, cfg.PoolTimeout)
+	}
+	if got.ConnMaxLifetime != cfg.ConnMaxLifetime {
+		t.Errorf("ConnMaxLifetime = %v, want %v", got.ConnMaxLifetime, cfg.ConnMaxLifetime)
 	}
 }

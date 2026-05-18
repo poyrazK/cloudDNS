@@ -184,7 +184,7 @@ func TestGetWithTTLReturnsCorrectValue(t *testing.T) {
 	}
 	defer mr.Close()
 
-	cache := NewRedisCache(mr.Addr(), "", 0)
+	cache := NewRedisCache(mr.Addr(), "", 0, RedisPoolConfig{})
 	ctx := context.Background()
 
 	// Set a key with known TTL

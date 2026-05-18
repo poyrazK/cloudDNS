@@ -26,7 +26,7 @@ func TestCache_ConcurrencyHammer(t *testing.T) {
 
 	// Setup Server with Redis
 	srv := NewServer("127.0.0.1:0", nil, nil)
-	srv.Redis = NewRedisCache(mr.Addr(), "", 0)
+	srv.Redis = NewRedisCache(mr.Addr(), "", 0, RedisPoolConfig{})
 
 	// Run for 3 seconds
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)

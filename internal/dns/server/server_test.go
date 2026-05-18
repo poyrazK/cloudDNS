@@ -1107,7 +1107,7 @@ func TestHandleAXFR_ConvertError(t *testing.T) {
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "axfr-fail.test.", QType: packet.AXFR})
 
 	conn := &mockTCPConn{}
-	srv.handleAXFR(context.Background(), conn, req, nil)
+	srv.handleAXFR(context.Background(), conn, req, nil, nil)
 
 	if len(conn.captured) < 2 {
 		t.Errorf("Expected at least 2 records (Start SOA and End SOA)")
@@ -1175,7 +1175,7 @@ func TestHandleAXFR_NoSOA(t *testing.T) {
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "nosoa.test.", QType: packet.AXFR})
 
 	conn := &mockTCPConn{}
-	srv.handleAXFR(context.Background(), conn, req, nil)
+	srv.handleAXFR(context.Background(), conn, req, nil, nil)
 
 	if len(conn.captured) != 1 {
 		t.Fatalf("Expected 1 error packet, got %d", len(conn.captured))
@@ -1204,7 +1204,7 @@ func TestHandleAXFR_StreamingError(t *testing.T) {
 	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "stream-fail.test.", QType: packet.AXFR})
 
 	conn := &mockTCPConn{}
-	srv.handleAXFR(context.Background(), conn, req, nil)
+	srv.handleAXFR(context.Background(), conn, req, nil, nil)
 
 	if len(conn.captured) != 1 {
 		t.Fatalf("Expected 1 error packet, got %d", len(conn.captured))
@@ -1240,7 +1240,7 @@ func TestHandleAXFR_TSIGUnknownKey(t *testing.T) {
 	_ = req.SignTSIG(buf, "unknown-key.", []byte("any"))
 
 	conn := &mockTCPConn{}
-	srv.handleAXFR(context.Background(), conn, req, buf.Buf[:buf.Position()])
+	srv.handleAXFR(context.Background(), conn, req, buf.Buf[:buf.Position()], nil)
 
 	if len(conn.captured) != 1 {
 		t.Fatalf("Expected 1 response, got %d", len(conn.captured))
@@ -1280,7 +1280,7 @@ func TestHandleAXFR_TSIGVerifyFailed(t *testing.T) {
 	buf.Buf[0] ^= 0xFF
 
 	conn := &mockTCPConn{}
-	srv.handleAXFR(context.Background(), conn, req, buf.Buf[:buf.Position()])
+	srv.handleAXFR(context.Background(), conn, req, buf.Buf[:buf.Position()], nil)
 
 	if len(conn.captured) != 1 {
 		t.Fatalf("Expected 1 response, got %d", len(conn.captured))
@@ -1357,7 +1357,7 @@ func TestHandleIXFR_TSIGUnknownKey(t *testing.T) {
 	_ = req.SignTSIG(buf, "unknown-key.", []byte("any"))
 
 	conn := &mockTCPConn{}
-	srv.handleIXFR(context.Background(), conn, req, buf.Buf[:buf.Position()])
+	srv.handleIXFR(context.Background(), conn, req, buf.Buf[:buf.Position()], nil)
 
 	if len(conn.captured) != 1 {
 		t.Fatalf("Expected 1 response, got %d", len(conn.captured))
@@ -1402,7 +1402,7 @@ func TestHandleIXFR_TSIGVerifyFailed(t *testing.T) {
 	buf.Buf[0] ^= 0xFF
 
 	conn := &mockTCPConn{}
-	srv.handleIXFR(context.Background(), conn, req, buf.Buf[:buf.Position()])
+	srv.handleIXFR(context.Background(), conn, req, buf.Buf[:buf.Position()], nil)
 
 	if len(conn.captured) != 1 {
 		t.Fatalf("Expected 1 response, got %d", len(conn.captured))
@@ -1424,7 +1424,7 @@ func TestDLQRetryWorker_Shutdown(t *testing.T) {
 	}
 	defer mr.Close()
 
-	redisCache := NewRedisCache(mr.Addr(), "", 0)
+	redisCache := NewRedisCache(mr.Addr(), "", 0, RedisPoolConfig{})
 	defer redisCache.Close()
 
 	srv := &Server{
