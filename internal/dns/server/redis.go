@@ -32,6 +32,18 @@ type RedisPoolConfig struct {
 
 // NewRedisCache creates a new Redis cache client.
 func NewRedisCache(addr string, password string, db int, cfg RedisPoolConfig) *RedisCache {
+	if cfg.PoolSize == 0 {
+		cfg.PoolSize = 100
+	}
+	if cfg.PoolTimeout == 0 {
+		cfg.PoolTimeout = 4 * time.Second
+	}
+	if cfg.ConnMaxLifetime == 0 {
+		cfg.ConnMaxLifetime = 30 * time.Minute
+	}
+	if cfg.MinIdleConns == 0 {
+		cfg.MinIdleConns = 10
+	}
 	rdb := redis.NewClient(&redis.Options{
 		Addr:            addr,
 		Password:        password,
