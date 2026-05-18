@@ -746,7 +746,7 @@ func (s *Server) handleAXFR(ctx context.Context, conn net.Conn, request *packet.
 	}
 
 	// Validate TSIG if present
-	if request.TSIGStart != -1 {
+	if request.TSIGStart != -1 && len(request.Resources) > 0 {
 		tsig := request.Resources[len(request.Resources)-1]
 		secret, ok := s.TsigKeys[tsig.Name]
 		if !ok {
@@ -1490,7 +1490,7 @@ func (s *Server) handleUpdate(ctx context.Context, request *packet.DNSPacket, ra
 	response.Header.Opcode = packet.OpcodeUpdate
 
 	// 1. Validate TSIG if present
-	if request.TSIGStart != -1 {
+	if request.TSIGStart != -1 && len(request.Resources) > 0 {
 		tsig := request.Resources[len(request.Resources)-1]
 		secret, ok := s.TsigKeys[tsig.Name]
 		if !ok {
@@ -1606,7 +1606,7 @@ func (s *Server) handleIXFR(ctx context.Context, conn net.Conn, request *packet.
 	}
 
 	// Validate TSIG if present
-	if request.TSIGStart != -1 {
+	if request.TSIGStart != -1 && len(request.Resources) > 0 {
 		tsig := request.Resources[len(request.Resources)-1]
 		secret, ok := s.TsigKeys[tsig.Name]
 		if !ok {

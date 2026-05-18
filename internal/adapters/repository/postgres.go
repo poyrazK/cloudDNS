@@ -530,9 +530,12 @@ func (r *PostgresRepository) CreateZoneWithRecords(ctx context.Context, zone *do
 	if errTx != nil {
 		return errTx
 	}
+	committed := false
 	defer func() {
-		if errRollback := tx.Rollback(); errRollback != nil && !errors.Is(errRollback, sql.ErrTxDone) {
-			r.logger.Error("failed to rollback transaction", "error", errRollback)
+		if !committed {
+			if errRollback := tx.Rollback(); errRollback != nil && !errors.Is(errRollback, sql.ErrTxDone) {
+				r.logger.Error("failed to rollback transaction", "error", errRollback)
+			}
 		}
 	}()
 
@@ -573,7 +576,11 @@ func (r *PostgresRepository) CreateZoneWithRecords(ctx context.Context, zone *do
 		}
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	committed = true
+	return nil
 }
 
 // CreateRecord implements ports.DNSRepository.
