@@ -32,10 +32,12 @@ type rateLimiter struct {
 }
 
 type bucket struct {
-	tokens  float64
-	last   time.Time
+	tokens  uint64 // tokens encoded as tokens<<10 + frac (scale=1024)
+	last    time.Time
 	heapIdx int // index in idleHeap, -1 if not in heap
 }
+
+const bucketScale = 1024
 
 type bucketIdleEntry struct {
 	ip string
@@ -107,17 +109,18 @@ func newRateLimiter(rate float64, burst int, maxBuckets int) *rateLimiter {
 // Allow checks if a request from the given IP is allowed under the token bucket limits.
 func (rl *rateLimiter) Allow(ip string) bool {
 	shard := rl.shard(ip)
+	now := time.Now()
+
 	shard.mu.Lock()
 	defer shard.mu.Unlock()
 
-	now := time.Now()
 	b, exists := shard.buckets[ip]
 	if !exists {
 		if len(shard.buckets) >= shard.maxBuckets {
 			shard.evictOldestBucket()
 		}
 		b = &bucket{
-			tokens: float64(shard.burst),
+			tokens: uint64(shard.burst) << 10,
 			last:   now,
 		}
 		entry := &bucketIdleEntry{ip: ip, b: b}
@@ -132,21 +135,23 @@ func (rl *rateLimiter) Allow(ip string) bool {
 	// Update heap position after last change
 	heap.Fix(&shard.idleHeap, b.heapIdx)
 
-	// Refill
-	b.tokens += elapsed * shard.rate
-	if b.tokens > float64(shard.burst) {
-		b.tokens = float64(shard.burst)
+	// Refill tokens
+	b.tokens += uint64(elapsed * shard.rate * bucketScale)
+	maxTokens := uint64(shard.burst) << 10
+	if b.tokens > maxTokens {
+		b.tokens = maxTokens
 	}
 
-	// Consume
-	if b.tokens >= 1 {
-		b.tokens--
-		return true
+	allowed := b.tokens >= bucketScale
+	if allowed {
+		b.tokens -= bucketScale
 	}
 
-	shard.rateLimited.Add(1)
-	metrics.RateLimitedTotal.Inc()
-	return false
+	if !allowed {
+		shard.rateLimited.Add(1)
+		metrics.RateLimitedTotal.Inc()
+	}
+	return allowed
 }
 
 // evictOldestBucket removes the bucket with the oldest last timestamp in O(log n) within this shard.
