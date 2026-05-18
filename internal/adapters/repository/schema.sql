@@ -107,6 +107,19 @@ CREATE INDEX IF NOT EXISTS idx_dns_records_zone_id ON dns_records(zone_id);
 -- Tenant-scoped zone listing (ListZones, tenant isolation)
 CREATE INDEX IF NOT EXISTS idx_dns_zones_tenant_id ON dns_zones(tenant_id);
 
+-- Index for zone+type queries (GetDNSKEYs, GetRecords by type)
+CREATE INDEX IF NOT EXISTS idx_dns_records_zone_type ON dns_records(zone_id, type);
+
+-- Partial index for health check probing
+CREATE INDEX IF NOT EXISTS idx_dns_records_health_active ON dns_records(health_check_type)
+  WHERE health_check_type IN ('HTTP', 'TCP');
+
+-- Index for audit logs tenant lookup
+CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant_id ON audit_logs(tenant_id);
+
+-- Index for zone changes by zone+serial
+CREATE INDEX IF NOT EXISTS idx_dns_zone_changes_zone_serial ON dns_zone_changes(zone_id, serial);
+
 CREATE TABLE IF NOT EXISTS api_keys (
     id UUID PRIMARY KEY,
     tenant_id TEXT NOT NULL,
