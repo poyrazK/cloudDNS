@@ -116,8 +116,15 @@ type Server struct {
 	wg           sync.WaitGroup
 
 	// inflightCache prevents thundering herd: tracks keys currently being fetched from L2.
-	// Key -> struct{} (presence indicates a fetch is in progress).
+	// Key -> *inflightEntry (done channel closed when fetch completes).
 	inflightCache sync.Map
+}
+
+// inflightEntry holds state for an in-progress L2 cache fetch.
+// The done channel is closed by the fetching goroutine when it finishes,
+// unblocking all goroutines that were waiting on it.
+type inflightEntry struct {
+	done chan struct{}
 }
 
 type udpTask struct {
@@ -1132,45 +1139,31 @@ func (s *Server) checkCache(ctx context.Context, req *packet.DNSPacket, cacheKey
 	metrics.RecordCacheMiss()
 
 	// L1 miss — check if another goroutine is already fetching L2 for this key
-	_, loading := s.inflightCache.LoadOrStore(cacheKey, struct{}{})
+	entry, loading := s.inflightCache.LoadOrStore(cacheKey, &inflightEntry{done: make(chan struct{})})
 	if loading {
-		// Another goroutine is fetching L2 — release lock and wait for L1 population
+		// Another goroutine is fetching L2 — release lock and wait for L1 population.
+		// Use channel-based wait instead of spinning with time.Sleep.
 		lock.Unlock()
-		// Wait until the in-flight fetch completes, the request context is canceled,
-		// or the caller-provided deadline elapses.
-		if deadline, ok := ctx.Deadline(); ok {
-			for {
-				if data, found := s.Cache.GetInto(cacheKey, req.Header.ID); found {
-					metrics.CacheOperations.WithLabelValues("l1", "hit").Inc()
-					metrics.RecordCacheHit()
-					metrics.QueriesTotal.WithLabelValues(qTypeLabel, "0", protocol).Inc()
-					metrics.QueryDuration.WithLabelValues("cache_l1").Observe(time.Since(start).Seconds())
-					_ = sendFn(data)
-					return data
-				}
-				if time.Now().After(deadline) || time.Now().After(start.Add(5*time.Second)) {
-					return nil
-				}
-				time.Sleep(50 * time.Microsecond)
-			}
+		entry := entry.(*inflightEntry)
+
+		// Wait on the in-flight completion channel, with context deadline bounding max wait.
+		select {
+		case <-entry.done:
+			// Fetch completed — L1 should now be populated. Check and return.
+		case <-ctx.Done():
+			return nil
 		}
-		// No deadline — use context cancellation
-		for {
-			if data, found := s.Cache.GetInto(cacheKey, req.Header.ID); found {
-				metrics.CacheOperations.WithLabelValues("l1", "hit").Inc()
-				metrics.RecordCacheHit()
-				metrics.QueriesTotal.WithLabelValues(qTypeLabel, "0", protocol).Inc()
-				metrics.QueryDuration.WithLabelValues("cache_l1").Observe(time.Since(start).Seconds())
-				_ = sendFn(data)
-				return data
-			}
-			select {
-			case <-ctx.Done():
-				return nil
-			default:
-				time.Sleep(50 * time.Microsecond)
-			}
+
+		// Check L1 cache now that the in-flight goroutine has completed.
+		if data, found := s.Cache.GetInto(cacheKey, req.Header.ID); found {
+			metrics.CacheOperations.WithLabelValues("l1", "hit").Inc()
+			metrics.RecordCacheHit()
+			metrics.QueriesTotal.WithLabelValues(qTypeLabel, "0", protocol).Inc()
+			metrics.QueryDuration.WithLabelValues("cache_l1").Observe(time.Since(start).Seconds())
+			_ = sendFn(data)
+			return data
 		}
+		// In-flight goroutine fetched from L2 but got a miss — fall through to DB.
 	}
 
 	// Marked in-flight — release lock before L2 fetch
@@ -1183,9 +1176,12 @@ func (s *Server) checkCache(ctx context.Context, req *packet.DNSPacket, cacheKey
 		data, remainingTTL, _ = s.Redis.GetWithTTL(ctx, cacheKey)
 	}
 
-	// Re-acquire lock to populate L1 and clear in-flight
+	// Re-acquire lock to populate L1, close the in-flight done channel, clear in-flight.
+	// Closing done unblocks all goroutines that were waiting on the channel.
 	lock.Lock()
-	s.inflightCache.Delete(cacheKey)
+	if entry, ok := s.inflightCache.LoadAndDelete(cacheKey); ok {
+		close(entry.(*inflightEntry).done)
+	}
 
 	// Check L1 again — another goroutine may have populated it while we were fetching L2
 	if d, found := s.Cache.GetInto(cacheKey, req.Header.ID); found {
