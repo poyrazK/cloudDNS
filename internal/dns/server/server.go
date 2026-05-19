@@ -1376,14 +1376,33 @@ func (s *Server) appendRecordsToResponse(resp *packet.DNSPacket, records []domai
 func (s *Server) handleNxDomain(ctx context.Context, req *packet.DNSPacket, q packet.DNSQuestion, zone *domain.Zone, dnssecOK bool, clientOPT *packet.DNSRecord, clientIP string, resp *packet.DNSPacket) {
 	if zone != nil {
 		resp.Header.ResCode = 3 // NXDOMAIN
-		soaRecords, _ := s.Repo.GetRecords(ctx, zone.Name, domain.TypeSOA, clientIP)
+
+		// Parallelize SOA and NSEC3PARAM lookups — both are independent DB calls
+		var soaRecords []domain.Record
+		var nsec3params []domain.Record
+		g, ctx := errgroup.WithContext(ctx)
+		g.SetLimit(2)
+		g.Go(func() error {
+			var err error
+			soaRecords, err = s.Repo.GetRecords(ctx, zone.Name, domain.TypeSOA, clientIP)
+			return err
+		})
+		g.Go(func() error {
+			if !dnssecOK {
+				return nil
+			}
+			var err error
+			nsec3params, err = s.Repo.GetRecords(ctx, zone.Name, "NSEC3PARAM", "")
+			return err
+		})
+		_ = g.Wait()
+
 		for _, rec := range soaRecords {
 			if pRec, err := repository.ConvertDomainToPacketRecord(rec); err == nil {
 				resp.Authorities = append(resp.Authorities, pRec)
 			}
 		}
 		if dnssecOK {
-			nsec3params, _ := s.Repo.GetRecords(ctx, zone.Name, "NSEC3PARAM", "")
 			if len(nsec3params) > 0 {
 				if nsec, err := s.generateNSEC3(ctx, zone, q.Name, ""); err == nil {
 					resp.Authorities = append(resp.Authorities, nsec)
