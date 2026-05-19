@@ -22,6 +22,9 @@ import (
 	"github.com/poyrazK/cloudDNS/internal/dns/packet"
 )
 
+// caaRegex parses CAA record content per RFC 6844: "[flag] [tag] \"[value]\""
+var caaRegex = regexp.MustCompile(`^(\d+)\s+([a-zA-Z0-9]+)\s+"((?:[^"\\]|\\.)*)"$`)
+
 // PostgresRepository implements ports.DNSRepository using PostgreSQL.
 type PostgresRepository struct {
 	db     *sql.DB
@@ -1561,8 +1564,7 @@ func ConvertDomainToPacketRecord(rec domain.Record) (packet.DNSRecord, error) {
 		pRec.Type = packet.CAA
 		// CAA content format: "[flag] [tag] \"[value]\""
 		// RFC 6844: value can contain escaped characters
-		re := regexp.MustCompile(`^(\d+)\s+([a-zA-Z0-9]+)\s+"((?:[^"\\]|\\.)*)"$`)
-		matches := re.FindStringSubmatch(rec.Content)
+		matches := caaRegex.FindStringSubmatch(rec.Content)
 		if len(matches) == 4 {
 			var flag uint16
 			if _, err := fmt.Sscanf(matches[1], "%d", &flag); err == nil {

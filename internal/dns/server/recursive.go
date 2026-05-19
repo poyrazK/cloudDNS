@@ -18,14 +18,18 @@ import (
 type recursiveResolver struct {
 	rootHints []string
 	fallbacks []string
+	timeout   time.Duration
 }
 
-// recursiveTimeout is the maximum time allowed for recursive resolution.
+// resolverTimeout is the maximum time allowed for recursive resolution.
 // Defaults to 30s but can be overridden in tests.
-var recursiveTimeout = 30 * time.Second
+var resolverTimeout = 30 * time.Second
 
 // newRecursiveResolver creates a recursive resolver with IANA root server hints and fallback resolvers.
-func newRecursiveResolver() *recursiveResolver {
+func newRecursiveResolver(timeout time.Duration) *recursiveResolver {
+	if timeout == 0 {
+		timeout = 30 * time.Second
+	}
 	return &recursiveResolver{
 		rootHints: []string{
 			"198.41.0.4",     // a.root-servers.net
@@ -46,6 +50,7 @@ func newRecursiveResolver() *recursiveResolver {
 			"8.8.8.8", // Google
 			"1.1.1.1", // Cloudflare
 		},
+		timeout: timeout,
 	}
 }
 
@@ -63,6 +68,13 @@ func (r *recursiveResolver) getShuffledRoots() []string {
 	return result
 }
 
+func (s *Server) recursiveTimeout() time.Duration {
+	if s.ServerConfig != nil {
+		return s.ServerConfig.RecursiveTimeout
+	}
+	return resolverTimeout // fallback to package var for tests
+}
+
 // resolveRecursive performs iterative DNS resolution starting from root servers.
 func (s *Server) resolveRecursive(_ context.Context, name string, qType packet.QueryType) (*packet.DNSPacket, error) {
 	// Total timeout to prevent indefinite blocking on failing root servers
@@ -70,7 +82,7 @@ func (s *Server) resolveRecursive(_ context.Context, name string, qType packet.Q
 	resolveStart := time.Now()
 
 	// Start with a random root server for load balancing and resilience.
-	resolver := newRecursiveResolver()
+	resolver := newRecursiveResolver(s.recursiveTimeout())
 	roots := resolver.getShuffledRoots()
 
 	var lastErr error
@@ -83,7 +95,7 @@ func (s *Server) resolveRecursive(_ context.Context, name string, qType packet.Q
 
 	for i := 0; i < maxRoots; i++ {
 		// Check total resolution timeout
-		if time.Since(resolveStart) >= recursiveTimeout {
+		if time.Since(resolveStart) >= resolver.timeout {
 			s.Logger.Warn("recursive resolution timed out during root iteration", "name", name)
 			metrics.RecursiveResolutionsTotal.WithLabelValues("timeout").Inc()
 			return nil, errors.New(errRecursiveTimeout)
@@ -174,7 +186,7 @@ func (s *Server) resolveRecursive(_ context.Context, name string, qType packet.Q
 
 	// 2. Fallback Strategy: Use reliable upstream resolvers if iterative resolution failed
 	// Check total resolution timeout before attempting fallbacks
-	if time.Since(resolveStart) >= recursiveTimeout {
+	if time.Since(resolveStart) >= resolver.timeout {
 		s.Logger.Warn("recursive resolution timed out before fallback", "name", name)
 		metrics.RecursiveResolutionsTotal.WithLabelValues("timeout").Inc()
 		return nil, errors.New(errRecursiveTimeout)
@@ -182,7 +194,7 @@ func (s *Server) resolveRecursive(_ context.Context, name string, qType packet.Q
 	s.Logger.Info("iterative resolution failed or inconclusive, trying fallbacks", "name", name)
 	for _, fallback := range resolver.fallbacks {
 		// Check total resolution timeout before each fallback query
-		if time.Since(resolveStart) >= recursiveTimeout {
+		if time.Since(resolveStart) >= resolver.timeout {
 			s.Logger.Warn("recursive resolution timed out during fallback", "name", name)
 			metrics.RecursiveResolutionsTotal.WithLabelValues("timeout").Inc()
 			return nil, errors.New(errRecursiveTimeout)

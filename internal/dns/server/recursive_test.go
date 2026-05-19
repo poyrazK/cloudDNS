@@ -201,7 +201,7 @@ func TestSendQuery(t *testing.T) {
 }
 
 func TestNewRecursiveResolver(t *testing.T) {
-	r := newRecursiveResolver()
+	r := newRecursiveResolver(30 * time.Second)
 	if len(r.rootHints) == 0 {
 		t.Errorf("Expected root hints to be initialized")
 	}
@@ -276,11 +276,11 @@ func TestSendTCPQuery(t *testing.T) {
 func TestResolveRecursiveFallbackTimeout(t *testing.T) {
 	ctx := context.Background()
 	// Save original timeout and restore after test
-	originalTimeout := recursiveTimeout
-	defer func() { recursiveTimeout = originalTimeout }()
+	originalTimeout := resolverTimeout
+	defer func() { resolverTimeout = originalTimeout }()
 
 	// Set very short timeout for test
-	recursiveTimeout = 10 * time.Millisecond
+	resolverTimeout = 10 * time.Millisecond
 
 	s := NewServer(":0", nil, nil)
 
