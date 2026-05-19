@@ -200,7 +200,7 @@ func (s *DNSSECService) SignRRSet(ctx context.Context, zoneName string, zoneID s
 }
 
 // signWithKeys signs records using the provided parsed ECDSA keys.
-func (s *DNSSECService) signWithKeys(ctx context.Context, zoneName string, records []packet.DNSRecord, keys []*ecdsa.PrivateKey) ([]packet.DNSRecord, error) {
+func (s *DNSSECService) signWithKeys(_ context.Context, zoneName string, records []packet.DNSRecord, keys []*ecdsa.PrivateKey) ([]packet.DNSRecord, error) {
 	sigs := make([]packet.DNSRecord, 0, len(keys))
 	for _, priv := range keys {
 		// Compute key tag from the public key (RFC 4034 Appendix B)

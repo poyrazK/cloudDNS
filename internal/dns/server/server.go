@@ -981,12 +981,10 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 		return err
 	})
 
-	if err := g.Wait(); err != nil {
-		// errgroup returns the first non-nil error from goroutines, but we intentionally
-		// allow partial results: zone lookup failure should not block record lookup
-		// from succeeding (and vice versa), since resolveWithWildcard only needs zone.
-		// Both goroutines are independent and run to completion before Wait returns.
-	}
+	// errgroup returns the first non-nil error, but we intentionally allow partial
+	// results since zone lookup failure should not block record lookup (and vice versa).
+	// Both goroutines run to completion before Wait returns.
+	_ = g.Wait()
 
 	if errRepo == nil && len(records) > 0 {
 		s.appendRecordsToResponse(response, records)
