@@ -358,7 +358,7 @@ func (b *BytePacketBuffer) WriteName(name string) error {
 			if err := b.WriteUint8(len(label)); err != nil {
 				return err
 			}
-			if err := b.WriteRange(b.Pos, []byte(label)); err != nil {
+			if err := b.WriteStringRange(b.Pos, label); err != nil {
 				return err
 			}
 		}
@@ -396,7 +396,7 @@ func (b *BytePacketBuffer) WriteNameUncompressed(name string) error {
 			if err := b.WriteUint8(len(label)); err != nil {
 				return err
 			}
-			if err := b.WriteRange(b.Pos, []byte(label)); err != nil {
+			if err := b.WriteStringRange(b.Pos, label); err != nil {
 				return err
 			}
 		}
@@ -406,6 +406,21 @@ func (b *BytePacketBuffer) WriteNameUncompressed(name string) error {
 
 // WriteRange writes a slice of bytes at a specific position
 func (b *BytePacketBuffer) WriteRange(start int, data []byte) error {
+	if start+len(data) > MaxPacketSize {
+		return errors.New("out of bounds")
+	}
+	copy(b.Buf[start:start+len(data)], data)
+	if start+len(data) > b.Pos {
+		b.Pos = start + len(data)
+	}
+	if b.Pos > b.Len {
+		b.Len = b.Pos
+	}
+	return nil
+}
+
+// WriteStringRange writes a string at a specific position without allocating a []byte.
+func (b *BytePacketBuffer) WriteStringRange(start int, data string) error {
 	if start+len(data) > MaxPacketSize {
 		return errors.New("out of bounds")
 	}
