@@ -20,6 +20,7 @@ import (
 	"os"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -988,11 +989,17 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 				data[0] = byte(request.Header.ID >> 8)
 				data[1] = byte(request.Header.ID & 0xFF)
 			}
-			if remainingTTL <= 0 {
-				remainingTTL = 60 * time.Second
-			} else if remainingTTL > 60*time.Second {
-				remainingTTL = 60 * time.Second
-			}
+			l1TTLCap := 300 * time.Second
+	if v := os.Getenv("REDIS_L1_TTL_CAP"); v != "" {
+		if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
+			l1TTLCap = time.Duration(secs) * time.Second
+		}
+	}
+	if remainingTTL <= 0 {
+		remainingTTL = l1TTLCap
+	} else if remainingTTL > l1TTLCap {
+		remainingTTL = l1TTLCap
+	}
 			s.Cache.SetNoCopy(cacheKey, data, remainingTTL)
 			cachedData = data
 		} else if s.Redis != nil {

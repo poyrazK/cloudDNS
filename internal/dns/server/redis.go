@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,10 +27,37 @@ type RedisCache struct {
 
 // NewRedisCache creates a new Redis cache client.
 func NewRedisCache(addr string, password string, db int) *RedisCache {
+	// Parse Redis URL if provided (e.g., redis://localhost:6379)
+	if strings.HasPrefix(addr, "redis://") || strings.HasPrefix(addr, "rediss://") {
+		if u, err := url.Parse(addr); err == nil {
+			addr = u.Host
+			if u.User != nil {
+				password = u.User.Username()
+			}
+		}
+	}
+
+	poolSize := 50
+	if v := os.Getenv("REDIS_POOL_SIZE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			poolSize = n
+		}
+	}
+	minIdle := 10
+	if v := os.Getenv("REDIS_MIN_IDLE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			minIdle = n
+		}
+	}
 	rdb := redis.NewClient(&redis.Options{
-		Addr:     addr,
-		Password: password,
-		DB:       db,
+		Addr:         addr,
+		Password:     password,
+		DB:           db,
+		PoolSize:     poolSize,
+		MinIdleConns: minIdle,
+		DialTimeout:  5 * time.Second,
+		ReadTimeout:  50 * time.Millisecond,
+		WriteTimeout: 50 * time.Millisecond,
 	})
 	return &RedisCache{client: rdb}
 }

@@ -180,7 +180,7 @@ func (c *DNSCache) Flush() {
 // cleanupLoop periodically triggers the cache-wide cleanup process.
 // It exits when done is closed.
 func (c *DNSCache) cleanupLoop(done <-chan struct{}, wg *sync.WaitGroup) {
-	ticker := time.NewTicker(5 * time.Minute)
+	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 	if wg != nil {
 		defer wg.Done()
