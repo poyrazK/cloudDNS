@@ -302,6 +302,78 @@ func TestSignRRSet(t *testing.T) {
 	}
 }
 
+// TestSignRRSet_CacheHit verifies that the second call to SignRRSet uses the cache.
+func TestSignRRSet_CacheHit(t *testing.T) {
+	repo := &mockDNSSECRepo{}
+	svc := NewDNSSECService(repo)
+	ctx := context.Background()
+
+	// Setup ZSK
+	_, err := svc.GenerateKey(ctx, "z1", "ZSK")
+	if err != nil {
+		t.Fatalf("GenerateKey failed: %v", err)
+	}
+
+	records := []packet.DNSRecord{
+		{Name: "www.example.com.", Type: packet.A, IP: net.ParseIP("1.2.3.4"), TTL: 300, Class: 1},
+	}
+
+	// First call - cache miss
+	sigs1, err := svc.SignRRSet(ctx, "example.com.", "z1", records)
+	if err != nil {
+		t.Fatalf("SignRRSet (cache miss) failed: %v", err)
+	}
+	if len(sigs1) != 1 {
+		t.Fatalf("Expected 1 RRSIG, got %d", len(sigs1))
+	}
+
+	// Second call - cache hit (same zone)
+	sigs2, err := svc.SignRRSet(ctx, "example.com.", "z1", records)
+	if err != nil {
+		t.Fatalf("SignRRSet (cache hit) failed: %v", err)
+	}
+	if len(sigs2) != 1 {
+		t.Fatalf("Expected 1 RRSIG on cache hit, got %d", len(sigs2))
+	}
+}
+
+func BenchmarkSignRRSet(b *testing.B) {
+	repo := &mockDNSSECRepo{}
+	svc := NewDNSSECService(repo)
+	ctx := context.Background()
+
+	// Pre-generate key (outside benchmark)
+	_, _ = svc.GenerateKey(ctx, "z1", "ZSK")
+
+	records := []packet.DNSRecord{
+		{Name: "www.example.com.", Type: packet.A, IP: net.ParseIP("1.2.3.4"), TTL: 300, Class: 1},
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = svc.SignRRSet(ctx, "example.com.", "z1", records)
+	}
+}
+
+func BenchmarkSignRRSet_Cached(b *testing.B) {
+	repo := &mockDNSSECRepo{}
+	svc := NewDNSSECService(repo)
+	ctx := context.Background()
+
+	// Pre-generate key once (outside benchmark)
+	_, _ = svc.GenerateKey(ctx, "z1", "ZSK")
+	// Warm the cache
+	records := []packet.DNSRecord{
+		{Name: "www.example.com.", Type: packet.A, IP: net.ParseIP("1.2.3.4"), TTL: 300, Class: 1},
+	}
+	_, _ = svc.SignRRSet(ctx, "example.com.", "z1", records)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = svc.SignRRSet(ctx, "example.com.", "z1", records)
+	}
+}
+
 // TestCollectKeyStats_AllZonesFail verifies that CollectKeyStats returns an
 // empty slice (not an error) when ListZones succeeds but all ListKeysForZone
 // calls fail. This is the "all-zones-fail" edge case.
