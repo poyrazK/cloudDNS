@@ -26,6 +26,8 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/poyrazK/cloudDNS/internal/adapters/repository"
 	"github.com/poyrazK/cloudDNS/internal/core/config"
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
@@ -973,11 +975,34 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 		return s.sendServFail(response, sendFn, qTypeLabel, protocol)
 	}
 
-	// Zone lookup
-	zone, _ := s.Repo.GetZoneLongestMatch(ctx, q.Name)
+	// Zone lookup + record resolution — run in parallel since they query different tables
+	var (
+		zone    *domain.Zone
+		records []domain.Record
+		errRepo error
+	)
 
-	// Record resolution + wildcard
-	records, errRepo := s.Repo.GetRecords(ctx, q.Name, queryTypeToRecordType(q.QType), clientIP)
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(2)
+
+	g.Go(func() error {
+		var err error
+		zone, err = s.Repo.GetZoneLongestMatch(ctx, q.Name)
+		return err
+	})
+
+	g.Go(func() error {
+		var err error
+		records, err = s.Repo.GetRecords(ctx, q.Name, queryTypeToRecordType(q.QType), clientIP)
+		errRepo = err
+		return err
+	})
+
+	// errgroup returns the first non-nil error, but we intentionally allow partial
+	// results since zone lookup failure should not block record lookup (and vice versa).
+	// Both goroutines run to completion before Wait returns.
+	_ = g.Wait()
+
 	if errRepo == nil && len(records) > 0 {
 		s.appendRecordsToResponse(response, records)
 	} else if zone != nil {

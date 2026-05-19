@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"math"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -23,7 +24,17 @@ import (
 type DNSSECService struct {
 	repo   ports.DNSRepository
 	logger *slog.Logger
+	keyCache sync.Map  // zoneID -> *cachedKeys
 }
+
+// cachedKeys holds parsed ECDSA keys for a zone with TTL.
+type cachedKeys struct {
+	keys    map[string][]*ecdsa.PrivateKey  // keyType -> parsed keys
+	expires time.Time
+}
+
+// keyCacheTTL is the TTL for cached DNSSEC keys.
+const keyCacheTTL = 5 * time.Minute
 
 // NewDNSSECService creates and returns a new DNSSECService instance.
 func NewDNSSECService(repo ports.DNSRepository) *DNSSECService {
@@ -61,6 +72,9 @@ func (s *DNSSECService) GenerateKey(ctx context.Context, zoneID string, keyType 
 	if err := s.repo.CreateKey(ctx, key); err != nil {
 		return nil, err
 	}
+
+	// Invalidate cached keys for this zone since we added a new key
+	s.InvalidateKeyCache(zoneID)
 
 	return key, nil
 }
@@ -118,6 +132,8 @@ func (s *DNSSECService) AutomateLifecycle(ctx context.Context, zoneID string) er
 				if errUpd := s.repo.UpdateKey(ctx, &k); errUpd != nil {
 					return errUpd
 				}
+				// Invalidate cache since a key was deactivated
+				s.InvalidateKeyCache(zoneID)
 			}
 		}
 		return nil
@@ -158,30 +174,43 @@ func (s *DNSSECService) SignRRSet(ctx context.Context, zoneName string, zoneID s
 		return nil, nil
 	}
 
+	// Try cache first
+	if cached := s.getCachedKeys(zoneID, "ZSK"); cached != nil {
+		return s.signWithKeys(ctx, zoneName, records, cached)
+	}
+
+	// Cache miss: fetch from DB
 	keys, err := s.GetActiveKeys(ctx, zoneID, "ZSK")
 	if err != nil {
 		return nil, err
 	}
 
-	sigs := make([]packet.DNSRecord, 0, len(keys))
+	// Parse and cache keys
+	parsedKeys := make([]*ecdsa.PrivateKey, 0, len(keys))
 	for _, key := range keys {
 		priv, err := x509.ParseECPrivateKey(key.PrivateKey)
 		if err != nil {
 			return nil, err
 		}
+		parsedKeys = append(parsedKeys, priv)
+	}
+	s.cacheKeys(zoneID, "ZSK", parsedKeys)
 
-		// Calculate key tag and set flags based on key type
-		// KSK (Key Signing Key) has the SEP bit set (Flags = 257)
-		// ZSK (Zone Signing Key) has Flags = 256
-		flags := uint16(256) // Default ZSK
-		if key.KeyType == "KSK" {
-			flags = 257
-		}
+	return s.signWithKeys(ctx, zoneName, records, parsedKeys)
+}
+
+// signWithKeys signs records using the provided parsed ECDSA keys.
+func (s *DNSSECService) signWithKeys(_ context.Context, zoneName string, records []packet.DNSRecord, keys []*ecdsa.PrivateKey) ([]packet.DNSRecord, error) {
+	sigs := make([]packet.DNSRecord, 0, len(keys))
+	for _, priv := range keys {
+		// Compute key tag from the public key (RFC 4034 Appendix B)
+		// Safe: priv is freshly parsed from DB and validated on key generation.
+		pubBytes, _ := x509.MarshalPKIXPublicKey(&priv.PublicKey)
 		tempKeyRec := packet.DNSRecord{
 			Type:      packet.DNSKEY,
-			Flags:     flags,
+			Flags:     256,
 			Algorithm: 13,
-			PublicKey: key.PublicKey,
+			PublicKey: pubBytes,
 		}
 		keyTag := tempKeyRec.ComputeKeyTag()
 
@@ -191,7 +220,6 @@ func (s *DNSSECService) SignRRSet(ctx context.Context, zoneName string, zoneID s
 		if unixNow >= 0 && unixNow <= math.MaxUint32 {
 			now = uint32(unixNow) // #nosec G115
 		}
-		// Use 64-bit arithmetic to avoid overflow when now is near uint32 max
 		ttl := uint64(30 * 24 * 60 * 60)
 		exp := uint64(now) + ttl
 		if exp > math.MaxUint32 {
@@ -207,6 +235,41 @@ func (s *DNSSECService) SignRRSet(ctx context.Context, zoneName string, zoneID s
 	}
 
 	return sigs, nil
+}
+
+// getCachedKeys returns cached parsed keys for a zone if not expired.
+func (s *DNSSECService) getCachedKeys(zoneID, keyType string) []*ecdsa.PrivateKey {
+	val, ok := s.keyCache.Load(zoneID)
+	if !ok {
+		return nil
+	}
+	cached := val.(*cachedKeys)
+	if time.Now().After(cached.expires) {
+		s.keyCache.Delete(zoneID)
+		return nil
+	}
+	return cached.keys[keyType]
+}
+
+// cacheKeys stores parsed keys in the cache with TTL, merging with existing keys for the zone.
+func (s *DNSSECService) cacheKeys(zoneID, keyType string, keys []*ecdsa.PrivateKey) {
+	existing, ok := s.keyCache.Load(zoneID)
+	if ok {
+		ec := existing.(*cachedKeys)
+		ec.keys[keyType] = keys
+		ec.expires = time.Now().Add(keyCacheTTL)
+		return
+	}
+	cached := &cachedKeys{
+		keys:    map[string][]*ecdsa.PrivateKey{keyType: keys},
+		expires: time.Now().Add(keyCacheTTL),
+	}
+	s.keyCache.Store(zoneID, cached)
+}
+
+// InvalidateKeyCache removes cached keys for a zone.
+func (s *DNSSECService) InvalidateKeyCache(zoneID string) {
+	s.keyCache.Delete(zoneID)
 }
 
 // KeyStats holds DNSSEC key statistics for metrics.
