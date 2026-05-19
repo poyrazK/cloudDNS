@@ -6,7 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -24,14 +24,15 @@ const rootZoneURL = "https://www.internic.net/domain/root.zone"
 
 func main() {
 	if err := Run(os.Args); err != nil {
-		log.Fatalf("iana-import failed: %v", err)
+		slog.Error("iana-import failed", "error", err)
+		os.Exit(1)
 	}
 }
 
 func Run([]string) error {
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
-		dbURL = "postgres://postgres:postgres@localhost:5432/clouddns?sslmode=disable"
+		return fmt.Errorf("DATABASE_URL environment variable is required")
 	}
 
 	db, err := sql.Open("pgx", dbURL)
@@ -40,7 +41,7 @@ func Run([]string) error {
 	}
 	defer func() {
 		if errClose := db.Close(); errClose != nil {
-			log.Printf("failed to close database: %v", errClose)
+			slog.Error("failed to close database", "error", errClose)
 		}
 	}()
 
@@ -54,14 +55,14 @@ func Run([]string) error {
 
 func RunImport(ctx context.Context, repo ports.DNSRepository, url string) error {
 	fmt.Printf("Downloading IANA root zone from %s...\n", url)
-	// #nosec G107 -- URL is trusted IANA source
-	resp, err := http.Get(url)
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get(url)
 	if err != nil {
 		return fmt.Errorf("failed to download: %w", err)
 	}
 	defer func() {
 		if errClose := resp.Body.Close(); errClose != nil {
-			log.Printf("failed to close response body: %v", errClose)
+			slog.Error("failed to close response body", "error", errClose)
 		}
 	}()
 

@@ -167,10 +167,10 @@ func TestRequireRole(t *testing.T) {
 
 func TestClientIP(t *testing.T) {
 	// Set up trusted proxy CIDR for tests
-	originalCIDRs := TrustedProxyCIDRs
-	defer func() { TrustedProxyCIDRs = originalCIDRs }()
+	originalCIDRs := getTrustedProxyCIDRs()
+	defer SetTrustedProxyCIDRs(originalCIDRs)
 	_, trustedCIDR, _ := net.ParseCIDR("192.168.1.0/24")
-	TrustedProxyCIDRs = []*net.IPNet{trustedCIDR}
+	SetTrustedProxyCIDRs([]*net.IPNet{trustedCIDR})
 
 	tests := []struct {
 		name     string
@@ -417,15 +417,22 @@ func TestCORSMiddleware(t *testing.T) {
 }
 
 func TestDefaultCORSConfig(t *testing.T) {
-	t.Run("DefaultWildcard", func(t *testing.T) {
-		// This test relies on CORS_ALLOWED_ORIGINS not being set
+	t.Run("DefaultEmptyOrigins", func(t *testing.T) {
+		// When CORS_ALLOWED_ORIGINS is not set, no origins are allowed (secure default)
 		t.Setenv("CORS_ALLOWED_ORIGINS", "")
 		config := DefaultCORSConfig()
-		if len(config.AllowedOrigins) != 1 || config.AllowedOrigins[0] != "*" {
-			t.Errorf("expected [*], got %v", config.AllowedOrigins)
+		if len(config.AllowedOrigins) != 0 {
+			t.Errorf("expected empty AllowedOrigins, got %v", config.AllowedOrigins)
 		}
 		if config.MaxAge != 86400 {
 			t.Errorf("expected 86400, got %d", config.MaxAge)
+		}
+		// Verify no origin is allowed
+		if config.isOriginAllowed("https://localhost") {
+			t.Errorf("expected localhost to NOT be allowed with empty config")
+		}
+		if config.isOriginAllowed("*") {
+			t.Errorf("expected * to NOT be allowed with empty config")
 		}
 	})
 

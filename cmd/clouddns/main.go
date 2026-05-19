@@ -65,7 +65,7 @@ func replaceDSNParam(dbURL, param, value string) string {
 // Exported for testing.
 func processDatabaseURL(dbURL, hostOverride string) string {
 	if dbURL == "" {
-		dbURL = "postgres://postgres:postgres@localhost:5432/clouddns?sslmode=disable"
+		return "" // Require explicit DATABASE_URL
 	}
 
 	if hostOverride == "" {
@@ -75,15 +75,18 @@ func processDatabaseURL(dbURL, hostOverride string) string {
 	// Detect URL format vs DSN format by checking for postgres:// prefix
 	isURL := strings.HasPrefix(dbURL, "postgres://") || strings.HasPrefix(dbURL, "postgresql://")
 	if isURL {
-		// url.Parse won't fail on valid postgres:// URLs; safe to ignore error due to isURL guard
-		u, _ := url.Parse(dbURL)
-		u.Host = hostOverride
-		q := u.Query()
-		if hostOverride == "127.0.0.1" || hostOverride == "localhost" || hostOverride == "::1" {
-			q.Set("sslmode", "disable")
+		u, err := url.Parse(dbURL)
+		if err != nil {
+			slog.Warn("failed to parse database URL", "error", err)
+		} else {
+			u.Host = hostOverride
+			q := u.Query()
+			if hostOverride == "127.0.0.1" || hostOverride == "localhost" || hostOverride == "::1" {
+				q.Set("sslmode", "disable")
+			}
+			u.RawQuery = q.Encode()
+			return u.String()
 		}
-		u.RawQuery = q.Encode()
-		return u.String()
 	}
 	// DSN format (user=... password=... host=... etc)
 	isLocalHost := hostOverride == "127.0.0.1" || hostOverride == "localhost" || hostOverride == "::1"
@@ -225,7 +228,41 @@ func run(ctx context.Context) error {
 	redisURL := os.Getenv("REDIS_URL")
 	var redisCache *server.RedisCache
 	if redisURL != "" {
-		redisCache = server.NewRedisCache(redisURL, "", 0)
+		redisPoolCfg := server.RedisPoolConfig{
+			PoolSize:        100,
+			MinIdleConns:    0,
+			PoolTimeout:     5 * time.Minute,
+			ConnMaxLifetime: 0,
+		}
+		if v := os.Getenv("REDIS_POOL_SIZE"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				redisPoolCfg.PoolSize = n
+			} else {
+				logger.Warn("invalid REDIS_POOL_SIZE, keeping default", "value", v, "reason", "must be a positive integer")
+			}
+		}
+		if v := os.Getenv("REDIS_MIN_IDLE_CONNS"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+				redisPoolCfg.MinIdleConns = n
+			} else {
+				logger.Warn("invalid REDIS_MIN_IDLE_CONNS, keeping default", "value", v, "reason", "must be a non-negative integer")
+			}
+		}
+		if v := os.Getenv("REDIS_POOL_TIMEOUT_MINUTES"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				redisPoolCfg.PoolTimeout = time.Duration(n) * time.Minute
+			} else {
+				logger.Warn("invalid REDIS_POOL_TIMEOUT_MINUTES, keeping default", "value", v, "reason", "must be a positive integer")
+			}
+		}
+		if v := os.Getenv("REDIS_CONN_MAX_LIFETIME_MINUTES"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				redisPoolCfg.ConnMaxLifetime = time.Duration(n) * time.Minute
+			} else {
+				logger.Warn("invalid REDIS_CONN_MAX_LIFETIME_MINUTES, keeping default", "value", v, "reason", "must be a positive integer")
+			}
+		}
+		redisCache = server.NewRedisCache(redisURL, "", 0, redisPoolCfg)
 		// Verify connectivity
 		pingCtx, cancel := context.WithTimeout(runCtx, 2*time.Second)
 		if err := redisCache.Ping(pingCtx); err != nil {

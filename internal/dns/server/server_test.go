@@ -291,6 +291,10 @@ func (m *mockServerRepo) UpdateRecordHealth(ctx context.Context, recordID string
 	return nil
 }
 
+func (m *mockServerRepo) UpdateRecord(ctx context.Context, record *domain.Record) error {
+	return nil
+}
+
 func (m *mockServerRepo) GetRecordsToProbe(ctx context.Context) ([]domain.Record, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -1420,7 +1424,7 @@ func TestDLQRetryWorker_Shutdown(t *testing.T) {
 	}
 	defer mr.Close()
 
-	redisCache := NewRedisCache(mr.Addr(), "", 0)
+	redisCache := NewRedisCache(mr.Addr(), "", 0, RedisPoolConfig{})
 	defer redisCache.Close()
 
 	srv := &Server{

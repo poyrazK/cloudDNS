@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -25,8 +23,16 @@ type RedisCache struct {
 	client *redis.Client
 }
 
+// RedisPoolConfig holds connection pool settings for the Redis client.
+type RedisPoolConfig struct {
+	PoolSize       int
+	MinIdleConns   int
+	PoolTimeout    time.Duration
+	ConnMaxLifetime time.Duration
+}
+
 // NewRedisCache creates a new Redis cache client.
-func NewRedisCache(addr string, password string, db int) *RedisCache {
+func NewRedisCache(addr string, password string, db int, cfg RedisPoolConfig) *RedisCache {
 	// Parse Redis URL if provided (e.g., redis://localhost:6379)
 	if strings.HasPrefix(addr, "redis://") || strings.HasPrefix(addr, "rediss://") {
 		if u, err := url.Parse(addr); err == nil {
@@ -37,27 +43,26 @@ func NewRedisCache(addr string, password string, db int) *RedisCache {
 		}
 	}
 
-	poolSize := 50
-	if v := os.Getenv("REDIS_POOL_SIZE"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			poolSize = n
-		}
+	if cfg.PoolSize == 0 {
+		cfg.PoolSize = 100
 	}
-	minIdle := 10
-	if v := os.Getenv("REDIS_MIN_IDLE"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			minIdle = n
-		}
+	if cfg.PoolTimeout == 0 {
+		cfg.PoolTimeout = 4 * time.Second
+	}
+	if cfg.ConnMaxLifetime == 0 {
+		cfg.ConnMaxLifetime = 30 * time.Minute
+	}
+	if cfg.MinIdleConns == 0 {
+		cfg.MinIdleConns = 10
 	}
 	rdb := redis.NewClient(&redis.Options{
-		Addr:         addr,
-		Password:     password,
-		DB:           db,
-		PoolSize:     poolSize,
-		MinIdleConns: minIdle,
-		DialTimeout:  5 * time.Second,
-		ReadTimeout:  50 * time.Millisecond,
-		WriteTimeout: 50 * time.Millisecond,
+		Addr:            addr,
+		Password:        password,
+		DB:              db,
+		PoolSize:        cfg.PoolSize,
+		MinIdleConns:    cfg.MinIdleConns,
+		PoolTimeout:     cfg.PoolTimeout,
+		ConnMaxLifetime: cfg.ConnMaxLifetime,
 	})
 	return &RedisCache{client: rdb}
 }
@@ -146,6 +151,17 @@ func (r *RedisCache) PopFromDLQ(ctx context.Context, timeout time.Duration) (str
 // DLQLen returns the current length of the dead letter queue.
 func (r *RedisCache) DLQLen(ctx context.Context) (int64, error) {
 	return r.client.LLen(ctx, DLQChannel).Result()
+}
+
+// PoolConfig returns the pool configuration currently applied to the client.
+func (r *RedisCache) PoolConfig() RedisPoolConfig {
+	opts := r.client.Options()
+	return RedisPoolConfig{
+		PoolSize:       opts.PoolSize,
+		MinIdleConns:   opts.MinIdleConns,
+		PoolTimeout:    opts.PoolTimeout,
+		ConnMaxLifetime: opts.ConnMaxLifetime,
+	}
 }
 
 // Close shuts down the Redis client connection.

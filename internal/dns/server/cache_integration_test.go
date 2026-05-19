@@ -22,7 +22,7 @@ func TestCacheInvalidation_Integration(t *testing.T) {
 
 	// 2. Setup Server with Redis
 	srv := NewServer("127.0.0.1:0", nil, nil)
-	srv.Redis = NewRedisCache(mr.Addr(), "", 0)
+	srv.Redis = NewRedisCache(mr.Addr(), "", 0, RedisPoolConfig{})
 	
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -60,7 +60,7 @@ func TestCacheInvalidation_MalformedPayload(t *testing.T) {
 	defer mr.Close()
 
 	srv := NewServer("127.0.0.1:0", nil, nil)
-	srv.Redis = NewRedisCache(mr.Addr(), "", 0)
+	srv.Redis = NewRedisCache(mr.Addr(), "", 0, RedisPoolConfig{})
 	
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

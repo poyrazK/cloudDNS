@@ -100,6 +100,14 @@ func (m *mockDNSService) UpdateRecordHealth(_ context.Context, _ string, _ domai
 	return m.err
 }
 
+func (m *mockDNSService) UpdateRecord(_ context.Context, record *domain.Record) error {
+	if m.err != nil {
+		return m.err
+	}
+	record.ID = "rec-updated"
+	return nil
+}
+
 func (m *mockDNSService) HealthCheck(_ context.Context) map[string]error {
 	res := make(map[string]error)
 	res["postgres"] = m.err
@@ -458,6 +466,60 @@ func TestCreateRecordValidation(t *testing.T) {
 				t.Errorf("CreateRecord(%s) status = %d, want %d", tt.name, w.Code, tt.want)
 			}
 		})
+	}
+}
+
+func TestUpdateRecordSuccess(t *testing.T) {
+	svc := &mockDNSService{}
+	repo := &testutil.MockRepo{}
+	handler := New(svc, repo, slog.Default())
+
+	rec := domain.Record{Name: "www.test.com.", Type: domain.TypeA, Content: "5.6.7.8", TTL: 300}
+	body, _ := json.Marshal(rec)
+	req := httptest.NewRequest("PUT", "/zones/z1/records/r1", bytes.NewBuffer(body))
+	req = withTenant(req, testTenantID)
+	w := httptest.NewRecorder()
+
+	handler.UpdateRecord(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+}
+
+func TestUpdateRecordNotFound(t *testing.T) {
+	svc := &mockDNSService{err: errors.New("not found")}
+	repo := &testutil.MockRepo{}
+	handler := New(svc, repo, slog.Default())
+
+	rec := domain.Record{Name: "www.test.com.", Type: domain.TypeA, Content: "5.6.7.8", TTL: 300}
+	body, _ := json.Marshal(rec)
+	req := httptest.NewRequest("PUT", "/zones/z1/records/r1", bytes.NewBuffer(body))
+	req = withTenant(req, testTenantID)
+	w := httptest.NewRecorder()
+
+	handler.UpdateRecord(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("Expected status 404, got %d", w.Code)
+	}
+}
+
+func TestUpdateRecordMissingTenant(t *testing.T) {
+	svc := &mockDNSService{}
+	repo := &testutil.MockRepo{}
+	handler := New(svc, repo, slog.Default())
+
+	rec := domain.Record{Name: "www.test.com.", Type: domain.TypeA, Content: "5.6.7.8", TTL: 300}
+	body, _ := json.Marshal(rec)
+	req := httptest.NewRequest("PUT", "/zones/z1/records/r1", bytes.NewBuffer(body))
+	// No withTenant call — missing tenant context
+	w := httptest.NewRecorder()
+
+	handler.UpdateRecord(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("Expected status 401, got %d", w.Code)
 	}
 }
 

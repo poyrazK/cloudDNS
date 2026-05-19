@@ -669,9 +669,10 @@ func (r *DNSRecord) Read(buffer *BytePacketBuffer) error {
 			case 2: // no-default
 				r.HTTPSNoDefault = true
 			case 3: // port
-				if len(paramData) >= 2 {
-					r.HTTPSPort = uint16(paramData[0])<<8 | uint16(paramData[1]) // #nosec G115
+				if len(paramData) < 2 {
+					return fmt.Errorf("HTTPS SVCB param port: length %d less than 2", len(paramData))
 				}
+				r.HTTPSPort = uint16(paramData[0])<<8 | uint16(paramData[1]) // #nosec G115
 			case 5: // echconfig
 				r.HTTPSEchConfig = paramData
 			case 6: // ipv4hint

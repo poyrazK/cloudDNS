@@ -87,6 +87,10 @@ func (m *auditMockRepo) UpdateRecordHealth(ctx context.Context, recordID string,
 	return m.mockRepo.UpdateRecordHealth(ctx, recordID, status, errMsg)
 }
 
+func (m *auditMockRepo) UpdateRecord(ctx context.Context, record *domain.Record) error {
+	return m.mockRepo.UpdateRecord(ctx, record)
+}
+
 func (m *auditMockRepo) DeleteRecord(ctx context.Context, recordID string, zoneID string, tenantID string) error {
 	return m.mockRepo.DeleteRecord(ctx, recordID, zoneID, tenantID)
 }

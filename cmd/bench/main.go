@@ -338,7 +338,7 @@ func runScaleTest(count int, concurrency int) {
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	repo := repository.NewPostgresRepository(db)
 	srv := server.NewServer(addr, repo, logger)
-	srv.Redis = server.NewRedisCache(redisURL, "", 0)
+	srv.Redis = server.NewRedisCache(redisURL, "", 0, server.RedisPoolConfig{})
 	
 	srvCtx, cancelSrv := context.WithCancel(ctx)
 	defer cancelSrv()

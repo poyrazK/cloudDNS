@@ -396,18 +396,26 @@ func (s *Server) Run(ctx context.Context) error {
 		close(s.done) // Signal all workers to exit (goroutines check s.done and exit via wg.Done)
 		// Close listeners to unblock Accept/ReadFrom calls
 		if s.tcpListener != nil {
-			_ = s.tcpListener.Close()
+			if err := s.tcpListener.Close(); err != nil {
+				s.Logger.Warn("failed to close TCP listener", "error", err)
+			}
 		}
 		if s.dotListener != nil {
-			_ = s.dotListener.Close()
+			if err := s.dotListener.Close(); err != nil {
+				s.Logger.Warn("failed to close DoT listener", "error", err)
+			}
 		}
 		shutdownCtx, shutdownCancel := context.WithTimeout(ctx, 5*time.Second)
 		defer shutdownCancel()
 		if s.dohServer != nil {
-			_ = s.dohServer.Shutdown(shutdownCtx)
+			if err := s.dohServer.Shutdown(shutdownCtx); err != nil {
+				s.Logger.Warn("failed to shut down DoH server", "error", err)
+			}
 		}
 		if s.doqListener != nil {
-			_ = s.doqListener.Close()
+			if err := s.doqListener.Close(); err != nil {
+				s.Logger.Warn("failed to close DoQ listener", "error", err)
+			}
 		}
 		if s.Redis != nil {
 			errCh := make(chan error, 1)
@@ -475,7 +483,9 @@ func (s *Server) Run(ctx context.Context) error {
 		s.wg.Add(1)
 		go func(c net.PacketConn) {
 			defer func() {
-				_ = c.Close()
+				if err := c.Close(); err != nil {
+					s.Logger.Warn("failed to close UDP listener", "error", err)
+				}
 			}()
 			defer s.wg.Done()
 			// Set read deadline so select can re-check s.done periodically
@@ -495,9 +505,9 @@ func (s *Server) Run(ctx context.Context) error {
 						_ = c.SetReadDeadline(time.Now().Add(udpReadDeadline))
 						continue
 					}
-					// buf[:n:n] shares the backing array — the channel send completes
-					// before the next ReadFrom, so the array is not overwritten.
-					data := buf[:n:n]
+					// Copy buffer since the backing array is reused across ReadFrom calls.
+					data := make([]byte, n)
+					copy(data, buf[:n])
 					s.udpQueue <- udpTask{addr: addr, data: data, conn: c}
 				}
 			}
@@ -521,7 +531,9 @@ func (s *Server) Run(ctx context.Context) error {
 		s.wg.Add(1)
 		go func() {
 			defer func() {
-				_ = s.tcpListener.Close()
+				if err := s.tcpListener.Close(); err != nil {
+					s.Logger.Warn("failed to close TCP listener", "error", err)
+				}
 			}()
 			defer s.wg.Done()
 			for {
@@ -548,7 +560,9 @@ func (s *Server) Run(ctx context.Context) error {
 			s.wg.Add(1)
 			go func() {
 				defer func() {
-					_ = s.dotListener.Close()
+					if err := s.dotListener.Close(); err != nil {
+						s.Logger.Warn("failed to close DoT listener", "error", err)
+					}
 				}()
 				defer s.wg.Done()
 				for {
@@ -733,11 +747,11 @@ func (s *Server) handleAXFR(ctx context.Context, conn net.Conn, request *packet.
 	}
 
 	// Validate TSIG if present
-	if request.TSIGStart != -1 {
+	if request.TSIGStart != -1 && len(request.Resources) > 0 {
 		tsig := request.Resources[len(request.Resources)-1]
 		secret, ok := s.TsigKeys[tsig.Name]
 		if !ok {
-			s.Logger.Warn("AXFR failed: unknown TSIG key", "key", tsig.Name, "zone", q.Name)
+			s.Logger.Debug("AXFR failed: unknown TSIG key", "key", tsig.Name, "zone", q.Name)
 			s.sendTCPError(conn, request.Header.ID, 5) // NotAuth
 			return
 		}
@@ -748,7 +762,12 @@ func (s *Server) handleAXFR(ctx context.Context, conn net.Conn, request *packet.
 		}
 	}
 
-	zone, _ := s.Repo.GetZone(ctx, q.Name)
+	zone, err := s.Repo.GetZone(ctx, q.Name)
+	if err != nil {
+		s.Logger.Error("AXFR failed to look up zone", "zone", q.Name, "error", err)
+		s.sendTCPError(conn, request.Header.ID, 2) // SERVFAIL
+		return
+	}
 	if zone == nil {
 		s.Logger.Warn("AXFR requested for non-existent zone", "name", q.Name)
 		s.sendTCPError(conn, request.Header.ID, 3) // NXDOMAIN
@@ -869,125 +888,228 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 		metrics.QueryDuration.WithLabelValues("total").Observe(time.Since(start).Seconds())
 	}()
 
-	var clientIP string
-	switch addr := srcAddr.(type) {
-	case string:
-		clientIP, _, _ = net.SplitHostPort(addr)
-	case net.Addr:
-		clientIP, _, _ = net.SplitHostPort(addr.String())
-	}
-
+	clientIP := extractClientIP(srcAddr)
 	if !s.limiter.Allow(clientIP) {
 		return nil
 	}
 
-	reqBuffer := packet.GetBuffer()
-	defer packet.PutBuffer(reqBuffer)
-	reqBuffer.Load(data)
-
-	request := packet.NewDNSPacket()
-	if errParse := request.FromBuffer(reqBuffer); errParse != nil {
+	request, errParse := s.parsePacket(data)
+	if errParse != nil {
 		s.Logger.Error("failed to parse packet", "error", errParse)
 		return errParse
 	}
 
-	// Default labels for metrics
 	qTypeLabel := "UNKNOWN"
 	if len(request.Questions) > 0 {
 		qTypeLabel = request.Questions[0].QType.String()
 	}
 
-	if request.Header.Opcode == packet.OpcodeUpdate {
+	// Opcode routing
+	switch request.Header.Opcode {
+	case packet.OpcodeUpdate:
 		err := s.handleUpdate(ctx, request, data, clientIP, sendFn)
-		rcode := "0"
-		if err == nil {
-			rcode = fmt.Sprintf("%d", request.Header.ResCode)
-		}
-		metrics.QueriesTotal.WithLabelValues("UPDATE", rcode, protocol).Inc()
+		metrics.QueriesTotal.WithLabelValues("UPDATE", rcodeLabel(err, request), protocol).Inc()
 		return err
-	}
-
-	if request.Header.Opcode == packet.OpcodeNotify {
+	case packet.OpcodeNotify:
 		err := s.handleNotify(ctx, request, clientIP, sendFn)
 		metrics.QueriesTotal.WithLabelValues("NOTIFY", "0", protocol).Inc()
 		return err
 	}
 
+	// Empty questions → FORMERR
 	if len(request.Questions) == 0 {
-		response := packet.NewDNSPacket()
-		response.Header.ID = request.Header.ID
-		response.Header.Response = true
-		response.Header.ResCode = 4 // FORMERR
-		metrics.QueriesTotal.WithLabelValues("NONE", "4", protocol).Inc()
-		resBuffer := packet.GetBuffer()
-		defer packet.PutBuffer(resBuffer)
-		_ = response.Write(resBuffer)
-		return sendFn(resBuffer.Buf[:resBuffer.Position()])
+		return s.sendFORMERR(request, sendFn, qTypeLabel, protocol)
 	}
 
 	q := request.Questions[0]
-	// 1. Handle CHAOS class queries for node identity (NSID readiness)
+
+	// CHAOS identity queries
 	if q.QClass == ClassCHAOS {
 		if strings.ToLower(q.Name) == "id.server." || strings.ToLower(q.Name) == "hostname.bind." {
-			response := packet.NewDNSPacket()
-			response.Header.ID = request.Header.ID
-			response.Header.Response = true
-			response.Header.AuthoritativeAnswer = true
-			response.Questions = append(response.Questions, q)
-
-			txtRec := packet.DNSRecord{
-				Name:  q.Name,
-				Type:  packet.TXT,
-				Class: ClassCHAOS,
-				TTL:   0,
-				Txt:   s.NodeID,
-			}
-			response.Answers = append(response.Answers, txtRec)
-
-			metrics.QueriesTotal.WithLabelValues(qTypeLabel, "0", protocol).Inc()
-			resBuffer := packet.GetBuffer()
-			defer packet.PutBuffer(resBuffer)
-			_ = response.Write(resBuffer)
-			return sendFn(resBuffer.Buf[:resBuffer.Position()])
+			return s.sendCHAOSIdentity(request, q, sendFn, qTypeLabel, protocol)
 		}
 	}
 
-	// Standardize name for lookup
+	// Standardize name
 	if !strings.HasSuffix(q.Name, ".") {
 		q.Name += "."
 	}
 	cacheKey := fmt.Sprintf("%s:%d", strings.ToLower(q.Name), q.QType)
 
-	// L1/L2 Check — acquire per-key lock only for atomic check-and-populate.
-	// Lock is NOT held during L3 resolution to avoid serializing concurrent requests
-	// that map to the same shard but have different cache keys.
+	// Cache check (L1 + L2)
+	if cached := s.checkCache(ctx, request, cacheKey, clientIP, qTypeLabel, protocol, sendFn); cached != nil {
+		return nil
+	}
+
+	// DB latency simulation
+	s.simulateDBLatency()
+
+	// EDNS0 processing
+	clientOPT, maxSize, dnssecOK, nsidRequested, clientCookie, paddingRequested := s.processEDNS0(request)
+
+	// Build response skeleton
+	response := s.newResponseSkeleton(request, q, clientOPT, dnssecOK, nsidRequested, clientCookie)
+	source := "local"
+
+	// Guard against nil repository
+	if s.Repo == nil {
+		return s.sendServFail(response, sendFn, qTypeLabel, protocol)
+	}
+
+	// Zone lookup
+	zone, _ := s.Repo.GetZoneLongestMatch(ctx, q.Name)
+
+	// Record resolution + wildcard
+	records, errRepo := s.Repo.GetRecords(ctx, q.Name, queryTypeToRecordType(q.QType), clientIP)
+	if errRepo == nil && len(records) > 0 {
+		s.appendRecordsToResponse(response, records)
+	} else if zone != nil {
+		source = "wildcard"
+		if recs, nsec3 := s.resolveWithWildcard(ctx, q, zone, dnssecOK, clientIP); len(recs) > 0 {
+			s.appendRecordsToResponse(response, recs)
+			if nsec3 != nil {
+				response.Authorities = append(response.Authorities, *nsec3)
+			}
+		}
+	}
+
+	// Handle NXDOMAIN / NoData / authoritative
+	if len(response.Answers) == 0 {
+		s.handleNxDomain(ctx, request, q, zone, dnssecOK, clientOPT, clientIP, response)
+	} else if zone != nil {
+		s.populateAuthorityAndAdditional(ctx, response, zone, clientIP)
+	}
+
+	// DNSSEC signing
+	if dnssecOK && zone != nil {
+		s.signResponse(ctx, zone, response)
+	}
+
+	// DNSSEC validation
+	if zone != nil {
+		s.validateDNSSECResponse(ctx, zone, response)
+	}
+
+	// Re-extract maxSize from OPT for truncation
+	maxSize = s.extractMaxSizeFromOPT(request, maxSize)
+
+	// Padding
+	if paddingRequested || protocol == "dot" || protocol == "doh" {
+		s.padResponse(response, 468)
+	}
+
+	// Write + truncate
+	resBuffer := packet.GetBuffer()
+	defer packet.PutBuffer(resBuffer)
+	resBuffer.HasNames = true
+	_ = response.Write(resBuffer)
+	s.truncateIfNeeded(response, resBuffer, maxSize)
+	resData := resBuffer.Buf[:resBuffer.Position()]
+
+	// Cache result
+	s.cacheResult(ctx, cacheKey, resData, response)
+
+	metrics.QueriesTotal.WithLabelValues(qTypeLabel, fmt.Sprintf("%d", response.Header.ResCode), protocol).Inc()
+	s.Logger.Info("query processed", "name", q.Name, "src", source, "lat", time.Since(start).Milliseconds())
+	return sendFn(resData)
+}
+
+func rcodeLabel(err error, req *packet.DNSPacket) string {
+	if err == nil {
+		return fmt.Sprintf("%d", req.Header.ResCode)
+	}
+	return "0"
+}
+
+// extractClientIP extracts the client IP address from the source address.
+func extractClientIP(srcAddr interface{}) string {
+	switch addr := srcAddr.(type) {
+	case string:
+		ip, _, _ := net.SplitHostPort(addr)
+		return ip
+	case net.Addr:
+		ip, _, _ := net.SplitHostPort(addr.String())
+		return ip
+	}
+	return ""
+}
+
+// parsePacket parses a DNS packet from raw data.
+func (s *Server) parsePacket(data []byte) (*packet.DNSPacket, error) {
+	reqBuffer := packet.GetBuffer()
+	defer packet.PutBuffer(reqBuffer)
+	reqBuffer.Load(data)
+	request := packet.NewDNSPacket()
+	if err := request.FromBuffer(reqBuffer); err != nil {
+		return nil, err
+	}
+	return request, nil
+}
+
+// sendFORMERR sends a FORMERR response for empty question packets.
+func (s *Server) sendFORMERR(req *packet.DNSPacket, sendFn func([]byte) error, _, protocol string) error {
+	response := packet.NewDNSPacket()
+	response.Header.ID = req.Header.ID
+	response.Header.Response = true
+	response.Header.ResCode = 4 // FORMERR
+	metrics.QueriesTotal.WithLabelValues("NONE", "4", protocol).Inc()
+	resBuffer := packet.GetBuffer()
+	defer packet.PutBuffer(resBuffer)
+	_ = response.Write(resBuffer)
+	return sendFn(resBuffer.Buf[:resBuffer.Position()])
+}
+
+// sendCHAOSIdentity responds to CHAOS identity queries (id.server., hostname.bind.).
+func (s *Server) sendCHAOSIdentity(req *packet.DNSPacket, q packet.DNSQuestion, sendFn func([]byte) error, qTypeLabel, protocol string) error {
+	response := packet.NewDNSPacket()
+	response.Header.ID = req.Header.ID
+	response.Header.Response = true
+	response.Header.AuthoritativeAnswer = true
+	response.Questions = append(response.Questions, q)
+	response.Answers = append(response.Answers, packet.DNSRecord{
+		Name:  q.Name,
+		Type:  packet.TXT,
+		Class: ClassCHAOS,
+		TTL:   0,
+		Txt:   s.NodeID,
+	})
+	metrics.QueriesTotal.WithLabelValues(qTypeLabel, "0", protocol).Inc()
+	resBuffer := packet.GetBuffer()
+	defer packet.PutBuffer(resBuffer)
+	_ = response.Write(resBuffer)
+	return sendFn(resBuffer.Buf[:resBuffer.Position()])
+}
+
+// checkCache checks L1 and L2 cache, sends response directly if found.
+// Returns nil if no cached data was found.
+func (s *Server) checkCache(ctx context.Context, req *packet.DNSPacket, cacheKey, _ string, qTypeLabel, protocol string, sendFn func([]byte) error) []byte {
+	start := time.Now()
 	lock := globalCacheLocks.lockKey(cacheKey)
 	lock.Lock()
+	defer lock.Unlock()
 
-	var cachedData []byte
-
-	if data, found := s.Cache.GetInto(cacheKey, request.Header.ID); found {
+	// L1 check
+	if data, found := s.Cache.GetInto(cacheKey, req.Header.ID); found {
 		metrics.CacheOperations.WithLabelValues("l1", "hit").Inc()
 		metrics.RecordCacheHit()
 		metrics.QueriesTotal.WithLabelValues(qTypeLabel, "0", protocol).Inc()
 		metrics.QueryDuration.WithLabelValues("cache_l1").Observe(time.Since(start).Seconds())
-		lock.Unlock()
-		err := sendFn(data)
-		return err
+		_ = sendFn(data)
+		return data
 	}
 	metrics.CacheOperations.WithLabelValues("l1", "miss").Inc()
 	metrics.RecordCacheMiss()
 
+	// L2 check (Redis)
 	if s.Redis != nil {
 		if data, remainingTTL, found := s.Redis.GetWithTTL(ctx, cacheKey); found {
 			metrics.CacheOperations.WithLabelValues("l2", "hit").Inc()
 			metrics.RecordCacheHit()
 			metrics.QueriesTotal.WithLabelValues(qTypeLabel, "0", protocol).Inc()
 			metrics.QueryDuration.WithLabelValues("cache_l2").Observe(time.Since(start).Seconds())
-			// Rewrite Transaction ID (data is a copy from Redis, safe to mutate)
 			if len(data) >= 2 {
-				data[0] = byte(request.Header.ID >> 8)
-				data[1] = byte(request.Header.ID & 0xFF)
+				data[0] = byte(req.Header.ID >> 8)
+				data[1] = byte(req.Header.ID & 0xFF)
 			}
 			l1TTLCap := 300 * time.Second
 	if v := os.Getenv("REDIS_L1_TTL_CAP"); v != "" {
@@ -1001,48 +1123,44 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 		remainingTTL = l1TTLCap
 	}
 			s.Cache.SetNoCopy(cacheKey, data, remainingTTL)
-			cachedData = data
-		} else if s.Redis != nil {
-			// Redis was checked but key not found = L2 miss
-			metrics.CacheOperations.WithLabelValues("l2", "miss").Inc()
-			metrics.RecordCacheMiss()
+			_ = sendFn(data)
+			return data
 		}
+		metrics.CacheOperations.WithLabelValues("l2", "miss").Inc()
+		metrics.RecordCacheMiss()
 	}
+	return nil
+}
 
-	lock.Unlock()
-
-	if cachedData != nil {
-		return sendFn(cachedData)
+// simulateDBLatency adds simulated DB latency if configured.
+func (s *Server) simulateDBLatency() {
+	if s.SimulateDBLatency <= 0 {
+		return
 	}
+	var b [8]byte
+	_, _ = crand.Read(b[:])
+	jitter := float64(binary.LittleEndian.Uint64(b[:])) / float64(math.MaxUint64)
+	time.Sleep(time.Duration(float64(s.SimulateDBLatency) * (0.5 + jitter)))
+}
 
-	// L3 Resolution
-	if s.SimulateDBLatency > 0 {
-		// Use crypto/rand for simulation jitter (safe for G404)
-		var b [8]byte
-		_, _ = crand.Read(b[:])
-		jitter := float64(binary.LittleEndian.Uint64(b[:])) / float64(math.MaxUint64)
-		time.Sleep(time.Duration(float64(s.SimulateDBLatency) * (0.5 + jitter)))
-	}
-
-	// EDNS(0) Support (RFC 6891)
+// processEDNS0 extracts EDNS0 options from the request.
+// Returns: clientOPT, maxSize, dnssecOK, nsidRequested, clientCookie, paddingRequested.
+func (s *Server) processEDNS0(req *packet.DNSPacket) (*packet.DNSRecord, int, bool, bool, []byte, bool) {
 	maxSize := 512
 	dnssecOK := false
 	nsidRequested := false
 	var clientCookie []byte
 	paddingRequested := false
-
 	var clientOPT *packet.DNSRecord
-	for _, res := range request.Resources {
+
+	for _, res := range req.Resources {
 		if res.Type == packet.OPT {
 			clientOPT = &res
 			maxSize = int(res.UDPPayloadSize)
 			if maxSize < 512 {
 				maxSize = 512
 			}
-			// DO bit is the first bit of the Z field (TTL bits 15-0)
 			dnssecOK = (res.Z & 0x8000) != 0
-
-			// Check options
 			for _, opt := range res.Options {
 				switch opt.Code {
 				case packet.EdnsOptionNSID:
@@ -1056,282 +1174,248 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 			break
 		}
 	}
+	return clientOPT, maxSize, dnssecOK, nsidRequested, clientCookie, paddingRequested
+}
 
+// newResponseSkeleton creates the response packet with header fields set.
+func (s *Server) newResponseSkeleton(req *packet.DNSPacket, q packet.DNSQuestion, clientOPT *packet.DNSRecord, dnssecOK, nsidRequested bool, clientCookie []byte) *packet.DNSPacket {
 	response := packet.NewDNSPacket()
-	response.Header.ID = request.Header.ID
+	response.Header.ID = req.Header.ID
 	response.Header.Response = true
 	response.Header.AuthoritativeAnswer = true
 	response.Header.RecursionAvailable = s.RecursionEnabled
 	response.Questions = append(response.Questions, q)
 
-	// If query had EDNS, response MUST have EDNS
 	if clientOPT != nil {
 		opt := packet.DNSRecord{
 			Name:           ".",
 			Type:           packet.OPT,
-			UDPPayloadSize: 4096, // Our server's supported buffer size
-			TTL:            0,    // Extended RCODE and Version
+			UDPPayloadSize: 4096,
+			TTL:            0,
 		}
 		if dnssecOK {
-			opt.Z = 0x8000 // Set DO bit if client set it
+			opt.Z = 0x8000
 		}
 		if nsidRequested {
 			opt.SetOption(packet.EdnsOptionNSID, []byte(s.NodeID))
 		}
 		if len(clientCookie) == 8 {
-			serverCookie := s.generateServerCookie(clientCookie[:8], clientIP)
-			fullCookie := append(clientCookie[:8], serverCookie...)
-			opt.SetOption(packet.EdnsOptionCookie, fullCookie)
+			serverCookie := s.generateServerCookie(clientCookie[:8], "")
+			opt.SetOption(packet.EdnsOptionCookie, append(clientCookie[:8], serverCookie...))
 		}
 		response.Resources = append(response.Resources, opt)
 	}
-	source := "local"
+	return response
+}
 
-	// Guard against nil repository (useful for identity-only nodes or tests)
-	if s.Repo == nil {
-		response.Header.ResCode = packet.RcodeServFail
-		metrics.QueriesTotal.WithLabelValues(qTypeLabel, "2", protocol).Inc()
-		resBuffer := packet.GetBuffer()
-		defer packet.PutBuffer(resBuffer)
-		_ = response.Write(resBuffer)
-		return sendFn(resBuffer.Buf[:resBuffer.Position()])
+// sendServFail sends a SERVFAIL response when Repo is nil.
+func (s *Server) sendServFail(resp *packet.DNSPacket, sendFn func([]byte) error, qTypeLabel, protocol string) error {
+	resp.Header.ResCode = packet.RcodeServFail
+	metrics.QueriesTotal.WithLabelValues(qTypeLabel, "2", protocol).Inc()
+	resBuffer := packet.GetBuffer()
+	defer packet.PutBuffer(resBuffer)
+	_ = resp.Write(resBuffer)
+	return sendFn(resBuffer.Buf[:resBuffer.Position()])
+}
+
+// resolveWithWildcard attempts wildcard resolution for the query name.
+// Returns records and an optional NSEC3 proof record.
+func (s *Server) resolveWithWildcard(ctx context.Context, q packet.DNSQuestion, zone *domain.Zone, dnssecOK bool, clientIP string) ([]domain.Record, *packet.DNSRecord) {
+	labels := strings.Split(strings.TrimSuffix(q.Name, "."), ".")
+	wildcardNames := make([]string, 0, len(labels)-1)
+	for i := 0; i < len(labels)-1; i++ {
+		wildcardNames = append(wildcardNames, "*."+strings.Join(labels[i+1:], ".")+".")
 	}
 
-	// 1. Find the zone for this query to include Authority/Additional records
-	// Use single-query longest-match instead of N+1 label traversal
-	zone, _ := s.Repo.GetZoneLongestMatch(ctx, q.Name)
+	results, err := s.Repo.GetRecordsByNames(ctx, wildcardNames, queryTypeToRecordType(q.QType), clientIP)
+	if err != nil {
+		return nil, nil
+	}
 
-	// 2. Resolve Main Records
-	dbStart := time.Now()
-	qTypeStr := queryTypeToRecordType(q.QType)
-	records, errRepo := s.Repo.GetRecords(ctx, q.Name, qTypeStr, clientIP)
-	metrics.QueryDuration.WithLabelValues("database").Observe(time.Since(dbStart).Seconds())
-	metrics.RecordCacheMiss() // DB lookup is a cache miss for ratio purposes
+	for _, wname := range wildcardNames {
+		if recs, ok := results[wname]; ok && len(recs) > 0 {
+			for j := range recs {
+				recs[j].Name = q.Name // Rewrite wildcard to query name
+			}
+			// DNSSEC: generate NSEC3 proof for wildcard match
+			if dnssecOK {
+				nsec3params, _ := s.Repo.GetRecords(ctx, zone.Name, "NSEC3PARAM", "")
+				if len(nsec3params) > 0 {
+					if nsec3, errNsec := s.generateNSEC3(ctx, zone, q.Name, wname); errNsec == nil {
+						return recs, &nsec3
+					}
+				}
+			}
+			return recs, nil
+		}
+	}
+	return nil, nil
+}
 
-	if errRepo == nil && len(records) > 0 {
-		for _, rec := range records {
-			pRec, errConv := repository.ConvertDomainToPacketRecord(rec)
-			if errConv == nil {
-				response.Answers = append(response.Answers, pRec)
+// appendRecordsToResponse converts domain records to packet records and appends to response.
+func (s *Server) appendRecordsToResponse(resp *packet.DNSPacket, records []domain.Record) {
+	for _, rec := range records {
+		if pRec, err := repository.ConvertDomainToPacketRecord(rec); err == nil {
+			resp.Answers = append(resp.Answers, pRec)
+		}
+	}
+}
+
+// handleNxDomain handles the NXDOMAIN / NoData case.
+func (s *Server) handleNxDomain(ctx context.Context, req *packet.DNSPacket, q packet.DNSQuestion, zone *domain.Zone, dnssecOK bool, clientOPT *packet.DNSRecord, clientIP string, resp *packet.DNSPacket) {
+	if zone != nil {
+		resp.Header.ResCode = 3 // NXDOMAIN
+		soaRecords, _ := s.Repo.GetRecords(ctx, zone.Name, domain.TypeSOA, clientIP)
+		for _, rec := range soaRecords {
+			if pRec, err := repository.ConvertDomainToPacketRecord(rec); err == nil {
+				resp.Authorities = append(resp.Authorities, pRec)
 			}
 		}
-	} else if zone != nil {
-		// Try wildcard matching if no direct records found
-		labels := strings.Split(strings.TrimSuffix(q.Name, "."), ".")
-		for i := 0; i < len(labels)-1; i++ {
-			wildcardName := "*." + strings.Join(labels[i+1:], ".") + "."
-			wildcardRecords, errWildcard := s.Repo.GetRecords(ctx, wildcardName, qTypeStr, clientIP)
-			if errWildcard == nil && len(wildcardRecords) > 0 {
-				source = "wildcard"
-				for _, rec := range wildcardRecords {
-					rec.Name = q.Name // RFC: Rewrite wildcard to query name
-					pRec, errConv := repository.ConvertDomainToPacketRecord(rec)
-					if errConv == nil {
-						response.Answers = append(response.Answers, pRec)
-					}
+		if dnssecOK {
+			nsec3params, _ := s.Repo.GetRecords(ctx, zone.Name, "NSEC3PARAM", "")
+			if len(nsec3params) > 0 {
+				if nsec, err := s.generateNSEC3(ctx, zone, q.Name, ""); err == nil {
+					resp.Authorities = append(resp.Authorities, nsec)
 				}
-				// DNSSEC: If DO bit is set and wildcard matched, include NSEC3 proof
-				// Per RFC 5155 Section 7.2.14, prove the wildcard existed
-				if dnssecOK && len(response.Answers) > 0 {
-					nsec3params, _ := s.Repo.GetRecords(ctx, zone.Name, "NSEC3PARAM", "")
-					if len(nsec3params) > 0 {
-						nsec3, errNsec := s.generateNSEC3(ctx, zone, q.Name, wildcardName)
-						if errNsec == nil {
-							response.Authorities = append(response.Authorities, nsec3)
-						}
-					}
+			} else {
+				if nsec, err := s.generateNSEC(ctx, zone, q.Name); err == nil {
+					resp.Authorities = append(resp.Authorities, nsec)
 				}
+			}
+		}
+	} else {
+		if s.RecursionEnabled && req.Header.RecursionDesired {
+			if recursiveResp, err := s.resolveRecursive(ctx, q.Name, q.QType); err == nil && recursiveResp != nil {
+				resp.Header.AuthoritativeAnswer = false
+				resp.Header.ResCode = recursiveResp.Header.ResCode
+				resp.Answers = recursiveResp.Answers
+				resp.Authorities = recursiveResp.Authorities
+			} else {
+				resp.Header.AuthoritativeAnswer = false
+				resp.Header.ResCode = 2 // SERVFAIL
+			}
+		} else {
+			resp.Header.AuthoritativeAnswer = false
+			resp.Header.ResCode = 3 // NXDOMAIN
+		}
+	}
+
+	// RFC 8914: Add EDE for NXDOMAIN
+	if clientOPT != nil {
+		for i := range resp.Resources {
+			if resp.Resources[i].Type == packet.OPT {
+				resp.Resources[i].AddEDE(packet.EdeOther, "")
+			}
+		}
+	}
+}
+
+// populateAuthorityAndAdditional adds NS records and glue A records to the response.
+func (s *Server) populateAuthorityAndAdditional(ctx context.Context, resp *packet.DNSPacket, zone *domain.Zone, clientIP string) {
+	nsRecords, _ := s.Repo.GetRecords(ctx, zone.Name, domain.TypeNS, clientIP)
+	nsTargets := make([]string, 0, len(nsRecords))
+	for _, rec := range nsRecords {
+		if pRec, err := repository.ConvertDomainToPacketRecord(rec); err == nil {
+			nsTargets = append(nsTargets, pRec.Host)
+		}
+	}
+
+	allGlue, _ := s.Repo.GetRecordsByNames(ctx, nsTargets, domain.TypeA, clientIP)
+
+	for _, rec := range nsRecords {
+		if pRec, err := repository.ConvertDomainToPacketRecord(rec); err == nil {
+			resp.Authorities = append(resp.Authorities, pRec)
+			for _, gRec := range allGlue[pRec.Host] {
+				if gpRec, err := repository.ConvertDomainToPacketRecord(gRec); err == nil {
+					resp.Resources = append(resp.Resources, gpRec)
+				}
+			}
+		}
+	}
+}
+
+// validateDNSSECResponse performs DNSSEC validation and converts to SERVFAIL in strict mode.
+func (s *Server) validateDNSSECResponse(ctx context.Context, zone *domain.Zone, resp *packet.DNSPacket) {
+	if err := s.validateDNSSEC(ctx, zone.Name, resp); err != nil && s.DNSSECMode == "strict" {
+		resp.Header.ResCode = packet.RcodeServFail
+		resp.Answers = nil
+		resp.Authorities = nil
+		for i := range resp.Resources {
+			if resp.Resources[i].Type == packet.OPT {
+				resp.Resources[i].AddEDE(packet.EdeDnssecBogus, err.Error())
+			}
+		}
+	}
+}
+
+// extractMaxSizeFromOPT re-reads maxSize from the request's OPT record.
+func (s *Server) extractMaxSizeFromOPT(req *packet.DNSPacket, fallback int) int {
+	for _, res := range req.Resources {
+		if res.Type == packet.OPT {
+			ms := int(res.UDPPayloadSize)
+			if ms < 512 {
+				ms = 512
+			}
+			return ms
+		}
+	}
+	return fallback
+}
+
+// truncateIfNeeded applies RFC 6891 multi-pass truncation to the response.
+func (s *Server) truncateIfNeeded(resp *packet.DNSPacket, buf *packet.BytePacketBuffer, maxSize int) {
+	if buf.Position() <= maxSize {
+		return
+	}
+	resp.Header.TruncatedMessage = true
+	resp.Answers = nil
+	resp.Authorities = nil
+	// Preserve OPT records
+	var optRecords []packet.DNSRecord
+	for _, res := range resp.Resources {
+		if res.Type == packet.OPT {
+			optRecords = append(optRecords, res)
+		}
+	}
+	resp.Resources = optRecords
+	buf.Reset()
+	buf.HasNames = true
+	_ = resp.Write(buf)
+	// If still too large, remove OPT entirely
+	if buf.Position() > maxSize {
+		resp.Resources = nil
+		buf.Reset()
+		buf.HasNames = true
+		_ = resp.Write(buf)
+	}
+}
+
+// cacheResult caches the response in L1 and L2 if eligible.
+func (s *Server) cacheResult(ctx context.Context, cacheKey string, resData []byte, resp *packet.DNSPacket) {
+	if resp.Header.TruncatedMessage || (resp.Header.ResCode != 0 && resp.Header.ResCode != 3) {
+		return
+	}
+	var ttl uint32 = 300
+	if len(resp.Answers) > 0 {
+		ttl = resp.Answers[0].TTL
+	} else if len(resp.Authorities) > 0 {
+		ttl = resp.Authorities[0].TTL
+	}
+	// RFC 2308: NXDOMAIN uses SOA MINIMUM for negative cache TTL
+	if resp.Header.ResCode == 3 {
+		for _, auth := range resp.Authorities {
+			if auth.Type == packet.SOA {
+				ttl = min(auth.Minimum, auth.TTL)
 				break
 			}
 		}
 	}
-
-	// 3. Handle NXDOMAIN / No Data
-	if len(response.Answers) == 0 {
-		if zone != nil {
-			response.Header.ResCode = 3 // NXDOMAIN
-			// RFC: Include SOA in Authority section for negative caching
-			soaRecords, _ := s.Repo.GetRecords(ctx, zone.Name, domain.TypeSOA, clientIP)
-			for _, rec := range soaRecords {
-				pRec, errConv := repository.ConvertDomainToPacketRecord(rec)
-				if errConv == nil {
-					response.Authorities = append(response.Authorities, pRec)
-				}
-			}
-
-			// DNSSEC: If DO bit is set, include NSEC or NSEC3 record
-			if dnssecOK {
-				// Check for NSEC3PARAM to decide between NSEC and NSEC3
-				nsec3params, _ := s.Repo.GetRecords(ctx, zone.Name, "NSEC3PARAM", "")
-				if len(nsec3params) > 0 {
-					nsec3, errNsec := s.generateNSEC3(ctx, zone, q.Name, "")
-					if errNsec == nil {
-						response.Authorities = append(response.Authorities, nsec3)
-					}
-				} else {
-					nsec, errNsec := s.generateNSEC(ctx, zone, q.Name)
-					if errNsec == nil {
-						response.Authorities = append(response.Authorities, nsec)
-					}
-				}
-			}
-		} else {
-			// Not authoritative for this zone - try recursive resolution if enabled
-			if s.RecursionEnabled && request.Header.RecursionDesired {
-				s.Logger.Info("fallback to recursive resolution", "name", q.Name, "type", q.QType)
-				recursiveResp, errRecurse := s.resolveRecursive(ctx, q.Name, q.QType)
-				if errRecurse == nil && recursiveResp != nil {
-					response.Header.AuthoritativeAnswer = false
-					response.Header.ResCode = recursiveResp.Header.ResCode
-					response.Answers = recursiveResp.Answers
-					response.Authorities = recursiveResp.Authorities
-					// Internal recursion doesn't set recursion available in the response usually,
-					// but our upstream root hints might. We already set RA in the header earlier.
-				} else {
-					s.Logger.Error("recursive resolution failed", "name", q.Name, "error", errRecurse)
-					response.Header.AuthoritativeAnswer = false
-					response.Header.ResCode = 2 // SERVFAIL
-				}
-			} else {
-				response.Header.AuthoritativeAnswer = false
-				response.Header.ResCode = 3 // NXDOMAIN
-			}
-		}
-
-		// RFC 8914: Extended DNS Error (EDE)
-		if clientOPT != nil {
-			for i := range response.Resources {
-				if response.Resources[i].Type == packet.OPT {
-					response.Resources[i].AddEDE(packet.EdeOther, "")
-				}
-			}
-		}
-	} else if zone != nil {
-		// 4. Populate Authority Section (NS records)
-		nsRecords, _ := s.Repo.GetRecords(ctx, zone.Name, domain.TypeNS, clientIP)
-
-		// Collect all NS host targets for batch glue lookup
-		nsTargets := make([]string, 0, len(nsRecords))
-		for _, rec := range nsRecords {
-			pRec, errConv := repository.ConvertDomainToPacketRecord(rec)
-			if errConv == nil {
-				nsTargets = append(nsTargets, pRec.Host)
-			}
-		}
-
-		// Batch fetch all glue A records in ONE query
-		allGlue, _ := s.Repo.GetRecordsByNames(ctx, nsTargets, domain.TypeA, clientIP)
-
-		for _, rec := range nsRecords {
-			pRec, errConv := repository.ConvertDomainToPacketRecord(rec)
-			if errConv == nil {
-				response.Authorities = append(response.Authorities, pRec)
-
-				// 5. Populate Additional Section (Glue records)
-				for _, gRec := range allGlue[pRec.Host] {
-					gpRec, errGlue := repository.ConvertDomainToPacketRecord(gRec)
-					if errGlue == nil {
-						response.Resources = append(response.Resources, gpRec)
-					}
-				}
-			}
-		}
+	cacheData := make([]byte, len(resData))
+	copy(cacheData, resData)
+	s.Cache.Set(cacheKey, cacheData, time.Duration(ttl)*time.Second)
+	if s.Redis != nil {
+		s.Redis.Set(ctx, cacheKey, cacheData, time.Duration(ttl)*time.Second)
 	}
-
-	// Dynamic RRSIG generation if DO bit is set
-	if dnssecOK && zone != nil {
-		s.signResponse(ctx, zone, response)
-	}
-
-	// DNSSEC validation (if validator is configured)
-	if zone != nil {
-		if err := s.validateDNSSEC(ctx, zone.Name, response); err != nil {
-			// Validation failed in strict mode - convert to SERVFAIL
-			if s.DNSSECMode == "strict" {
-				response.Header.ResCode = packet.RcodeServFail
-				response.Answers = nil
-				response.Authorities = nil
-				// RFC 8914: Add EDE for DNSSEC validation failures
-				for i := range response.Resources {
-					if response.Resources[i].Type == packet.OPT {
-						response.Resources[i].AddEDE(packet.EdeDnssecBogus, err.Error())
-					}
-				}
-			}
-		}
-	}
-
-	// Handle Truncation
-	for _, res := range request.Resources {
-		if res.Type == packet.OPT {
-			maxSize = int(res.UDPPayloadSize)
-			if maxSize < 512 {
-				maxSize = 512
-			}
-			break
-		}
-	}
-
-	// RFC 7830 / 8467: Padding
-	if paddingRequested || protocol == "dot" || protocol == "doh" {
-		blockSize := 128
-		if response.Header.Response {
-			blockSize = 468 // Recommended response block size
-		}
-		s.padResponse(response, blockSize)
-	}
-
-	resBuffer := packet.GetBuffer()
-	defer packet.PutBuffer(resBuffer)
-	resBuffer.HasNames = true // Enable Name Compression
-	_ = response.Write(resBuffer)
-
-	if resBuffer.Position() > maxSize {
-		response.Header.TruncatedMessage = true
-		response.Answers = nil
-		response.Authorities = nil
-		// RFC 6891: Preserve OPT records (type 41) when truncating
-		var optRecords []packet.DNSRecord
-		for _, res := range response.Resources {
-			if res.Type == packet.OPT {
-				optRecords = append(optRecords, res)
-			}
-		}
-		response.Resources = optRecords
-		resBuffer.Reset()
-		resBuffer.HasNames = true
-		_ = response.Write(resBuffer)
-		// If still too large (e.g., due to large EDNS options like padding), remove OPT entirely
-		if resBuffer.Position() > maxSize {
-			response.Resources = nil
-			resBuffer.Reset()
-			resBuffer.HasNames = true
-			_ = response.Write(resBuffer)
-		}
-	}
-
-	resData := resBuffer.Buf[:resBuffer.Position()]
-
-	// Cache the result
-	var ttl uint32 = 300
-	if len(response.Answers) > 0 {
-		ttl = response.Answers[0].TTL
-	} else if len(response.Authorities) > 0 {
-		ttl = response.Authorities[0].TTL
-	}
-
-	if (response.Header.ResCode == 0 || response.Header.ResCode == 3) && !response.Header.TruncatedMessage {
-		cacheData := make([]byte, len(resData))
-		copy(cacheData, resData)
-		s.Cache.Set(cacheKey, cacheData, time.Duration(ttl)*time.Second)
-		if s.Redis != nil {
-			s.Redis.Set(ctx, cacheKey, cacheData, time.Duration(ttl)*time.Second)
-		}
-	}
-
-	metrics.QueriesTotal.WithLabelValues(qTypeLabel, fmt.Sprintf("%d", response.Header.ResCode), protocol).Inc()
-	s.Logger.Info("query processed", "name", q.Name, "src", source, "lat", time.Since(start).Milliseconds())
-	return sendFn(resData)
 }
 
 // handleNotify processes a DNS NOTIFY (RFC 1996) and triggers a zone refresh if needed.
@@ -1350,24 +1434,16 @@ func (s *Server) handleNotify(ctx context.Context, request *packet.DNSPacket, cl
 	response.Header.AuthoritativeAnswer = true
 	response.Questions = append(response.Questions, request.Questions[0])
 
-	// Trigger async refresh if it's a slave zone
-	if !s.DisableAsync {
-		go func(zoneName string) {
-			// Check for cancellation or shutdown before starting long-running operations.
-			select {
-			case <-ctx.Done():
-				return
-			case <-s.done:
-				return
-			default:
-			}
-			zone, err := s.Repo.GetZone(ctx, zoneName)
-			if err != nil {
-				s.Logger.Error("failed to fetch zone for notify refresh", "zone", zoneName, "error", err)
-				return
-			}
-			if zone != nil && zone.Role == "slave" {
-				// Check again before refresh to avoid unnecessary work during shutdown.
+	// For slave zones, validate source is the configured master before triggering refresh
+	zone, err := s.Repo.GetZone(ctx, request.Questions[0].Name)
+	if err != nil {
+		s.Logger.Error("failed to fetch zone for notify", "zone", request.Questions[0].Name, "error", err)
+	}
+	if zone != nil && zone.Role == "slave" && zone.MasterServer != "" {
+		if !isAuthorizedNotifier(clientIP, zone.MasterServer) {
+			s.Logger.Warn("NOTIFY rejected: unauthorized source", "from", clientIP, "master", zone.MasterServer)
+		} else if !s.DisableAsync {
+			go func(zoneName string) {
 				select {
 				case <-ctx.Done():
 					return
@@ -1375,13 +1451,40 @@ func (s *Server) handleNotify(ctx context.Context, request *packet.DNSPacket, cl
 					return
 				default:
 				}
-				s.refreshZone(ctx, zone)
-			}
-		}(request.Questions[0].Name)
+				if z, err := s.Repo.GetZone(ctx, zoneName); err == nil && z != nil {
+					s.refreshZone(ctx, z)
+				}
+			}(request.Questions[0].Name)
+		}
 	}
 
 	response.Header.ResCode = packet.RcodeNoError
 	return s.sendUpdateResponse(response, sendFn)
+}
+
+// isAuthorizedNotifier checks if the source IP is authorized to send NOTIFY for the zone.
+func isAuthorizedNotifier(clientIP, masterServer string) bool {
+	// Extract host from masterServer (may be "host:port" format)
+	masterHost, _, err := net.SplitHostPort(masterServer)
+	if err != nil {
+		masterHost = masterServer // No port in config, use as-is
+	}
+
+	// If master is an IP, compare directly
+	if net.ParseIP(masterHost) != nil {
+		return clientIP == masterHost
+	}
+
+	// Master is a hostname — resolve and compare IPs
+	addrs, err := net.ResolveTCPAddr("tcp", masterHost+":0")
+	if err != nil {
+		return false
+	}
+	clientParsed := net.ParseIP(clientIP)
+	if clientParsed == nil {
+		return false
+	}
+	return clientParsed.Equal(addrs.IP)
 }
 
 // handleUpdate processes a DNS dynamic update (RFC 2136) request.
@@ -1394,11 +1497,11 @@ func (s *Server) handleUpdate(ctx context.Context, request *packet.DNSPacket, ra
 	response.Header.Opcode = packet.OpcodeUpdate
 
 	// 1. Validate TSIG if present
-	if request.TSIGStart != -1 {
+	if request.TSIGStart != -1 && len(request.Resources) > 0 {
 		tsig := request.Resources[len(request.Resources)-1]
 		secret, ok := s.TsigKeys[tsig.Name]
 		if !ok {
-			s.Logger.Warn("update failed: unknown TSIG key", "key", tsig.Name)
+			s.Logger.Debug("update failed: unknown TSIG key", "key", tsig.Name)
 			response.Header.ResCode = packet.RcodeNotAuth
 			return s.sendUpdateResponse(response, sendFn)
 		}
@@ -1510,11 +1613,11 @@ func (s *Server) handleIXFR(ctx context.Context, conn net.Conn, request *packet.
 	}
 
 	// Validate TSIG if present
-	if request.TSIGStart != -1 {
+	if request.TSIGStart != -1 && len(request.Resources) > 0 {
 		tsig := request.Resources[len(request.Resources)-1]
 		secret, ok := s.TsigKeys[tsig.Name]
 		if !ok {
-			s.Logger.Warn("IXFR failed: unknown TSIG key", "key", tsig.Name, "zone", q.Name)
+			s.Logger.Debug("IXFR failed: unknown TSIG key", "key", tsig.Name, "zone", q.Name)
 			s.sendTCPError(conn, request.Header.ID, 5) // NotAuth
 			return
 		}
