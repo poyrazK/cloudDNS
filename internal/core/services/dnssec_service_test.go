@@ -362,7 +362,7 @@ func BenchmarkSignRRSet_Cached(b *testing.B) {
 
 	// Pre-generate key once (outside benchmark)
 	_, _ = svc.GenerateKey(ctx, "z1", "ZSK")
-	// Warm the cache
+	// Warm the cache with one call (outside timing)
 	records := []packet.DNSRecord{
 		{Name: "www.example.com.", Type: packet.A, IP: net.ParseIP("1.2.3.4"), TTL: 300, Class: 1},
 	}
@@ -370,6 +370,25 @@ func BenchmarkSignRRSet_Cached(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
+		_, _ = svc.SignRRSet(ctx, "example.com.", "z1", records)
+	}
+}
+
+// BenchmarkSignRRSet_DB measures cold cache: DB lookup + key parse every time.
+func BenchmarkSignRRSet_DB(b *testing.B) {
+	repo := &mockDNSSECRepo{}
+	svc := NewDNSSECService(repo)
+	ctx := context.Background()
+
+	records := []packet.DNSRecord{
+		{Name: "www.example.com.", Type: packet.A, IP: net.ParseIP("1.2.3.4"), TTL: 300, Class: 1},
+	}
+
+	for i := 0; i < b.N; i++ {
+		// Invalidate to force cold cache every iteration
+		svc.InvalidateKeyCache("z1")
+		// GenerateKey hits DB (ListKeysForZone) and parses key
+		_, _ = svc.GenerateKey(ctx, "z1", "ZSK")
 		_, _ = svc.SignRRSet(ctx, "example.com.", "z1", records)
 	}
 }
