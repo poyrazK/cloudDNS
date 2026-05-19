@@ -1446,7 +1446,16 @@ func (s *Server) populateAuthorityAndAdditional(ctx context.Context, resp *packe
 		}
 	}
 
-	allGlue, _ := s.Repo.GetRecordsByNames(ctx, nsTargets, domain.TypeA, clientIP)
+	// Fetch NS and A glue in parallel — GetRecordsByNames is a no-op when nsTargets is empty.
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(2)
+	var allGlue map[string][]domain.Record
+	g.Go(func() error {
+		var err error
+		allGlue, err = s.Repo.GetRecordsByNames(ctx, nsTargets, domain.TypeA, clientIP)
+		return err
+	})
+	_ = g.Wait()
 
 	for _, rec := range nsRecords {
 		if pRec, err := repository.ConvertDomainToPacketRecord(rec); err == nil {
