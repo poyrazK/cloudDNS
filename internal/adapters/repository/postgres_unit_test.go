@@ -27,7 +27,7 @@ func TestPostgresRepository_Unit(t *testing.T) {
 			AddRow("r1", "z1", "www.test.", "A", "1.2.3.4", 300, nil, nil, nil, nil, "HTTP", "http://target", "HEALTHY")
 
 		// Anchored query with WHERE predicates
-		mock.ExpectQuery(`SELECT .* FROM dns_records r .* WHERE LOWER\(r\.name\) = LOWER\(\$1\) AND \(r\.network IS NULL OR \$2::inet <<= r\.network\) AND r\.type = \$3`).
+		mock.ExpectQuery(`SELECT .* FROM dns_records r .* WHERE name = \$1 AND \(r\.network IS NULL OR \$2::inet <<= r\.network\) AND r\.type = \$3`).
 			WithArgs("www.test.", "8.8.8.8", "A").
 			WillReturnRows(rows)
 
@@ -45,7 +45,7 @@ func TestPostgresRepository_Unit(t *testing.T) {
 		rows := sqlmock.NewRows([]string{"id", "tenant_id", "name", "vpc_id", "description", "role", "master_server", "created_at", "updated_at"}).
 			AddRow("z1", "t1", "test.com.", "", "", "master", "", time.Now(), time.Now())
 
-		mock.ExpectQuery(`SELECT .* FROM dns_zones WHERE LOWER\(name\) = LOWER\(\$1\)`).
+		mock.ExpectQuery(`SELECT .* FROM dns_zones WHERE name = \$1`).
 			WithArgs("test.com.").
 			WillReturnRows(rows)
 
@@ -64,7 +64,7 @@ func TestPostgresRepository_Unit(t *testing.T) {
 		rows := sqlmock.NewRows([]string{"id", "tenant_id", "name", "vpc_id", "description", "role", "master_server", "created_at", "updated_at"}).
 			AddRow("z1", "t1", "example.com.", "", "", "master", "", time.Now(), time.Now())
 
-		mock.ExpectQuery(`SELECT .* FROM dns_zones WHERE name <= \$1 AND \$1 LIKE name \|\| '%'`).
+		mock.ExpectQuery(`SELECT .* FROM dns_zones WHERE name <= \$1 AND REVERSE\(\$1\) LIKE REVERSE\(name\) \|\| '%'`).
 			WithArgs("example.com.").
 			WillReturnRows(rows)
 
@@ -82,7 +82,7 @@ func TestPostgresRepository_Unit(t *testing.T) {
 		rows := sqlmock.NewRows([]string{"id", "tenant_id", "name", "vpc_id", "description", "role", "master_server", "created_at", "updated_at"}).
 			AddRow("z1", "t1", "example.com.", "", "", "master", "", time.Now(), time.Now())
 
-		mock.ExpectQuery(`SELECT .* FROM dns_zones WHERE name <= \$1 AND \$1 LIKE name \|\| '%'`).
+		mock.ExpectQuery(`SELECT .* FROM dns_zones WHERE name <= \$1 AND REVERSE\(\$1\) LIKE REVERSE\(name\) \|\| '%'`).
 			WithArgs("www.example.com.").
 			WillReturnRows(rows)
 
@@ -97,7 +97,7 @@ func TestPostgresRepository_Unit(t *testing.T) {
 
 	// 2d. Test GetZoneLongestMatch no match
 	t.Run("GetZoneLongestMatch_NoMatch", func(t *testing.T) {
-		mock.ExpectQuery(`SELECT .* FROM dns_zones WHERE name <= \$1 AND \$1 LIKE name \|\| '%'`).
+		mock.ExpectQuery(`SELECT .* FROM dns_zones WHERE name <= \$1 AND REVERSE\(\$1\) LIKE REVERSE\(name\) \|\| '%'`).
 			WithArgs("unknown.domain.").
 			WillReturnError(sql.ErrNoRows)
 
@@ -274,18 +274,11 @@ func TestPostgresRepository_Unit(t *testing.T) {
 
 	// 11b. Test GetDNSKEYs
 	t.Run("GetDNSKEYs", func(t *testing.T) {
-		// First mock GetZone
-		zoneRows := sqlmock.NewRows([]string{"id", "tenant_id", "name", "vpc_id", "description", "role", "master_server", "created_at", "updated_at"}).
-			AddRow("z1", "t1", "test.com.", "", "", "master", "", time.Now(), time.Now())
-		mock.ExpectQuery(`SELECT .* FROM dns_zones WHERE LOWER\(name\) = LOWER\(\$1\)`).
-			WithArgs("test.com.").
-			WillReturnRows(zoneRows)
-
-		// Then mock GetDNSKEYs query
+		// Single JOIN query using zone name directly
 		dnskeyRows := sqlmock.NewRows([]string{"id", "zone_id", "name", "type", "content", "ttl", "priority", "weight", "port", "network", "health_check_type", "health_check_target", "status"}).
 			AddRow("dk1", "z1", "test.com.", "DNSKEY", " AwAAAEEAE....", 300, nil, nil, nil, nil, nil, nil, "UNKNOWN")
-		mock.ExpectQuery(`SELECT r\.id, r\.zone_id, r\.name, r\.type, r\.content, r\.ttl, r\.priority, r\.weight, r\.port, r\.network, r\.health_check_type, r\.health_check_target, COALESCE\(h\.status, 'UNKNOWN'\) FROM dns_records r LEFT JOIN record_health h ON r\.id = h\.record_id WHERE r\.zone_id = \$1 AND r\.type = 'DNSKEY'`).
-			WithArgs("z1").
+		mock.ExpectQuery(`SELECT r\.id, r\.zone_id, r\.name, r\.type, r\.content, r\.ttl, r\.priority, r\.weight, r\.port, r\.network, r\.health_check_type, r\.health_check_target, COALESCE\(h\.status, 'UNKNOWN'\) FROM dns_records r JOIN dns_zones z ON r\.zone_id = z\.id LEFT JOIN record_health h ON r\.id = h\.record_id WHERE z\.name = \$1 AND r\.type = 'DNSKEY'`).
+			WithArgs("test.com.").
 			WillReturnRows(dnskeyRows)
 
 		recs, err := repo.GetDNSKEYs(ctx, "test.com.")
@@ -349,7 +342,7 @@ func TestPostgresRepository_Unit(t *testing.T) {
 	// 14. Remaining methods
 	t.Run("OtherMethods", func(t *testing.T) {
 		// GetIPsForName
-		mock.ExpectQuery(`SELECT content FROM dns_records WHERE LOWER\(name\) = LOWER\(\$1\) AND type = 'A' AND \(network IS NULL OR \$2::inet <<= network\)`).WithArgs("www.test.", "1.1.1.1").
+		mock.ExpectQuery(`SELECT content FROM dns_records WHERE name = \$1 AND type = 'A' AND \(network IS NULL OR \$2::inet <<= network\)`).WithArgs("www.test.", "1.1.1.1").
 			WillReturnRows(sqlmock.NewRows([]string{"content"}).AddRow("1.2.3.4"))
 		ips, err := repo.GetIPsForName(ctx, "www.test.", "1.1.1.1")
 		if err != nil || len(ips) != 1 {
@@ -365,7 +358,7 @@ func TestPostgresRepository_Unit(t *testing.T) {
 		}
 
 		// DeleteRecordsByName
-		mock.ExpectExec(`DELETE FROM dns_records WHERE zone_id = \$1 AND LOWER\(name\) = LOWER\(\$2\)`).WithArgs("z1", "test.").
+		mock.ExpectExec(`DELETE FROM dns_records WHERE zone_id = \$1 AND name = \$2`).WithArgs("z1", "test.").
 			WillReturnResult(sqlmock.NewResult(0, 1))
 		err = repo.DeleteRecordsByName(ctx, "z1", "test.")
 		if err != nil {

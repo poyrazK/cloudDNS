@@ -132,3 +132,12 @@ CREATE TABLE IF NOT EXISTS api_keys (
     expires_at TIMESTAMPTZ,
     CONSTRAINT role_check CHECK (role IN ('admin', 'writer', 'reader'))
 );
+
+-- Enable case-insensitive text type for DNS names
+CREATE EXTENSION IF NOT EXISTS citext;
+
+-- Migrate dns_records.name to citext for case-insensitive index usage
+ALTER TABLE dns_records ALTER COLUMN name TYPE citext;
+
+-- Migrate dns_zones.name to citext for case-insensitive zone lookups
+ALTER TABLE dns_zones ALTER COLUMN name TYPE citext;

@@ -43,7 +43,7 @@ func (r *PostgresRepository) GetRecords(ctx context.Context, name string, qType 
 	                 r.health_check_type, r.health_check_target, COALESCE(h.status, 'UNKNOWN')
 	          FROM dns_records r
 	          LEFT JOIN record_health h ON r.id = h.record_id
-	          WHERE LOWER(r.name) = LOWER($1) AND (r.network IS NULL OR $2::inet <<= r.network)`
+	          WHERE name = $1 AND (r.network IS NULL OR $2::inet <<= r.network)`
 
 	var rows *sql.Rows
 	var errQuery error
@@ -110,12 +110,12 @@ func (r *PostgresRepository) GetRecordsByNames(ctx context.Context, names []stri
 		return nil, nil
 	}
 
-	// Build query: WHERE LOWER(r.name) IN (LOWER($1), LOWER($2), ...)
+	// Build query: WHERE name IN ($2, $3, ...) - citext is case-insensitive
 	placeholders := make([]string, len(names))
-	args := make([]interface{}, len(names)+2)
+	args := make([]interface{}, len(names)+1)
 	args[0] = clientIP
 	for i, name := range names {
-		placeholders[i] = fmt.Sprintf("LOWER($%d)", i+2)
+		placeholders[i] = fmt.Sprintf("$%d", i+2)
 		args[i+1] = name
 	}
 
@@ -123,7 +123,7 @@ func (r *PostgresRepository) GetRecordsByNames(ctx context.Context, names []stri
                  r.health_check_type, r.health_check_target, COALESCE(h.status, 'UNKNOWN')
           FROM dns_records r
           LEFT JOIN record_health h ON r.id = h.record_id
-          WHERE LOWER(r.name) IN (%s) AND (r.network IS NULL OR $1::inet <<= r.network)`,
+          WHERE name IN (%s) AND (r.network IS NULL OR $1::inet <<= r.network)`,
 		strings.Join(placeholders, ","))
 
 	if qType != "" {
@@ -184,8 +184,8 @@ func (r *PostgresRepository) GetRecordsByNames(ctx context.Context, names []stri
 // GetIPsForName implements ports.DNSRepository.
 func (r *PostgresRepository) GetIPsForName(ctx context.Context, name string, clientIP string) ([]string, error) {
 	// Optimized query returning only content for Type A
-	query := `SELECT content FROM dns_records 
-	          WHERE LOWER(name) = LOWER($1) AND type = 'A' AND (network IS NULL OR $2::inet <<= network)`
+	query := `SELECT content FROM dns_records
+	          WHERE name = $1 AND type = 'A' AND (network IS NULL OR $2::inet <<= network)`
 
 	rows, errQuery := r.db.QueryContext(ctx, query, name, clientIP)
 	if errQuery != nil {
@@ -215,7 +215,7 @@ func (r *PostgresRepository) GetIPsForName(ctx context.Context, name string, cli
 
 // GetZone implements ports.DNSRepository.
 func (r *PostgresRepository) GetZone(ctx context.Context, name string) (*domain.Zone, error) {
-	query := `SELECT id, tenant_id, name, vpc_id, description, role, master_server, created_at, updated_at FROM dns_zones WHERE LOWER(name) = LOWER($1)`
+	query := `SELECT id, tenant_id, name, vpc_id, description, role, master_server, created_at, updated_at FROM dns_zones WHERE name = $1`
 	var z domain.Zone
 	var role, masterServer sql.NullString
 	errRow := r.db.QueryRowContext(ctx, query, name).Scan(&z.ID, &z.TenantID, &z.Name, &z.VPCID, &z.Description, &role, &masterServer, &z.CreatedAt, &z.UpdatedAt)
@@ -240,7 +240,7 @@ func (r *PostgresRepository) GetZone(ctx context.Context, name string) (*domain.
 func (r *PostgresRepository) GetZoneLongestMatch(ctx context.Context, qName string) (*domain.Zone, error) {
 	query := `SELECT id, tenant_id, name, vpc_id, description, role, master_server, created_at, updated_at
 		 FROM dns_zones
-		 WHERE name <= $1 AND $1 LIKE name || '%'
+		 WHERE name <= $1 AND REVERSE($1) LIKE REVERSE(name) || '%'
 		 ORDER BY LENGTH(name) DESC
 		 LIMIT 1`
 	var z domain.Zone
@@ -263,22 +263,14 @@ func (r *PostgresRepository) GetZoneLongestMatch(ctx context.Context, qName stri
 
 // GetDNSKEYs implements ports.DNSRepository.
 func (r *PostgresRepository) GetDNSKEYs(ctx context.Context, zoneName string) ([]domain.Record, error) {
-	// First get the zone to find zone ID
-	zone, err := r.GetZone(ctx, zoneName)
-	if err != nil {
-		return nil, err
-	}
-	if zone == nil {
-		return nil, nil
-	}
-
 	query := `
 		SELECT r.id, r.zone_id, r.name, r.type, r.content, r.ttl, r.priority, r.weight, r.port, r.network,
 		       r.health_check_type, r.health_check_target, COALESCE(h.status, 'UNKNOWN')
 		FROM dns_records r
+		JOIN dns_zones z ON r.zone_id = z.id
 		LEFT JOIN record_health h ON r.id = h.record_id
-		WHERE r.zone_id = $1 AND r.type = 'DNSKEY'`
-	rows, errQuery := r.db.QueryContext(ctx, query, zone.ID)
+		WHERE z.name = $1 AND r.type = 'DNSKEY'`
+	rows, errQuery := r.db.QueryContext(ctx, query, zoneName)
 	if errQuery != nil {
 		return nil, errQuery
 	}
@@ -758,14 +750,14 @@ func (r *PostgresRepository) DeleteRecord(ctx context.Context, recordID string, 
 
 // DeleteRecordsByNameAndType implements ports.DNSRepository.
 func (r *PostgresRepository) DeleteRecordsByNameAndType(ctx context.Context, zoneID string, name string, qType domain.RecordType) error {
-	query := `DELETE FROM dns_records WHERE zone_id = $1 AND LOWER(name) = LOWER($2) AND type = $3`
+	query := `DELETE FROM dns_records WHERE zone_id = $1 AND name = $2 AND type = $3`
 	_, err := r.db.ExecContext(ctx, query, zoneID, name, string(qType))
 	return err
 }
 
 // DeleteRecordsByName implements ports.DNSRepository.
 func (r *PostgresRepository) DeleteRecordsByName(ctx context.Context, zoneID string, name string) error {
-	query := `DELETE FROM dns_records WHERE zone_id = $1 AND LOWER(name) = LOWER($2)`
+	query := `DELETE FROM dns_records WHERE zone_id = $1 AND name = $2`
 	_, err := r.db.ExecContext(ctx, query, zoneID, name)
 	return err
 }
@@ -779,7 +771,7 @@ func (r *PostgresRepository) DeleteRecordsForZone(ctx context.Context, zoneID st
 
 // DeleteRecordSpecific implements ports.DNSRepository.
 func (r *PostgresRepository) DeleteRecordSpecific(ctx context.Context, zoneID string, name string, qType domain.RecordType, content string) error {
-	query := `DELETE FROM dns_records WHERE zone_id = $1 AND LOWER(name) = LOWER($2) AND type = $3 AND content = $4`
+	query := `DELETE FROM dns_records WHERE zone_id = $1 AND name = $2 AND type = $3 AND content = $4`
 	_, err := r.db.ExecContext(ctx, query, zoneID, name, string(qType), content)
 	return err
 }
@@ -999,15 +991,15 @@ func (r *PostgresRepository) ApplyZoneUpdate(ctx context.Context, zoneID string,
 			_, err = tx.ExecContext(ctx, query, op.Record.ID, op.Record.ZoneID, op.Record.Name, op.Record.Type, op.Record.Content, op.Record.TTL, op.Record.Priority, op.Record.Weight, op.Record.Port, op.Record.Network, string(healthType), op.Record.HealthCheckTarget, op.Record.CreatedAt, op.Record.UpdatedAt)
 
 		case domain.ActionDeleteRRSet:
-			query := `DELETE FROM dns_records WHERE zone_id = $1 AND LOWER(name) = LOWER($2) AND type = $3`
+			query := `DELETE FROM dns_records WHERE zone_id = $1 AND name = $2 AND type = $3`
 			_, err = tx.ExecContext(ctx, query, zoneID, op.Record.Name, string(op.Record.Type))
 
 		case domain.ActionDeleteAll:
-			query := `DELETE FROM dns_records WHERE zone_id = $1 AND LOWER(name) = LOWER($2)`
+			query := `DELETE FROM dns_records WHERE zone_id = $1 AND name = $2`
 			_, err = tx.ExecContext(ctx, query, zoneID, op.Record.Name)
 
 		case domain.ActionDeleteSpecific:
-			query := `DELETE FROM dns_records WHERE zone_id = $1 AND LOWER(name) = LOWER($2) AND type = $3 AND content = $4`
+			query := `DELETE FROM dns_records WHERE zone_id = $1 AND name = $2 AND type = $3 AND content = $4`
 			_, err = tx.ExecContext(ctx, query, zoneID, op.Record.Name, string(op.Record.Type), op.Record.Content)
 		}
 
