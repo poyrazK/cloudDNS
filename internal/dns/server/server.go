@@ -114,6 +114,10 @@ type Server struct {
 	cancel       context.CancelFunc
 	done         chan struct{}
 	wg           sync.WaitGroup
+
+	// inflightCache prevents thundering herd: tracks keys currently being fetched from L2.
+	// Key -> struct{} (presence indicates a fetch is in progress).
+	inflightCache sync.Map
 }
 
 type udpTask struct {
@@ -1107,11 +1111,12 @@ func (s *Server) sendCHAOSIdentity(req *packet.DNSPacket, q packet.DNSQuestion, 
 
 // checkCache checks L1 and L2 cache, sends response directly if found.
 // Returns nil if no cached data was found.
+// Uses an inflight map to prevent thundering herd: if another goroutine is already
+// fetching L2 for this key, we wait and use the L1 result instead.
 func (s *Server) checkCache(ctx context.Context, req *packet.DNSPacket, cacheKey, _ string, qTypeLabel, protocol string, sendFn func([]byte) error) []byte {
 	start := time.Now()
 	lock := globalCacheLocks.lockKey(cacheKey)
 	lock.Lock()
-	defer lock.Unlock()
 
 	// L1 check
 	if data, found := s.Cache.GetInto(cacheKey, req.Header.ID); found {
@@ -1119,41 +1124,86 @@ func (s *Server) checkCache(ctx context.Context, req *packet.DNSPacket, cacheKey
 		metrics.RecordCacheHit()
 		metrics.QueriesTotal.WithLabelValues(qTypeLabel, "0", protocol).Inc()
 		metrics.QueryDuration.WithLabelValues("cache_l1").Observe(time.Since(start).Seconds())
+		lock.Unlock()
 		_ = sendFn(data)
 		return data
 	}
 	metrics.CacheOperations.WithLabelValues("l1", "miss").Inc()
 	metrics.RecordCacheMiss()
 
-	// L2 check (Redis)
-	if s.Redis != nil {
-		if data, remainingTTL, found := s.Redis.GetWithTTL(ctx, cacheKey); found {
-			metrics.CacheOperations.WithLabelValues("l2", "hit").Inc()
-			metrics.RecordCacheHit()
-			metrics.QueriesTotal.WithLabelValues(qTypeLabel, "0", protocol).Inc()
-			metrics.QueryDuration.WithLabelValues("cache_l2").Observe(time.Since(start).Seconds())
-			if len(data) >= 2 {
-				data[0] = byte(req.Header.ID >> 8)
-				data[1] = byte(req.Header.ID & 0xFF)
+	// L1 miss — check if another goroutine is already fetching L2 for this key
+	_, loading := s.inflightCache.LoadOrStore(cacheKey, struct{}{})
+	if loading {
+		// Another goroutine is fetching L2 — release lock and wait for L1 population
+		lock.Unlock()
+		// Spin-wait briefly for the other goroutine to populate L1
+		for i := 0; i < 100; i++ {
+			time.Sleep(10 * time.Microsecond)
+			if data, found := s.Cache.GetInto(cacheKey, req.Header.ID); found {
+				metrics.CacheOperations.WithLabelValues("l1", "hit").Inc()
+				metrics.RecordCacheHit()
+				metrics.QueriesTotal.WithLabelValues(qTypeLabel, "0", protocol).Inc()
+				metrics.QueryDuration.WithLabelValues("cache_l1").Observe(time.Since(start).Seconds())
+				_ = sendFn(data)
+				return data
 			}
-			l1TTLCap := 300 * time.Second
-	if v := os.Getenv("REDIS_L1_TTL_CAP"); v != "" {
-		if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
-			l1TTLCap = time.Duration(secs) * time.Second
 		}
-	}
-	if remainingTTL <= 0 {
-		remainingTTL = l1TTLCap
-	} else if remainingTTL > l1TTLCap {
-		remainingTTL = l1TTLCap
-	}
-			s.Cache.SetNoCopy(cacheKey, data, remainingTTL)
-			_ = sendFn(data)
-			return data
-		}
-		metrics.CacheOperations.WithLabelValues("l2", "miss").Inc()
+		// Timed out waiting — treat as L2 miss (fall through to DB)
+		metrics.CacheOperations.WithLabelValues("l1", "miss").Inc()
 		metrics.RecordCacheMiss()
+		return nil
 	}
+
+	// Marked in-flight — release lock before L2 fetch
+	lock.Unlock()
+
+	// L2 check (Redis) — unlocked for performance
+	var data []byte
+	var remainingTTL time.Duration
+	if s.Redis != nil {
+		data, remainingTTL, _ = s.Redis.GetWithTTL(ctx, cacheKey)
+	}
+
+	// Re-acquire lock to populate L1 and clear in-flight
+	lock.Lock()
+	s.inflightCache.Delete(cacheKey)
+
+	// Check L1 again — another goroutine may have populated it while we were fetching L2
+	if d, found := s.Cache.GetInto(cacheKey, req.Header.ID); found {
+		lock.Unlock()
+		_ = sendFn(d)
+		return d
+	}
+
+	if len(data) > 0 {
+		metrics.CacheOperations.WithLabelValues("l2", "hit").Inc()
+		metrics.RecordCacheHit()
+		metrics.QueriesTotal.WithLabelValues(qTypeLabel, "0", protocol).Inc()
+		metrics.QueryDuration.WithLabelValues("cache_l2").Observe(time.Since(start).Seconds())
+		if len(data) >= 2 {
+			data[0] = byte(req.Header.ID >> 8)
+			data[1] = byte(req.Header.ID & 0xFF)
+		}
+		l1TTLCap := 300 * time.Second
+		if v := os.Getenv("REDIS_L1_TTL_CAP"); v != "" {
+			if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
+				l1TTLCap = time.Duration(secs) * time.Second
+			}
+		}
+		if remainingTTL <= 0 {
+			remainingTTL = l1TTLCap
+		} else if remainingTTL > l1TTLCap {
+			remainingTTL = l1TTLCap
+		}
+		s.Cache.SetNoCopy(cacheKey, data, remainingTTL)
+		lock.Unlock()
+		_ = sendFn(data)
+		return data
+	}
+
+	metrics.CacheOperations.WithLabelValues("l2", "miss").Inc()
+	metrics.RecordCacheMiss()
+	lock.Unlock()
 	return nil
 }
 
