@@ -107,6 +107,19 @@ CREATE INDEX IF NOT EXISTS idx_dns_records_zone_id ON dns_records(zone_id);
 -- Tenant-scoped zone listing (ListZones, tenant isolation)
 CREATE INDEX IF NOT EXISTS idx_dns_zones_tenant_id ON dns_zones(tenant_id);
 
+-- Index for zone+type queries (GetDNSKEYs, GetRecords by type)
+CREATE INDEX IF NOT EXISTS idx_dns_records_zone_type ON dns_records(zone_id, type);
+
+-- Partial index for health check probing
+CREATE INDEX IF NOT EXISTS idx_dns_records_health_active ON dns_records(health_check_type)
+  WHERE health_check_type IN ('HTTP', 'TCP');
+
+-- Index for audit logs tenant lookup
+CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant_id ON audit_logs(tenant_id);
+
+-- Index for zone changes by zone+serial
+CREATE INDEX IF NOT EXISTS idx_dns_zone_changes_zone_serial ON dns_zone_changes(zone_id, serial);
+
 CREATE TABLE IF NOT EXISTS api_keys (
     id UUID PRIMARY KEY,
     tenant_id TEXT NOT NULL,
@@ -119,3 +132,12 @@ CREATE TABLE IF NOT EXISTS api_keys (
     expires_at TIMESTAMPTZ,
     CONSTRAINT role_check CHECK (role IN ('admin', 'writer', 'reader'))
 );
+
+-- Enable case-insensitive text type for DNS names
+CREATE EXTENSION IF NOT EXISTS citext;
+
+-- Migrate dns_records.name to citext for case-insensitive index usage
+ALTER TABLE dns_records ALTER COLUMN name TYPE citext;
+
+-- Migrate dns_zones.name to citext for case-insensitive zone lookups
+ALTER TABLE dns_zones ALTER COLUMN name TYPE citext;

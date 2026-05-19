@@ -175,12 +175,6 @@ func run(ctx context.Context) error {
 				maxOpenConns = n
 			}
 		}
-		maxIdleConns := 10
-		if v := os.Getenv("DATABASE_MAX_IDLE_CONNS"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-				maxIdleConns = n
-			}
-		}
 		connMaxLifetime := 5 * time.Minute
 		if v := os.Getenv("DATABASE_CONN_MAX_LIFETIME_MINUTES"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -188,8 +182,9 @@ func run(ctx context.Context) error {
 			}
 		}
 		db.SetMaxOpenConns(maxOpenConns)
-		db.SetMaxIdleConns(maxIdleConns)
+		db.SetMaxIdleConns(maxOpenConns) // Keep all connections warm
 		db.SetConnMaxLifetime(connMaxLifetime)
+		db.SetConnMaxIdleTime(30 * time.Second)
 
 		defer func() { _ = db.Close() }()
 		repo = repository.NewPostgresRepository(db)

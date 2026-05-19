@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -32,6 +33,16 @@ type RedisPoolConfig struct {
 
 // NewRedisCache creates a new Redis cache client.
 func NewRedisCache(addr string, password string, db int, cfg RedisPoolConfig) *RedisCache {
+	// Parse Redis URL if provided (e.g., redis://localhost:6379)
+	if strings.HasPrefix(addr, "redis://") || strings.HasPrefix(addr, "rediss://") {
+		if u, err := url.Parse(addr); err == nil {
+			addr = u.Host
+			if u.User != nil {
+				password = u.User.Username()
+			}
+		}
+	}
+
 	if cfg.PoolSize == 0 {
 		cfg.PoolSize = 100
 	}
