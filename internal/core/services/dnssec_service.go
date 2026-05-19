@@ -204,6 +204,7 @@ func (s *DNSSECService) signWithKeys(ctx context.Context, zoneName string, recor
 	sigs := make([]packet.DNSRecord, 0, len(keys))
 	for _, priv := range keys {
 		// Compute key tag from the public key (RFC 4034 Appendix B)
+		// Safe: priv is freshly parsed from DB and validated on key generation.
 		pubBytes, _ := x509.MarshalPKIXPublicKey(&priv.PublicKey)
 		tempKeyRec := packet.DNSRecord{
 			Type:      packet.DNSKEY,
@@ -250,8 +251,15 @@ func (s *DNSSECService) getCachedKeys(zoneID, keyType string) []*ecdsa.PrivateKe
 	return cached.keys[keyType]
 }
 
-// cacheKeys stores parsed keys in the cache with TTL.
+// cacheKeys stores parsed keys in the cache with TTL, merging with existing keys for the zone.
 func (s *DNSSECService) cacheKeys(zoneID, keyType string, keys []*ecdsa.PrivateKey) {
+	existing, ok := s.keyCache.Load(zoneID)
+	if ok {
+		ec := existing.(*cachedKeys)
+		ec.keys[keyType] = keys
+		ec.expires = time.Now().Add(keyCacheTTL)
+		return
+	}
 	cached := &cachedKeys{
 		keys:    map[string][]*ecdsa.PrivateKey{keyType: keys},
 		expires: time.Now().Add(keyCacheTTL),

@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"errors"
 	"net"
 	"testing"
@@ -337,6 +338,39 @@ func TestSignRRSet_CacheHit(t *testing.T) {
 	}
 }
 
+// TestSignRRSet_CacheExpiration verifies that expired cache entries are not returned.
+func TestSignRRSet_CacheExpiration(t *testing.T) {
+	repo := &mockDNSSECRepo{}
+	svc := NewDNSSECService(repo)
+	ctx := context.Background()
+
+	// Create key and populate cache
+	_, err := svc.GenerateKey(ctx, "z1", "ZSK")
+	if err != nil {
+		t.Fatalf("GenerateKey failed: %v", err)
+	}
+	records := []packet.DNSRecord{
+		{Name: "www.example.com.", Type: packet.A, IP: net.ParseIP("1.2.3.4"), TTL: 300, Class: 1},
+	}
+	_, _ = svc.SignRRSet(ctx, "example.com.", "z1", records)
+
+	// Advance time past TTL (replace cached entry with an already-expired one)
+	expiredCached := &cachedKeys{
+		keys:    map[string][]*ecdsa.PrivateKey{"ZSK": {}},
+		expires: time.Now().Add(-1 * time.Second),
+	}
+	svc.keyCache.Store("z1", expiredCached)
+
+	// Next SignRRSet should treat as cache miss and re-fetch
+	sigs, err := svc.SignRRSet(ctx, "example.com.", "z1", records)
+	if err != nil {
+		t.Fatalf("SignRRSet after expiry failed: %v", err)
+	}
+	if len(sigs) != 1 {
+		t.Fatalf("Expected 1 RRSIG after expiry re-fetch, got %d", len(sigs))
+	}
+}
+
 func BenchmarkSignRRSet(b *testing.B) {
 	repo := &mockDNSSECRepo{}
 	svc := NewDNSSECService(repo)
@@ -374,7 +408,10 @@ func BenchmarkSignRRSet_Cached(b *testing.B) {
 	}
 }
 
-// BenchmarkSignRRSet_DB measures cold cache: DB lookup + key parse every time.
+// BenchmarkSignRRSet_DB measures cold cache: DB read + key parse every time.
+// Key is created once outside the loop; each iteration invalidates cache and
+// re-parses the key from its stored bytes, simulating a DB round-trip without
+// the cost of a DB write (which BenchmarkSignRRSet_DB does not need to measure).
 func BenchmarkSignRRSet_DB(b *testing.B) {
 	repo := &mockDNSSECRepo{}
 	svc := NewDNSSECService(repo)
@@ -384,12 +421,17 @@ func BenchmarkSignRRSet_DB(b *testing.B) {
 		{Name: "www.example.com.", Type: packet.A, IP: net.ParseIP("1.2.3.4"), TTL: 300, Class: 1},
 	}
 
+	// Create key once outside benchmark (simulates pre-existing key in DB)
+	created, _ := svc.GenerateKey(ctx, "z1", "ZSK")
+
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		// Invalidate to force cold cache every iteration
 		svc.InvalidateKeyCache("z1")
-		// GenerateKey hits DB (ListKeysForZone) and parses key
-		_, _ = svc.GenerateKey(ctx, "z1", "ZSK")
+		// Simulate cold cache: parse the stored key bytes (like DB read would)
 		_, _ = svc.SignRRSet(ctx, "example.com.", "z1", records)
+		// Restore the key so repo still has it for next iteration
+		svc.InvalidateKeyCache("z1")
+		repo.keys = []domain.DNSSECKey{*created}
 	}
 }
 
