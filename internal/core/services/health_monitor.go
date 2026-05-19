@@ -16,28 +16,42 @@ import (
 
 // HealthMonitor manages background health checks for DNS records.
 type HealthMonitor struct {
-	repo   ports.DNSRepository
-	logger *slog.Logger
-	client *http.Client
+	repo        ports.DNSRepository
+	logger      *slog.Logger
+	client      *http.Client
+	tcpTimeout  time.Duration
 }
 
 // HealthMonitorOptions configures optional health monitor behavior.
 type HealthMonitorOptions struct {
-	InsecureSkipVerify bool
+	InsecureSkipVerify   bool
+	HTTPTimeout          time.Duration
+	TCPTimeout           time.Duration
 }
 
 // NewHealthMonitor creates a new HealthMonitor with a default HTTP client.
 func NewHealthMonitor(repo ports.DNSRepository, logger *slog.Logger, opts *HealthMonitorOptions) *HealthMonitor {
-	client := &http.Client{Timeout: 5 * time.Second}
+	httpTimeout := 5 * time.Second
+	tcpTimeout := 3 * time.Second
+	if opts != nil {
+		if opts.HTTPTimeout > 0 {
+			httpTimeout = opts.HTTPTimeout
+		}
+		if opts.TCPTimeout > 0 {
+			tcpTimeout = opts.TCPTimeout
+		}
+	}
+	client := &http.Client{Timeout: httpTimeout}
 	if opts != nil && opts.InsecureSkipVerify {
 		client.Transport = &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		}
 	}
 	return &HealthMonitor{
-		repo:   repo,
-		logger: logger,
-		client: client,
+		repo:      repo,
+		logger:    logger,
+		client:    client,
+		tcpTimeout: tcpTimeout,
 	}
 }
 
@@ -162,7 +176,7 @@ func (m *HealthMonitor) probeHTTP(ctx context.Context, target string) (domain.He
 
 // probeTCP attempts a TCP connection and returns healthy if the connection succeeds.
 func (m *HealthMonitor) probeTCP(ctx context.Context, target string) (domain.HealthStatus, string) {
-	dialer := &net.Dialer{Timeout: 3 * time.Second}
+	dialer := &net.Dialer{Timeout: m.tcpTimeout}
 	conn, err := dialer.DialContext(ctx, "tcp", target)
 	if err != nil {
 		return domain.HealthStatusUnhealthy, err.Error()

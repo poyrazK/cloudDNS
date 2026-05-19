@@ -98,6 +98,9 @@ type Server struct {
 	TLSConfig *tls.Config
 	DoQAddr  string // DNS-over-QUIC listen address (default ":853")
 
+	// ServerConfig holds timeout and timing values.
+	ServerConfig *config.ServerConfig
+
 	// Listener handles for graceful shutdown
 	tcpListener net.Listener
 	dotListener  net.Listener
@@ -381,7 +384,21 @@ func (s *Server) dlqRetryWorker(ctx context.Context) {
 // udpReadDeadline is the read deadline set on UDP sockets to allow periodic
 // re-checking of the shutdown signal (s.done). Without this, ReadFrom blocks
 // indefinitely and goroutines don't exit promptly on cancellation.
-const udpReadDeadline = 500 * time.Millisecond
+func (s *Server) udpReadDeadline() time.Duration {
+	if s.ServerConfig != nil {
+		return s.ServerConfig.UDPSocketReadDeadline
+	}
+	return 500 * time.Millisecond
+}
+
+// shutdownTimeout returns the configured shutdown timeout, defaulting to 5s.
+func (s *Server) shutdownTimeout() time.Duration {
+	if s.ServerConfig != nil {
+		return s.ServerConfig.ShutdownTimeout
+	}
+	return 5 * time.Second
+}
+
 // Run starts the DNS server and blocks until the context is canceled.
 func (s *Server) Run(ctx context.Context) error {
 	s.Logger.Info("starting parallel server", "addr", s.Addr, "listeners", runtime.NumCPU())
@@ -404,7 +421,7 @@ func (s *Server) Run(ctx context.Context) error {
 				s.Logger.Warn("failed to close DoT listener", "error", err)
 			}
 		}
-		shutdownCtx, shutdownCancel := context.WithTimeout(ctx, 5*time.Second)
+		shutdownCtx, shutdownCancel := context.WithTimeout(ctx, s.shutdownTimeout())
 		defer shutdownCancel()
 		if s.dohServer != nil {
 			if err := s.dohServer.Shutdown(shutdownCtx); err != nil {
@@ -488,7 +505,7 @@ func (s *Server) Run(ctx context.Context) error {
 			}()
 			defer s.wg.Done()
 			// Set read deadline so select can re-check s.done periodically
-			_ = c.SetReadDeadline(time.Now().Add(udpReadDeadline))
+			_ = c.SetReadDeadline(time.Now().Add(s.udpReadDeadline()))
 			buf := make([]byte, 512)
 			for {
 				select {
@@ -501,7 +518,7 @@ func (s *Server) Run(ctx context.Context) error {
 							return
 						}
 						// Refresh deadline to allow re-check of s.done
-						_ = c.SetReadDeadline(time.Now().Add(udpReadDeadline))
+						_ = c.SetReadDeadline(time.Now().Add(s.udpReadDeadline()))
 						continue
 					}
 					// Copy buffer since the backing array is reused across ReadFrom calls.
