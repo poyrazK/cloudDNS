@@ -1148,9 +1148,7 @@ func (s *Server) checkCache(ctx context.Context, req *packet.DNSPacket, cacheKey
 				return data
 			}
 		}
-		// Timed out waiting — treat as L2 miss (fall through to DB)
-		metrics.CacheOperations.WithLabelValues("l1", "miss").Inc()
-		metrics.RecordCacheMiss()
+		// Timed out waiting — fall through to DB layer (metrics already recorded on L1 miss entry)
 		return nil
 	}
 
