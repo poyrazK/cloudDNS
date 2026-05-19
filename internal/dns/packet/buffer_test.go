@@ -70,6 +70,30 @@ func TestBufferMutators(t *testing.T) {
 	if err := buf.WriteRange(MaxPacketSize, []byte{1}); err == nil {
 		t.Errorf("WriteRange out of bounds should fail")
 	}
+
+	// Test WriteStringRange
+	_ = buf.WriteStringRange(30, "hello")
+	got, _ = buf.GetRange(30, 5)
+	if string(got) != "hello" {
+		t.Errorf("WriteStringRange failed: expected 'hello', got '%s'", string(got))
+	}
+
+	// Test WriteStringRange out of bounds
+	if err := buf.WriteStringRange(MaxPacketSize, "x"); err == nil {
+		t.Errorf("WriteStringRange out of bounds should fail")
+	}
+
+	// Test WriteStringRange with MaxPacketSize - 1 (just within bounds)
+	buf.Reset()
+	if err := buf.WriteStringRange(MaxPacketSize-3, "abc"); err != nil {
+		t.Errorf("WriteStringRange at MaxPacketSize-3 should succeed: %v", err)
+	}
+
+	// Test WriteStringRange exactly at limit
+	buf.Reset()
+	if err := buf.WriteStringRange(MaxPacketSize-1, "a"); err != nil {
+		t.Errorf("WriteStringRange at MaxPacketSize-1 should succeed: %v", err)
+	}
 }
 
 func TestBuffer_ReadErrors(t *testing.T) {

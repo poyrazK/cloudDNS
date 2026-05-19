@@ -320,25 +320,32 @@ func (b *BytePacketBuffer) WriteName(name string) error {
 		name += "."
 	}
 
+	// Pre-compute lowercase once for compression map lookups
+	var lowerName string
+	if b.HasNames {
+		lowerName = strings.ToLower(name)
+	}
+
 	curr := name
+	lowerCurr := lowerName
 	for {
 		if curr == "" || curr == "." {
 			return b.Write(0)
 		}
 
 		if b.HasNames {
-			lower := strings.ToLower(curr)
-			if pos, ok := b.names[lower]; ok {
+			if pos, ok := b.names[lowerCurr]; ok {
 				// Compression pointer: high bits 11, low bits are offset
 				offset := uint16(0xC000) | uint16(pos&0x3FFF)
 				return b.Writeu16(offset)
 			}
 			if b.Pos < 0x4000 {
-				b.names[lower] = b.Pos
+				b.names[lowerCurr] = b.Pos
 			}
 		}
 
 		dotIdx := strings.IndexByte(curr, '.')
+		lowerDotIdx := strings.IndexByte(lowerCurr, '.')
 		if dotIdx == -1 {
 			return b.Write(0)
 		}
@@ -351,13 +358,12 @@ func (b *BytePacketBuffer) WriteName(name string) error {
 			if err := b.WriteUint8(len(label)); err != nil {
 				return err
 			}
-			for i := 0; i < len(label); i++ {
-				if err := b.Write(label[i]); err != nil {
-					return err
-				}
+			if err := b.WriteStringRange(b.Pos, label); err != nil {
+				return err
 			}
 		}
 		curr = curr[dotIdx+1:]
+		lowerCurr = lowerCurr[lowerDotIdx+1:]
 	}
 }
 
@@ -390,10 +396,8 @@ func (b *BytePacketBuffer) WriteNameUncompressed(name string) error {
 			if err := b.WriteUint8(len(label)); err != nil {
 				return err
 			}
-			for i := 0; i < len(label); i++ {
-				if err := b.Write(label[i]); err != nil {
-					return err
-				}
+			if err := b.WriteStringRange(b.Pos, label); err != nil {
+				return err
 			}
 		}
 		curr = curr[dotIdx+1:]
@@ -402,6 +406,21 @@ func (b *BytePacketBuffer) WriteNameUncompressed(name string) error {
 
 // WriteRange writes a slice of bytes at a specific position
 func (b *BytePacketBuffer) WriteRange(start int, data []byte) error {
+	if start+len(data) > MaxPacketSize {
+		return errors.New("out of bounds")
+	}
+	copy(b.Buf[start:start+len(data)], data)
+	if start+len(data) > b.Pos {
+		b.Pos = start + len(data)
+	}
+	if b.Pos > b.Len {
+		b.Len = b.Pos
+	}
+	return nil
+}
+
+// WriteStringRange writes a string at a specific position without allocating a []byte.
+func (b *BytePacketBuffer) WriteStringRange(start int, data string) error {
 	if start+len(data) > MaxPacketSize {
 		return errors.New("out of bounds")
 	}
