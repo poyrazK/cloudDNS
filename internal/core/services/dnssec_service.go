@@ -271,21 +271,26 @@ func (s *DNSSECService) getCachedKeys(zoneID, keyType string) []*cachedSigningKe
 
 // cacheKeys stores parsed keys in the cache with TTL, merging with existing keys for the zone.
 // keyTags must be provided and have the same length as keys.
+// Atomically replaces the entire cachedKeys entry so readers always see a consistent snapshot.
 func (s *DNSSECService) cacheKeys(zoneID, keyType string, keys []*ecdsa.PrivateKey, keyTags []uint16) {
-	existing, ok := s.keyCache.Load(zoneID)
-	if ok {
-		ec := existing.(*cachedKeys)
-		ec.keys[keyType] = keys
-		ec.keyTags[keyType] = keyTags
-		ec.expires = time.Now().Add(keyCacheTTL)
-		return
-	}
-	cached := &cachedKeys{
-		keys:    map[string][]*ecdsa.PrivateKey{keyType: keys},
-		keyTags: map[string][]uint16{keyType: keyTags},
+	existing, _ := s.keyCache.Load(zoneID)
+	ec := &cachedKeys{
+		keys:    make(map[string][]*ecdsa.PrivateKey),
+		keyTags: make(map[string][]uint16),
 		expires: time.Now().Add(keyCacheTTL),
 	}
-	s.keyCache.Store(zoneID, cached)
+	if existing != nil {
+		old := existing.(*cachedKeys)
+		for k, v := range old.keys {
+			ec.keys[k] = v
+		}
+		for k, v := range old.keyTags {
+			ec.keyTags[k] = v
+		}
+	}
+	ec.keys[keyType] = keys
+	ec.keyTags[keyType] = keyTags
+	s.keyCache.Store(zoneID, ec)
 }
 
 // InvalidateKeyCache removes cached keys for a zone.

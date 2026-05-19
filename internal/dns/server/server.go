@@ -1136,9 +1136,26 @@ func (s *Server) checkCache(ctx context.Context, req *packet.DNSPacket, cacheKey
 	if loading {
 		// Another goroutine is fetching L2 — release lock and wait for L1 population
 		lock.Unlock()
-		// Spin-wait briefly for the other goroutine to populate L1
-		for i := 0; i < 100; i++ {
-			time.Sleep(10 * time.Microsecond)
+		// Wait until the in-flight fetch completes, the request context is canceled,
+		// or the caller-provided deadline elapses.
+		if deadline, ok := ctx.Deadline(); ok {
+			for {
+				if data, found := s.Cache.GetInto(cacheKey, req.Header.ID); found {
+					metrics.CacheOperations.WithLabelValues("l1", "hit").Inc()
+					metrics.RecordCacheHit()
+					metrics.QueriesTotal.WithLabelValues(qTypeLabel, "0", protocol).Inc()
+					metrics.QueryDuration.WithLabelValues("cache_l1").Observe(time.Since(start).Seconds())
+					_ = sendFn(data)
+					return data
+				}
+				if time.Now().After(deadline) || time.Now().After(start.Add(5*time.Second)) {
+					return nil
+				}
+				time.Sleep(50 * time.Microsecond)
+			}
+		}
+		// No deadline — use context cancellation
+		for {
 			if data, found := s.Cache.GetInto(cacheKey, req.Header.ID); found {
 				metrics.CacheOperations.WithLabelValues("l1", "hit").Inc()
 				metrics.RecordCacheHit()
@@ -1147,9 +1164,13 @@ func (s *Server) checkCache(ctx context.Context, req *packet.DNSPacket, cacheKey
 				_ = sendFn(data)
 				return data
 			}
+			select {
+			case <-ctx.Done():
+				return nil
+			default:
+				time.Sleep(50 * time.Microsecond)
+			}
 		}
-		// Timed out waiting — fall through to DB layer (metrics already recorded on L1 miss entry)
-		return nil
 	}
 
 	// Marked in-flight — release lock before L2 fetch
