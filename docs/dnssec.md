@@ -105,16 +105,17 @@ When DNSSEC validation fails, cloudDNS returns RFC 8914 Extended DNS Error codes
 
 ## Supported Algorithms
 
-cloudDNS DNSSEC implementation supports four algorithms per RFC 8624:
+cloudDNS DNSSEC implementation supports five algorithms per RFC 8624:
 
 | Algorithm | Name | Signing | Verification |
 |-----------|------|---------|--------------|
 | 8 | RSASHA256 | ✅ Full | ✅ Full |
 | 13 | ECDSAP256SHA256 | ✅ Full | ✅ Full |
+| 14 | ECDSAP384SHA384 | ✅ Full | ✅ Full |
 | 15 | ED25519 | ✅ Full | ✅ Full |
 | 16 | ED448 | ✅ Full | ✅ Full |
 
-All four algorithms support both zone signing (via `SignRRSet`) and response validation (via `VerifyRRSet`).
+All five algorithms support both zone signing (via `SignRRSet`) and response validation (via `VerifyRRSet`).
 
 ### Algorithm Details
 
@@ -127,6 +128,12 @@ All four algorithms support both zone signing (via `SignRRSet`) and response val
 - 64-byte public key in RFC 6605 X||Y format
 - Fast verification, small signature size (64 bytes)
 - Default algorithm for new zones
+
+**ECDSA P-384 SHA-384 (Algorithm 14)**
+- 96-byte public key in RFC 6605 X||Y format
+- Higher security margin than P-256 (384-bit vs 256-bit curve)
+- Uses SHA-384 for hashing
+- Recommended for KSK operations where maximum security is required
 
 **Ed25519 (Algorithm 15)**
 - 32-byte public key per RFC 8080

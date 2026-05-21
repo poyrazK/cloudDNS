@@ -241,6 +241,79 @@ func TestSignRRSet_Ed448(t *testing.T) {
 	}
 }
 
+// TestGenerateKey_ECDSA_P384 verifies that P-384 keys are generated with algorithm 14.
+func TestGenerateKey_ECDSA_P384(t *testing.T) {
+	repo := &mockDNSSECRepo{}
+	svc := NewDNSSECService(repo)
+	ctx := context.Background()
+
+	key, err := svc.GenerateKey(ctx, "zone-1", "ecdsa384-zsk")
+	if err != nil {
+		t.Fatalf("GenerateKey (P-384) failed: %v", err)
+	}
+
+	if key.KeyType != "ecdsa384-zsk" {
+		t.Errorf("Expected key type ecdsa384-zsk, got %s", key.KeyType)
+	}
+	if key.Algorithm != 14 {
+		t.Errorf("Expected algorithm 14, got %d", key.Algorithm)
+	}
+	if len(key.PrivateKey) == 0 || len(key.PublicKey) == 0 {
+		t.Errorf("Keys were not generated")
+	}
+}
+
+// TestSignRRSet_ECDSA_P384 verifies that SignRRSet works end-to-end with P-384 keys.
+func TestSignRRSet_ECDSA_P384(t *testing.T) {
+	repo := &mockDNSSECRepo{}
+	svc := NewDNSSECService(repo)
+	ctx := context.Background()
+
+	key, err := svc.GenerateKey(ctx, "z1", "ecdsa384-zsk")
+	if err != nil {
+		t.Fatalf("GenerateKey failed: %v", err)
+	}
+
+	if key.Algorithm != 14 {
+		t.Fatalf("Expected algorithm 14, got %d", key.Algorithm)
+	}
+
+	repo.keys = append(repo.keys, domain.DNSSECKey{
+		ID:         key.ID,
+		ZoneID:     "z1",
+		KeyType:    "ZSK",
+		Algorithm:  14,
+		PrivateKey: key.PrivateKey,
+		PublicKey:  key.PublicKey,
+		Active:     true,
+	})
+
+	records := []packet.DNSRecord{
+		{Name: "www.example.com.", Type: packet.A, IP: net.ParseIP("1.2.3.4"), TTL: 300, Class: 1},
+	}
+
+	sigs, err := svc.SignRRSet(ctx, "example.com.", "z1", records)
+	if err != nil {
+		t.Fatalf("SignRRSet (P-384) failed: %v", err)
+	}
+	if len(sigs) != 1 {
+		t.Fatalf("Expected 1 RRSIG, got %d", len(sigs))
+	}
+	sig := sigs[0]
+	if sig.Type != packet.RRSIG {
+		t.Errorf("Expected RRSIG record, got %v", sig.Type)
+	}
+	if sig.TypeCovered != uint16(packet.A) {
+		t.Errorf("Expected TypeCovered A, got %v", sig.TypeCovered)
+	}
+	if sig.Algorithm != packet.AlgorithmECDSAP384 {
+		t.Errorf("Expected AlgorithmECDSAP384, got %d", sig.Algorithm)
+	}
+	if len(sig.Signature) != 96 {
+		t.Errorf("Expected 96-byte signature for P-384, got %d", len(sig.Signature))
+	}
+}
+
 // TestAutomateLifecycle verifies that the background worker can detect
 // missing keys and automatically generate them for a zone.
 func TestAutomateLifecycle(t *testing.T) {

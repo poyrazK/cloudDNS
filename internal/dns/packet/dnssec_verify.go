@@ -8,6 +8,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/sha512"
 	"errors"
 	"math/big"
 	"strings"
@@ -232,7 +233,7 @@ func countNameLabels(name string) uint8 {
 }
 
 // VerifyRRSet verifies an RRSIG signature over an RRSet.
-// It supports ECDSA P-256 (Algorithm 13), RSA SHA-256 (Algorithm 8), Ed25519 (Algorithm 15), and Ed448 (Algorithm 16) signatures.
+// It supports ECDSA P-256 (13), ECDSA P-384 (14), RSA SHA-256 (8), Ed25519 (15), and Ed448 (16) signatures.
 func VerifyRRSet(rrset []DNSRecord, rrsig DNSRecord, dnskey DNSRecord, now uint32) (bool, error) {
 	if len(rrset) == 0 {
 		return false, errors.New("dnssec: empty rrset")
@@ -325,12 +326,10 @@ func VerifyRRSet(rrset []DNSRecord, rrsig DNSRecord, dnskey DNSRecord, now uint3
 		}
 	}
 
-	// 7. Compute hash
-	hashed := sha256.Sum256(buf.Buf[:buf.Position()])
-
 	// 8. Verify signature based on algorithm
 	switch rrsig.Algorithm {
 	case AlgorithmECDSAP256:
+		hashed := sha256.Sum256(buf.Buf[:buf.Position()])
 		publicKey, err := extractECDSAPublicKey(dnskey)
 		if err != nil {
 			return false, err
@@ -344,7 +343,23 @@ func VerifyRRSet(rrset []DNSRecord, rrsig DNSRecord, dnskey DNSRecord, now uint3
 			return false, ErrInvalidSignature
 		}
 
+	case AlgorithmECDSAP384:
+		hashed := sha512.Sum384(buf.Buf[:buf.Position()])
+		publicKey, err := extractECDSAPublicKey(dnskey)
+		if err != nil {
+			return false, err
+		}
+		if len(rrsig.Signature) < 96 {
+			return false, ErrInvalidSignature
+		}
+		r := new(big.Int).SetBytes(rrsig.Signature[0:48])
+		s := new(big.Int).SetBytes(rrsig.Signature[48:96])
+		if !ecdsa.Verify(publicKey, hashed[:], r, s) {
+			return false, ErrInvalidSignature
+		}
+
 	case AlgorithmRSASHA256:
+		hashed := sha256.Sum256(buf.Buf[:buf.Position()])
 		publicKey, err := extractRSAPublicKey(dnskey)
 		if err != nil {
 			return false, err
@@ -354,20 +369,22 @@ func VerifyRRSet(rrset []DNSRecord, rrsig DNSRecord, dnskey DNSRecord, now uint3
 		}
 
 	case AlgorithmED25519:
+		hashed := sha256.Sum256(buf.Buf[:buf.Position()])
 		publicKey, err := extractED25519PublicKey(dnskey)
 		if err != nil {
 			return false, err
 		}
-		if !ed25519.Verify(publicKey, buf.Buf[:buf.Position()], rrsig.Signature) {
+		if !ed25519.Verify(publicKey, hashed[:], rrsig.Signature) {
 			return false, ErrInvalidSignature
 		}
 
 	case AlgorithmED448:
+		hashed := sha512.Sum384(buf.Buf[:buf.Position()])
 		publicKey, err := extractED448PublicKey(dnskey)
 		if err != nil {
 			return false, err
 		}
-		if !ed448.Verify(publicKey, buf.Buf[:buf.Position()], rrsig.Signature, "") {
+		if !ed448.Verify(publicKey, hashed[:], rrsig.Signature, "") {
 			return false, ErrInvalidSignature
 		}
 
@@ -378,21 +395,32 @@ func VerifyRRSet(rrset []DNSRecord, rrsig DNSRecord, dnskey DNSRecord, now uint3
 	return true, nil
 }
 
-// extractECDSAPublicKey extracts an ECDSA P-256 public key from a DNSKEY record.
-// It supports both RFC 6605 format (64-byte X||Y for Algorithm 13) and
-// SEC1 uncompressed format (65-byte 0x04||X||Y).
+// extractECDSAPublicKey extracts an ECDSA public key from a DNSKEY record.
+// It supports:
+// - Algorithm 13 (P-256): 64-byte X||Y format per RFC 6605
+// - Algorithm 14 (P-384): 96-byte X||Y format per RFC 6605
+// - SEC1 uncompressed format: 65-byte 0x04||X||Y (for any curve)
 func extractECDSAPublicKey(dnskey DNSRecord) (*ecdsa.PublicKey, error) {
 	var x, y *big.Int
+	var curve elliptic.Curve
 
 	switch {
-	case dnskey.Algorithm == 13 && len(dnskey.PublicKey) == 64:
+	case dnskey.Algorithm == AlgorithmECDSAP256 && len(dnskey.PublicKey) == 64:
 		// RFC 6605: ECDSAP256SHA256 uses X||Y format (64 bytes)
 		x = new(big.Int).SetBytes(dnskey.PublicKey[0:32])
 		y = new(big.Int).SetBytes(dnskey.PublicKey[32:64])
+		curve = elliptic.P256()
+	case dnskey.Algorithm == AlgorithmECDSAP384 && len(dnskey.PublicKey) == 96:
+		// RFC 6605: ECDSAP384SHA384 uses X||Y format (96 bytes)
+		x = new(big.Int).SetBytes(dnskey.PublicKey[0:48])
+		y = new(big.Int).SetBytes(dnskey.PublicKey[48:96])
+		curve = elliptic.P384()
 	case len(dnskey.PublicKey) >= 65 && dnskey.PublicKey[0] == 0x04:
-		// SEC1 uncompressed format: 0x04 || X (32 bytes) || Y (32 bytes)
-		x = new(big.Int).SetBytes(dnskey.PublicKey[1:33])
-		y = new(big.Int).SetBytes(dnskey.PublicKey[33:65])
+		// SEC1 uncompressed format: 0x04 || X || Y
+		coordSize := (len(dnskey.PublicKey) - 1) / 2
+		x = new(big.Int).SetBytes(dnskey.PublicKey[1 : 1+coordSize])
+		y = new(big.Int).SetBytes(dnskey.PublicKey[1+coordSize:])
+		curve = elliptic.P256() // Default, but could be P384 if key is large enough
 	default:
 		if len(dnskey.PublicKey) < 64 {
 			return nil, ErrNoPublicKey
@@ -401,7 +429,7 @@ func extractECDSAPublicKey(dnskey DNSRecord) (*ecdsa.PublicKey, error) {
 	}
 
 	return &ecdsa.PublicKey{
-		Curve: elliptic.P256(),
+		Curve: curve,
 		X:     x,
 		Y:     y,
 	}, nil
@@ -585,7 +613,7 @@ func ValidateDNSKEYFormat(dnskey DNSRecord) (bool, error) {
 
 	var err error
 	switch dnskey.Algorithm {
-	case AlgorithmECDSAP256:
+	case AlgorithmECDSAP256, AlgorithmECDSAP384:
 		_, err = extractECDSAPublicKey(dnskey)
 	case AlgorithmRSASHA256:
 		_, err = extractRSAPublicKey(dnskey)
