@@ -1026,8 +1026,11 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 		s.validateDNSSECResponse(ctx, zone, response)
 	}
 
-	// Re-extract maxSize from OPT for truncation
-	maxSize = s.extractMaxSizeFromOPT(request, maxSize)
+	// Use maxSize from processEDNS0 — clientOPT already has the correct payload size.
+	// No second O(n) scan needed.
+	if clientOPT != nil && clientOPT.UDPPayloadSize >= 512 {
+		maxSize = int(clientOPT.UDPPayloadSize)
+	}
 
 	// Padding
 	if paddingRequested || protocol == "dot" || protocol == "doh" {
@@ -1466,19 +1469,6 @@ func (s *Server) validateDNSSECResponse(ctx context.Context, zone *domain.Zone, 
 	}
 }
 
-// extractMaxSizeFromOPT re-reads maxSize from the request's OPT record.
-func (s *Server) extractMaxSizeFromOPT(req *packet.DNSPacket, fallback int) int {
-	for _, res := range req.Resources {
-		if res.Type == packet.OPT {
-			ms := int(res.UDPPayloadSize)
-			if ms < 512 {
-				ms = 512
-			}
-			return ms
-		}
-	}
-	return fallback
-}
 
 // truncateIfNeeded applies RFC 6891 multi-pass truncation to the response.
 func (s *Server) truncateIfNeeded(resp *packet.DNSPacket, buf *packet.BytePacketBuffer, maxSize int) {
