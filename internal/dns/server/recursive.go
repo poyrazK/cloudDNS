@@ -21,6 +21,26 @@ type recursiveResolver struct {
 	timeout   time.Duration
 }
 
+// Package-level constants for IANA root servers to avoid allocation per resolution.
+// These are static values that never change.
+var ianaRootHints = []string{
+	"198.41.0.4",     // a.root-servers.net
+	"170.247.170.2",  // b.root-servers.net
+	"192.33.4.12",    // c.root-servers.net
+	"199.7.91.13",    // d.root-servers.net
+	"192.203.230.10", // e.root-servers.net
+	"192.5.5.241",    // f.root-servers.net
+	"192.112.36.4",   // g.root-servers.net
+	"198.97.190.53",  // h.root-servers.net
+	"192.36.148.17",  // i.root-servers.net
+	"192.58.128.30",  // j.root-servers.net
+	"193.0.14.129",   // k.root-servers.net
+	"199.7.83.42",    // l.root-servers.net
+	"202.12.27.33",   // m.root-servers.net
+}
+
+var fallbackResolvers = []string{"8.8.8.8", "1.1.1.1"}
+
 // resolverTimeout is the maximum time allowed for recursive resolution.
 // Defaults to 30s but can be overridden in tests.
 var resolverTimeout = 30 * time.Second
@@ -31,26 +51,9 @@ func newRecursiveResolver(timeout time.Duration) *recursiveResolver {
 		timeout = 30 * time.Second
 	}
 	return &recursiveResolver{
-		rootHints: []string{
-			"198.41.0.4",     // a.root-servers.net
-			"170.247.170.2",  // b.root-servers.net
-			"192.33.4.12",    // c.root-servers.net
-			"199.7.91.13",    // d.root-servers.net
-			"192.203.230.10", // e.root-servers.net
-			"192.5.5.241",    // f.root-servers.net
-			"192.112.36.4",   // g.root-servers.net
-			"198.97.190.53",  // h.root-servers.net
-			"192.36.148.17",  // i.root-servers.net
-			"192.58.128.30",  // j.root-servers.net
-			"193.0.14.129",   // k.root-servers.net
-			"199.7.83.42",    // l.root-servers.net
-			"202.12.27.33",   // m.root-servers.net
-		},
-		fallbacks: []string{
-			"8.8.8.8", // Google
-			"1.1.1.1", // Cloudflare
-		},
-		timeout: timeout,
+		rootHints: ianaRootHints,  // Reference to package-level constant, no copy
+		fallbacks: fallbackResolvers,
+		timeout:   timeout,
 	}
 }
 
@@ -68,13 +71,6 @@ func (r *recursiveResolver) getShuffledRoots() []string {
 	return result
 }
 
-func (s *Server) recursiveTimeout() time.Duration {
-	if s.ServerConfig != nil {
-		return s.ServerConfig.RecursiveTimeout
-	}
-	return resolverTimeout // fallback to package var for tests
-}
-
 // resolveRecursive performs iterative DNS resolution starting from root servers.
 func (s *Server) resolveRecursive(_ context.Context, name string, qType packet.QueryType) (*packet.DNSPacket, error) {
 	// Total timeout to prevent indefinite blocking on failing root servers
@@ -82,7 +78,7 @@ func (s *Server) resolveRecursive(_ context.Context, name string, qType packet.Q
 	resolveStart := time.Now()
 
 	// Start with a random root server for load balancing and resilience.
-	resolver := newRecursiveResolver(s.recursiveTimeout())
+	resolver := newRecursiveResolver(resolverTimeout)
 	roots := resolver.getShuffledRoots()
 
 	var lastErr error
