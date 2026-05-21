@@ -9,6 +9,8 @@ import (
 	"crypto/sha1" // #nosec G505 -- SHA-1 required for DNSSEC DS records (RFC 4034)
 	"crypto/sha256"
 	"strings"
+
+	"github.com/cloudflare/circl/sign/ed448"
 )
 
 // DNSSEC Algorithm numbers per RFC 8624
@@ -16,6 +18,7 @@ const (
 	AlgorithmRSASHA256 uint8 = 8
 	AlgorithmECDSAP256 uint8 = 13
 	AlgorithmED25519   uint8 = 15
+	AlgorithmED448     uint8 = 16
 )
 
 // ComputeKeyTag calculates the key tag for a DNSKEY record according to RFC 4034 Appendix B.
@@ -111,7 +114,7 @@ func (r *DNSRecord) ComputeDS(digestType uint8) (DNSRecord, error) {
 }
 
 // SignRRSet generates an RRSIG for a set of records.
-// Supports ECDSA P-256 (Algorithm 13), RSA SHA-256 (Algorithm 8), and Ed25519 (Algorithm 15).
+// Supports ECDSA P-256 (Algorithm 13), RSA SHA-256 (Algorithm 8), Ed25519 (Algorithm 15), and Ed448 (Algorithm 16).
 func SignRRSet(records []DNSRecord, privKey any, algorithm uint8, signerName string, keyTag uint16, inception, expiration uint32) (DNSRecord, error) {
 	if len(records) == 0 {
 		return DNSRecord{}, nil
@@ -218,6 +221,13 @@ func SignRRSet(records []DNSRecord, privKey any, algorithm uint8, signerName str
 			return DNSRecord{}, ErrInvalidSignature
 		}
 		sigData = ed25519.Sign(ed25519Priv[:], buf.Buf[:buf.Position()])
+
+	case AlgorithmED448:
+		ed448Priv, ok := privKey.(ed448.PrivateKey)
+		if !ok {
+			return DNSRecord{}, ErrInvalidSignature
+		}
+		sigData = ed448.Sign(ed448Priv, buf.Buf[:buf.Position()], "")
 
 	default:
 		return DNSRecord{}, ErrUnsupportedAlgorithm
