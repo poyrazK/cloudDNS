@@ -11,7 +11,7 @@ cloudDNS is a high-performance, authoritative, and recursive DNS server built fr
 
 ### DNSSEC (DNS Security Extensions)
 *   **Signing**: Automated KSK/ZSK generation, rotation, and zone signing with Double-Signature rollover for zero-downtime key rotation.
-*   **Validation**: Response validation with ECDSA P-256, AD bit support, and RFC 8914 Extended DNS Error (EDE) codes for debugging.
+*   **Validation**: Response validation with multi-algorithm DNSSEC support (ECDSA P-256, Ed25519, Ed448, RSA SHA-256), AD bit support, and RFC 8914 Extended DNS Error (EDE) codes for debugging.
 *   **Modes**: Three validation modes - `disabled`, `ad-bit-only`, or `strict` (SERVFAIL on invalid).
 *   **NSEC/NSEC3**: Authenticated denial of existence for secure proof of non-existence.
 *   **Documentation**: See [docs/dnssec.md](docs/dnssec.md) for full details.
