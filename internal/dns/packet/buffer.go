@@ -207,6 +207,9 @@ func (b *BytePacketBuffer) ReadName() (string, error) {
 				return "", err
 			}
 			offset := ((uint16(lenByte) ^ 0xC0) << 8) | uint16(b2)
+			if offset >= uint16(b.Len) {
+				return "", errors.New("out of bounds")
+			}
 			pos = int(offset)
 			jumped = true
 			jumpsPerformed++
@@ -217,6 +220,9 @@ func (b *BytePacketBuffer) ReadName() (string, error) {
 		pos++
 		lenInt := int(lenByte)
 
+		if lenByte > 63 {
+			return "", errors.New("label too long")
+		}
 		if pos+lenInt > b.Len {
 			return "", errors.New("out of bounds")
 		}

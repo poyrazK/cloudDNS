@@ -299,12 +299,25 @@ func run(ctx context.Context) error {
 		localASN := getEnvUint32("ANYCAST_LOCAL_ASN", 65001)
 		peerASN := getEnvUint32("BGP_PEER_ASN", 65000)
 
+		bgpListenPort := int32(179)
+		if v := os.Getenv("BGP_LISTEN_PORT"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				bgpListenPort = int32(n)
+			}
+		}
+
 		// Configure RouterID and NextHop if provided
 		routerID := os.Getenv("BGP_ROUTER_ID")
 		nextHop := os.Getenv("BGP_NEXT_HOP")
-		routingAdapter.SetConfig(routerID, 179, nextHop)
+		routingAdapter.SetConfig(routerID, bgpListenPort, nextHop)
 
-		anycastMgr = services.NewAnycastManager(dnsSvc, routingAdapter, vipAdapter, vip, iface, logger, 5*time.Second)
+		anycastDebounce := 5 * time.Second
+		if v := os.Getenv("ANYCAST_DEBOUNCE_SECS"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				anycastDebounce = time.Duration(n) * time.Second
+			}
+		}
+		anycastMgr = services.NewAnycastManager(dnsSvc, routingAdapter, vipAdapter, vip, iface, logger, anycastDebounce)
 
 		errChan := make(chan error, 1)
 		go func() {
@@ -332,6 +345,25 @@ func run(ctx context.Context) error {
 	dnsServer := server.NewServer(dnsAddr, repo, logger)
 	dnsServer.Redis = redisCache
 
+	// Configure server timeouts from env or defaults
+	serverCfg := config.DefaultServerConfig()
+	if v := os.Getenv("SERVER_UDP_READ_DEADLINE_MS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			serverCfg.UDPSocketReadDeadline = time.Duration(n) * time.Millisecond
+		}
+	}
+	if v := os.Getenv("SERVER_SHUTDOWN_TIMEOUT_SECS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			serverCfg.ShutdownTimeout = time.Duration(n) * time.Second
+		}
+	}
+	if v := os.Getenv("SERVER_RECURSIVE_TIMEOUT_SECS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			serverCfg.RecursiveTimeout = time.Duration(n) * time.Second
+		}
+	}
+	dnsServer.ServerConfig = serverCfg
+
 	// Configure DNSSEC if trust anchors are provided
 	dnsServer.DNSSECConfig = parseDNSSECConfig()
 
@@ -357,8 +389,12 @@ func run(ctx context.Context) error {
 
 	// 5. Start Health Monitor (Smart Engine)
 	if repo != nil {
-		healthMonitor := services.NewHealthMonitor(repo, logger, nil)
-		go healthMonitor.Start(runCtx, 30*time.Second)
+		healthMonitorOpts := &services.HealthMonitorOptions{
+			HTTPTimeout: serverCfg.HealthCheckHTTPTimeout,
+			TCPTimeout:  serverCfg.HealthCheckTCPTimeout,
+		}
+		healthMonitor := services.NewHealthMonitor(repo, logger, healthMonitorOpts)
+		go healthMonitor.Start(runCtx, serverCfg.HealthCheckInterval)
 	}
 
 	logger.Info("cloudDNS services starting",
@@ -366,13 +402,38 @@ func run(ctx context.Context) error {
 		"api_addr", apiAddr,
 	)
 
+	readHeaderTimeout := 5 * time.Second
+	readTimeout := 10 * time.Second
+	writeTimeout := 10 * time.Second
+	idleTimeout := 120 * time.Second
+	if v := os.Getenv("API_READ_HEADER_TIMEOUT_SECS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			readHeaderTimeout = time.Duration(n) * time.Second
+		}
+	}
+	if v := os.Getenv("API_READ_TIMEOUT_SECS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			readTimeout = time.Duration(n) * time.Second
+		}
+	}
+	if v := os.Getenv("API_WRITE_TIMEOUT_SECS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			writeTimeout = time.Duration(n) * time.Second
+		}
+	}
+	if v := os.Getenv("API_IDLE_TIMEOUT_SECS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			idleTimeout = time.Duration(n) * time.Second
+		}
+	}
+
 	s := &http.Server{
 		Addr:              apiAddr,
 		Handler:           mux,
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      10 * time.Second,
-		IdleTimeout:       120 * time.Second,
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
 	}
 
 	certFile := os.Getenv("API_TLS_CERT")
