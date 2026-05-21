@@ -819,3 +819,32 @@ func makeMockResponseWithDS(parentZone, childZone string, ds packet.DNSRecord, r
 	}
 }
 
+// TestBuildDNSSECChain_TrustAnchorNotReached tests that buildDNSSECChain returns an error
+// when the chain of trust cannot be verified to a trust anchor.
+func TestBuildDNSSECChain_TrustAnchorNotReached(t *testing.T) {
+	srv, queries := mockDNSSECServer(t)
+
+	// Create a DNSKEY for example.com but NO trust anchor configured
+	// (validator initialized with nil anchors)
+	dnskey, _ := makeTestDNSKEYWithName(t, "example.com.")
+
+	*queries = []struct {
+		query    string
+		qtype    packet.QueryType
+		response *packet.DNSPacket
+		err      error
+	}{{
+		query:    "example.com.",
+		qtype:    packet.DNSKEY,
+		response: makeMockResponse("example.com.", []packet.DNSRecord{dnskey}, nil),
+	}}
+
+	ctx := context.Background()
+	_, err := srv.buildDNSSECChain(ctx, "example.com.")
+
+	// Should fail because there's no trust anchor to verify the chain
+	if err == nil {
+		t.Error("expected error when trust anchor not reached, got nil")
+	}
+}
+

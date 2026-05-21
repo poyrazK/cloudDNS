@@ -1480,15 +1480,25 @@ func (s *Server) populateAuthorityAndAdditional(ctx context.Context, resp *packe
 }
 
 // validateDNSSECResponse performs DNSSEC validation and converts to SERVFAIL in strict mode.
+// In non-strict mode, it still removes data with invalid signatures for security.
 func (s *Server) validateDNSSECResponse(ctx context.Context, zone *domain.Zone, resp *packet.DNSPacket) {
-	if err := s.validateDNSSEC(ctx, zone.Name, resp); err != nil && s.DNSSECMode == "strict" {
-		resp.Header.ResCode = packet.RcodeServFail
-		resp.Answers = nil
-		resp.Authorities = nil
-		for i := range resp.Resources {
-			if resp.Resources[i].Type == packet.OPT {
-				resp.Resources[i].AddEDE(packet.EdeDnssecBogus, err.Error())
+	if err := s.validateDNSSEC(ctx, zone.Name, resp); err != nil {
+		if s.DNSSECMode == "strict" {
+			resp.Header.ResCode = packet.RcodeServFail
+			resp.Answers = nil
+			resp.Authorities = nil
+			for i := range resp.Resources {
+				if resp.Resources[i].Type == packet.OPT {
+					// Use EDE code only (empty string) to avoid leaking internal error details
+					resp.Resources[i].AddEDE(packet.EdeDnssecBogus, "")
+				}
 			}
+		} else {
+			// Non-strict mode: return SERVFAIL and remove data with invalid signatures
+			resp.Header.ResCode = packet.RcodeServFail
+			resp.Header.AuthedData = false
+			resp.Answers = nil
+			resp.Authorities = nil
 		}
 	}
 }
@@ -2274,6 +2284,11 @@ func (s *Server) buildDNSSECChain(ctx context.Context, zoneName string) ([]servi
 
 	if len(chain) == 0 {
 		return nil, fmt.Errorf("buildDNSSECChain: could not build chain for %s", zoneName)
+	}
+
+	// Verify we reached a trust anchor
+	if s.DNSSECValidator.GetTrustAnchor(chain[len(chain)-1].Zone) == nil {
+		return nil, fmt.Errorf("buildDNSSECChain: could not verify chain to trust anchor for %s", zoneName)
 	}
 
 	return chain, nil
