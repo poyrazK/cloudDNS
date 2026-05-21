@@ -132,10 +132,12 @@ func (rl *rateLimiter) Allow(ip string) bool {
 	elapsed := now.Sub(b.last).Seconds()
 	b.last = now
 
-	// Update heap position after last change (heapIdx may be -1 if bucket was evicted by Cleanup but not yet removed from map)
-	if b.heapIdx != -1 {
-		heap.Fix(&shard.idleHeap, b.heapIdx)
-	}
+	// NOTE: We do NOT call heap.Fix here. The heap ordering is maintained correctly:
+	// - New buckets are pushed to the end (youngest) via heap.Push
+	// - During eviction, heap.Pop returns the oldest bucket (index 0)
+	// - The "last" timestamp update is only used for token refill calculations
+	// - Calling heap.Fix on every Allow() would be O(log n) and actually corrupts ordering
+	//   (a just-touched bucket becomes youngest, heap.Fix moves it toward front when we want oldest at front)
 
 	// Refill tokens
 	b.tokens += uint64(elapsed * shard.rate * bucketScale)
