@@ -118,6 +118,9 @@ type Server struct {
 	// inflightCache prevents thundering herd: tracks keys currently being fetched from L2.
 	// Key -> *inflightEntry (done channel closed when fetch completes).
 	inflightCache sync.Map
+
+	// l1TTLCap is cached at startup to avoid repeated os.Getenv calls in hot path
+	l1TTLCap time.Duration
 }
 
 // inflightEntry holds state for an in-progress L2 cache fetch.
@@ -167,6 +170,14 @@ func NewServer(addr string, repo ports.DNSRepository, logger *slog.Logger) *Serv
 	s.done = make(chan struct{})
 	_, _ = crand.Read(s.CookieSecret)
 	s.queryFn = s.sendQuery
+
+	// Cache REDIS_L1_TTL_CAP at startup to avoid repeated os.Getenv in hot path
+	s.l1TTLCap = 300 * time.Second
+	if v := os.Getenv("REDIS_L1_TTL_CAP"); v != "" {
+		if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
+			s.l1TTLCap = time.Duration(secs) * time.Second
+		}
+	}
 
 	// Initialize caches with done channel for graceful shutdown
 	s.Cache = NewDNSCache(s.done, &s.wg)
@@ -936,9 +947,10 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 
 	q := request.Questions[0]
 
-	// CHAOS identity queries
+	// CHAOS identity queries - compute lowerName once
+	lowerName := strings.ToLower(q.Name)
 	if q.QClass == ClassCHAOS {
-		if strings.ToLower(q.Name) == "id.server." || strings.ToLower(q.Name) == "hostname.bind." {
+		if lowerName == "id.server." || lowerName == "hostname.bind." {
 			return s.sendCHAOSIdentity(request, q, sendFn, qTypeLabel, protocol)
 		}
 	}
@@ -947,7 +959,7 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 	if !strings.HasSuffix(q.Name, ".") {
 		q.Name += "."
 	}
-	cacheKey := fmt.Sprintf("%s:%d", strings.ToLower(q.Name), q.QType)
+	cacheKey := lowerName + ":" + strconv.Itoa(int(q.QType))
 
 	// Cache check (L1 + L2)
 	if cached := s.checkCache(ctx, request, cacheKey, clientIP, qTypeLabel, protocol, sendFn); cached != nil {
@@ -1202,12 +1214,7 @@ func (s *Server) checkCache(ctx context.Context, req *packet.DNSPacket, cacheKey
 			data[0] = byte(req.Header.ID >> 8)
 			data[1] = byte(req.Header.ID & 0xFF)
 		}
-		l1TTLCap := 300 * time.Second
-		if v := os.Getenv("REDIS_L1_TTL_CAP"); v != "" {
-			if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
-				l1TTLCap = time.Duration(secs) * time.Second
-			}
-		}
+		l1TTLCap := s.l1TTLCap
 		if remainingTTL <= 0 {
 			remainingTTL = l1TTLCap
 		} else if remainingTTL > l1TTLCap {
