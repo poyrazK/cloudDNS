@@ -1482,7 +1482,7 @@ func (s *Server) validateDNSSECResponse(ctx context.Context, zone *domain.Zone, 
 			resp.Authorities = nil
 			for i := range resp.Resources {
 				if resp.Resources[i].Type == packet.OPT {
-					// Use only EDE code, not err.Error() to avoid leaking internal details
+					// Use EDE code only (empty string) to avoid leaking internal error details
 					resp.Resources[i].AddEDE(packet.EdeDnssecBogus, "")
 				}
 			}
