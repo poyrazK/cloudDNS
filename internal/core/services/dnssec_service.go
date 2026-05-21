@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cloudflare/circl/sign/ed448"
 	"github.com/google/uuid"
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
 	"github.com/poyrazK/cloudDNS/internal/core/ports"
@@ -27,17 +28,19 @@ type DNSSECService struct {
 	keyCache sync.Map  // zoneID -> *cachedKeys
 }
 
-// cachedKeys holds parsed ECDSA keys for a zone with TTL.
+// cachedKeys holds parsed DNSSEC keys for a zone with TTL.
 type cachedKeys struct {
-	keys    map[string][]*ecdsa.PrivateKey  // keyType -> parsed keys
-	keyTags map[string][]uint16              // keyType -> key tags (pre-computed)
-	expires time.Time
+	keys      map[string][]any   // keyType -> parsed keys (any: *ecdsa.PrivateKey or ed448.PrivateKey)
+	keyTags   map[string][]uint16 // keyType -> key tags (pre-computed)
+	algorithms map[string][]uint8 // keyType -> algorithm numbers
+	expires   time.Time
 }
 
 // cachedSigningKey holds a parsed key and its pre-computed key tag for signing.
 type cachedSigningKey struct {
-	privateKey *ecdsa.PrivateKey
+	privateKey any        // *ecdsa.PrivateKey or ed448.PrivateKey
 	keyTag     uint16
+	algorithm  uint8      // DNSSEC algorithm number
 }
 
 // keyCacheTTL is the TTL for cached DNSSEC keys.
@@ -48,27 +51,43 @@ func NewDNSSECService(repo ports.DNSRepository) *DNSSECService {
 	return &DNSSECService{repo: repo, logger: slog.Default()}
 }
 
-// GenerateKey creates a new ECDSA P-256 key pair for a zone
+// GenerateKey creates a new DNSSEC key pair for a zone.
+// Supported algorithms: ECDSA P-256 (keyType contains "ecdsa"), Ed448 (keyType contains "ed448").
 func (s *DNSSECService) GenerateKey(ctx context.Context, zoneID string, keyType string) (*domain.DNSSECKey, error) {
-	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate key: %w", err)
-	}
+	var algorithm uint8
+	var privBytes, pubBytes []byte
 
-	privBytes, err := x509.MarshalECPrivateKey(priv)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal ECDSA private key: %w", err)
-	}
-	pubBytes, err := x509.MarshalPKIXPublicKey(&priv.PublicKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal ECDSA public key: %w", err)
+	switch {
+	case strings.Contains(strings.ToLower(keyType), "ed448"):
+		algorithm = packet.AlgorithmED448
+		pub, priv, err := ed448.GenerateKey(rand.Reader)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate Ed448 key: %w", err)
+		}
+		privBytes = priv
+		pubBytes = pub
+	default:
+		algorithm = packet.AlgorithmECDSAP256
+		priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate key: %w", err)
+		}
+		var err2 error
+		privBytes, err2 = x509.MarshalECPrivateKey(priv)
+		if err2 != nil {
+			return nil, fmt.Errorf("failed to marshal ECDSA private key: %w", err2)
+		}
+		pubBytes, err2 = x509.MarshalPKIXPublicKey(&priv.PublicKey)
+		if err2 != nil {
+			return nil, fmt.Errorf("failed to marshal ECDSA public key: %w", err2)
+		}
 	}
 
 	key := &domain.DNSSECKey{
 		ID:         uuid.New().String(),
 		ZoneID:     zoneID,
 		KeyType:    keyType,
-		Algorithm:  13, // ECDSAP256SHA256
+		Algorithm:  int(algorithm),
 		PrivateKey: privBytes,
 		PublicKey:  pubBytes,
 		Active:     true,
@@ -192,32 +211,39 @@ func (s *DNSSECService) SignRRSet(ctx context.Context, zoneName string, zoneID s
 		return nil, err
 	}
 
-	// Parse keys
-	parsedKeys := make([]*ecdsa.PrivateKey, 0, len(keys))
-	keyTags := make([]uint16, 0, len(keys))
+	// Parse keys and pre-compute key tags
+	signingKeys := make([]*cachedSigningKey, 0, len(keys))
 	for _, key := range keys {
-		priv, err := x509.ParseECPrivateKey(key.PrivateKey)
-		if err != nil {
-			return nil, err
+		algorithm := uint8(key.Algorithm)
+		var priv any
+		var pubBytes []byte
+
+		switch algorithm {
+		case packet.AlgorithmED448:
+			priv = ed448.PrivateKey(key.PrivateKey)
+			pubBytes = key.PublicKey
+		default:
+			ecdsaPriv, err := x509.ParseECPrivateKey(key.PrivateKey)
+			if err != nil {
+				return nil, err
+			}
+			priv = ecdsaPriv
+			pubBytes, _ = x509.MarshalPKIXPublicKey(&ecdsaPriv.PublicKey)
 		}
-		parsedKeys = append(parsedKeys, priv)
-		// Pre-compute key tag
-		pubBytes, _ := x509.MarshalPKIXPublicKey(&priv.PublicKey)
+
 		tempKeyRec := packet.DNSRecord{
 			Type:      packet.DNSKEY,
 			Flags:     256,
-			Algorithm: 13,
+			Algorithm: algorithm,
 			PublicKey: pubBytes,
 		}
-		keyTags = append(keyTags, tempKeyRec.ComputeKeyTag())
+		signingKeys = append(signingKeys, &cachedSigningKey{
+			privateKey: priv,
+			keyTag:     tempKeyRec.ComputeKeyTag(),
+			algorithm:  algorithm,
+		})
 	}
-	s.cacheKeys(zoneID, "ZSK", parsedKeys, keyTags)
-
-	// Build signing keys with pre-computed tags
-	signingKeys := make([]*cachedSigningKey, 0, len(parsedKeys))
-	for i := range parsedKeys {
-		signingKeys = append(signingKeys, &cachedSigningKey{privateKey: parsedKeys[i], keyTag: keyTags[i]})
-	}
+	s.cacheKeys(zoneID, "ZSK", signingKeys)
 
 	return s.signWithKeys(ctx, zoneName, records, signingKeys)
 }
@@ -239,7 +265,7 @@ func (s *DNSSECService) signWithKeys(_ context.Context, zoneName string, records
 		}
 		expiration := uint32(exp)
 
-		sig, err := packet.SignRRSet(records, k.privateKey, packet.AlgorithmECDSAP256, zoneName, k.keyTag, now, expiration)
+		sig, err := packet.SignRRSet(records, k.privateKey, k.algorithm, zoneName, k.keyTag, now, expiration)
 		if err != nil {
 			return nil, err
 		}
@@ -262,22 +288,22 @@ func (s *DNSSECService) getCachedKeys(zoneID, keyType string) []*cachedSigningKe
 	}
 	tags := cached.keyTags[keyType]
 	keys := cached.keys[keyType]
+	algorithms := cached.algorithms[keyType]
 	result := make([]*cachedSigningKey, 0, len(keys))
 	for i := range keys {
-		result = append(result, &cachedSigningKey{privateKey: keys[i], keyTag: tags[i]})
+		result = append(result, &cachedSigningKey{privateKey: keys[i], keyTag: tags[i], algorithm: algorithms[i]})
 	}
 	return result
 }
 
 // cacheKeys stores parsed keys in the cache with TTL, merging with existing keys for the zone.
-// keyTags must be provided and have the same length as keys.
-// Atomically replaces the entire cachedKeys entry so readers always see a consistent snapshot.
-func (s *DNSSECService) cacheKeys(zoneID, keyType string, keys []*ecdsa.PrivateKey, keyTags []uint16) {
+func (s *DNSSECService) cacheKeys(zoneID, keyType string, keys []*cachedSigningKey) {
 	existing, _ := s.keyCache.Load(zoneID)
 	ec := &cachedKeys{
-		keys:    make(map[string][]*ecdsa.PrivateKey),
-		keyTags: make(map[string][]uint16),
-		expires: time.Now().Add(keyCacheTTL),
+		keys:       make(map[string][]any),
+		keyTags:    make(map[string][]uint16),
+		algorithms: make(map[string][]uint8),
+		expires:    time.Now().Add(keyCacheTTL),
 	}
 	if existing != nil {
 		old := existing.(*cachedKeys)
@@ -287,9 +313,22 @@ func (s *DNSSECService) cacheKeys(zoneID, keyType string, keys []*ecdsa.PrivateK
 		for k, v := range old.keyTags {
 			ec.keyTags[k] = v
 		}
+		for k, v := range old.algorithms {
+			ec.algorithms[k] = v
+		}
 	}
-	ec.keys[keyType] = keys
-	ec.keyTags[keyType] = keyTags
+
+	cachedKeys := make([]any, len(keys))
+	cachedTags := make([]uint16, len(keys))
+	cachedAlgos := make([]uint8, len(keys))
+	for i, k := range keys {
+		cachedKeys[i] = k.privateKey
+		cachedTags[i] = k.keyTag
+		cachedAlgos[i] = k.algorithm
+	}
+	ec.keys[keyType] = cachedKeys
+	ec.keyTags[keyType] = cachedTags
+	ec.algorithms[keyType] = cachedAlgos
 	s.keyCache.Store(zoneID, ec)
 }
 
