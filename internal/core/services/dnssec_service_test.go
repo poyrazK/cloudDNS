@@ -2,7 +2,6 @@ package services
 
 import (
 	"context"
-	"crypto/ecdsa"
 	"errors"
 	"net"
 	"testing"
@@ -161,6 +160,84 @@ func TestGenerateKey(t *testing.T) {
 	_, err = svc.GenerateKey(ctx, "zone-1", "KSK")
 	if err == nil {
 		t.Errorf("Expected error in GenerateKey when repo fails")
+	}
+}
+
+// TestGenerateKey_Ed448 verifies that the service can generate valid Ed448 keys.
+func TestGenerateKey_Ed448(t *testing.T) {
+	repo := &mockDNSSECRepo{}
+	svc := NewDNSSECService(repo)
+	ctx := context.Background()
+
+	key, err := svc.GenerateKey(ctx, "zone-1", "ed448-zsk")
+	if err != nil {
+		t.Fatalf("GenerateKey (Ed448) failed: %v", err)
+	}
+
+	if key.KeyType != "ed448-zsk" {
+		t.Errorf("Expected key type ed448-zsk, got %s", key.KeyType)
+	}
+	if key.Algorithm != 16 {
+		t.Errorf("Expected algorithm 16, got %d", key.Algorithm)
+	}
+	if len(key.PrivateKey) == 0 || len(key.PublicKey) == 0 {
+		t.Errorf("Keys were not generated")
+	}
+}
+
+// TestSignRRSet_Ed448 verifies that SignRRSet works end-to-end with Ed448 keys.
+// Note: SignRRSet is currently hardcoded to look for "ZSK" key type.
+// This test verifies that a key created as "ed448-zsk" has algorithm 16.
+func TestSignRRSet_Ed448(t *testing.T) {
+	repo := &mockDNSSECRepo{}
+	svc := NewDNSSECService(repo)
+	ctx := context.Background()
+
+	// Generate Ed448 ZSK - it will have algorithm 16 but SignRRSet looks for "ZSK"
+	key, err := svc.GenerateKey(ctx, "z1", "ed448-zsk")
+	if err != nil {
+		t.Fatalf("GenerateKey failed: %v", err)
+	}
+
+	// Verify the key was created with Ed448 algorithm
+	if key.Algorithm != 16 {
+		t.Fatalf("Expected algorithm 16, got %d", key.Algorithm)
+	}
+
+	// Manually add it to the mock repo as a ZSK so SignRRSet can find it
+	repo.keys = append(repo.keys, domain.DNSSECKey{
+		ID:         key.ID,
+		ZoneID:     "z1",
+		KeyType:    "ZSK", // SignRRSet looks for "ZSK"
+		Algorithm:  16,    // Ed448
+		PrivateKey: key.PrivateKey,
+		PublicKey:  key.PublicKey,
+		Active:     true,
+	})
+
+	records := []packet.DNSRecord{
+		{Name: "www.example.com.", Type: packet.A, IP: net.ParseIP("1.2.3.4"), TTL: 300, Class: 1},
+	}
+
+	sigs, err := svc.SignRRSet(ctx, "example.com.", "z1", records)
+	if err != nil {
+		t.Fatalf("SignRRSet (Ed448) failed: %v", err)
+	}
+	if len(sigs) != 1 {
+		t.Fatalf("Expected 1 RRSIG, got %d", len(sigs))
+	}
+	sig := sigs[0]
+	if sig.Type != packet.RRSIG {
+		t.Errorf("Expected RRSIG record, got %v", sig.Type)
+	}
+	if sig.TypeCovered != uint16(packet.A) {
+		t.Errorf("Expected TypeCovered A, got %v", sig.TypeCovered)
+	}
+	if sig.Algorithm != packet.AlgorithmED448 {
+		t.Errorf("Expected AlgorithmED448, got %d", sig.Algorithm)
+	}
+	if len(sig.Signature) == 0 {
+		t.Errorf("Expected non-empty signature")
 	}
 }
 
@@ -356,8 +433,10 @@ func TestSignRRSet_CacheExpiration(t *testing.T) {
 
 	// Advance time past TTL (replace cached entry with an already-expired one)
 	expiredCached := &cachedKeys{
-		keys:    map[string][]*ecdsa.PrivateKey{"ZSK": {}},
-		expires: time.Now().Add(-1 * time.Second),
+		keys:       map[string][]any{"ZSK": {}},
+		keyTags:    map[string][]uint16{"ZSK": {}},
+		algorithms: map[string][]uint8{"ZSK": {}},
+		expires:    time.Now().Add(-1 * time.Second),
 	}
 	svc.keyCache.Store("z1", expiredCached)
 
