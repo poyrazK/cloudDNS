@@ -2019,13 +2019,15 @@ func (s *Server) validateDNSSEC(ctx context.Context, zoneName string, response *
 	rrsigGroups := make(map[string][]packet.DNSRecord)
 	for _, rec := range response.Answers {
 		if rec.Type == packet.RRSIG {
-			key := fmt.Sprintf("%s:%d", strings.ToLower(rec.Name), rec.TypeCovered)
+			lowerName := strings.ToLower(rec.Name)
+			key := lowerName + ":" + strconv.Itoa(int(rec.TypeCovered))
 			rrsigGroups[key] = append(rrsigGroups[key], rec)
 		}
 	}
 	for _, rec := range response.Authorities {
 		if rec.Type == packet.RRSIG {
-			key := fmt.Sprintf("%s:%d", strings.ToLower(rec.Name), rec.TypeCovered)
+			lowerName := strings.ToLower(rec.Name)
+			key := lowerName + ":" + strconv.Itoa(int(rec.TypeCovered))
 			rrsigGroups[key] = append(rrsigGroups[key], rec)
 		}
 	}
@@ -2303,7 +2305,8 @@ func (s *Server) groupRecords(records []packet.DNSRecord) [][]packet.DNSRecord {
 		if r.Type == packet.RRSIG || r.Type == packet.OPT || r.Type == packet.TSIG {
 			continue
 		}
-		key := fmt.Sprintf("%s:%d", strings.ToLower(r.Name), r.Type)
+		lowerName := strings.ToLower(r.Name)
+		key := lowerName + ":" + strconv.Itoa(int(r.Type))
 		if _, ok := groups[key]; !ok {
 			keys = append(keys, key)
 		}
