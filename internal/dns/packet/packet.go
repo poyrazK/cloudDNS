@@ -817,7 +817,7 @@ func (r *DNSRecord) Write(buffer *BytePacketBuffer) (int, error) {
 	case TXT:
 		if err := buffer.Writeu16(uint16(len(r.Txt) + 1)); err != nil { return 0, err } // #nosec G115
 		if err := buffer.Write(byte(len(r.Txt))); err != nil { return 0, err } // #nosec G115
-		if err := buffer.WriteRange(buffer.Position(), []byte(r.Txt)); err != nil { return 0, err }
+		if err := buffer.WriteStringRange(buffer.Position(), r.Txt); err != nil { return 0, err }
 	case SOA:
 		lenPos := buffer.Position()
 		if err := buffer.Writeu16(0); err != nil { return 0, err }
@@ -835,9 +835,9 @@ func (r *DNSRecord) Write(buffer *BytePacketBuffer) (int, error) {
 	case HINFO:
 		if err := buffer.Writeu16(uint16(len(r.CPU) + len(r.OS) + 2)); err != nil { return 0, err } // #nosec G115
 		if err := buffer.Write(byte(len(r.CPU))); err != nil { return 0, err } // #nosec G115
-		if err := buffer.WriteRange(buffer.Position(), []byte(r.CPU)); err != nil { return 0, err }
+		if err := buffer.WriteStringRange(buffer.Position(), r.CPU); err != nil { return 0, err }
 		if err := buffer.Write(byte(len(r.OS))); err != nil { return 0, err } // #nosec G115
-		if err := buffer.WriteRange(buffer.Position(), []byte(r.OS)); err != nil { return 0, err }
+		if err := buffer.WriteStringRange(buffer.Position(), r.OS); err != nil { return 0, err }
 	case MINFO:
 		lenPos := buffer.Position()
 		if err := buffer.Writeu16(0); err != nil { return 0, err }
