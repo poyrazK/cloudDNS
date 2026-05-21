@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/cloudflare/circl/sign/ed448"
 )
 
 // TestVerifyRRSet_ValidSignature tests signature verification with a valid signature.
@@ -1381,6 +1383,43 @@ func TestSignAndVerify_ED25519(t *testing.T) {
 	}
 }
 
+// TestSignAndVerify_ED448 tests sign and verify round-trip using Ed448 (Algorithm 16).
+func TestSignAndVerify_ED448(t *testing.T) {
+	pub, priv, err := ed448.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("ed448.GenerateKey failed: %v", err)
+	}
+
+	dnskey := DNSRecord{
+		Name:      "example.com.",
+		Type:      DNSKEY,
+		Flags:     256,
+		Protocol:  3,
+		Algorithm: AlgorithmED448,
+		PublicKey: pub,
+	}
+
+	rrset := []DNSRecord{
+		{Name: "www.example.com.", Type: A, Class: 1, TTL: 300, IP: []byte{1, 2, 3, 4}},
+	}
+
+	now := uint32(time.Now().Unix())
+	keyTag := dnskey.ComputeKeyTag()
+
+	sig, err := SignRRSet(rrset, priv, AlgorithmED448, "example.com.", keyTag, now-3600, now+86400)
+	if err != nil {
+		t.Fatalf("SignRRSet (Ed448) failed: %v", err)
+	}
+
+	valid, err := VerifyRRSet(rrset, sig, dnskey, now)
+	if err != nil {
+		t.Fatalf("VerifyRRSet (Ed448) failed: %v", err)
+	}
+	if !valid {
+		t.Error("Expected valid Ed448 signature")
+	}
+}
+
 // TestVerifyRRSet_UnsupportedAlgorithm tests that unsupported algorithms return an error.
 func TestVerifyRRSet_UnsupportedAlgorithm(t *testing.T) {
 	privKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -2001,5 +2040,48 @@ func TestValidateDNSKEYFormat_ED25519_WrongSize(t *testing.T) {
 	_, err := ValidateDNSKEYFormat(dnskey)
 	if err == nil {
 		t.Error("Expected error for wrong-sized Ed25519 key")
+	}
+}
+
+// TestValidateDNSKEYFormat_ED448 tests Ed448 key format validation.
+func TestValidateDNSKEYFormat_ED448(t *testing.T) {
+	// ed448.GenerateKey returns (pub, priv, err) — pub is 57 bytes, priv is 114 bytes
+	pubKey, _, err := ed448.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("Failed to generate Ed448 key: %v", err)
+	}
+
+	dnskey := DNSRecord{
+		Name:      "example.com.",
+		Type:      DNSKEY,
+		Flags:     257,
+		Protocol:  3,
+		Algorithm: AlgorithmED448,
+		PublicKey: pubKey,
+	}
+
+	valid, err := ValidateDNSKEYFormat(dnskey)
+	if err != nil {
+		t.Fatalf("ValidateDNSKEYFormat returned error: %v", err)
+	}
+	if !valid {
+		t.Error("Expected valid Ed448 DNSKEY to pass validation")
+	}
+}
+
+// TestValidateDNSKEYFormat_ED448_WrongSize tests that wrong-sized Ed448 keys are rejected.
+func TestValidateDNSKEYFormat_ED448_WrongSize(t *testing.T) {
+	dnskey := DNSRecord{
+		Name:      "example.com.",
+		Type:      DNSKEY,
+		Flags:     257,
+		Protocol:  3,
+		Algorithm: AlgorithmED448,
+		PublicKey: make([]byte, 56), // Too short — must be 57 bytes
+	}
+
+	_, err := ValidateDNSKEYFormat(dnskey)
+	if err == nil {
+		t.Error("Expected error for wrong-sized Ed448 key")
 	}
 }

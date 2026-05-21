@@ -11,6 +11,8 @@ import (
 	"errors"
 	"math/big"
 	"strings"
+
+	"github.com/cloudflare/circl/sign/ed448"
 )
 
 var (
@@ -230,7 +232,7 @@ func countNameLabels(name string) uint8 {
 }
 
 // VerifyRRSet verifies an RRSIG signature over an RRSet.
-// It supports ECDSA P-256 (Algorithm 13), RSA SHA-256 (Algorithm 8), and Ed25519 (Algorithm 15) signatures.
+// It supports ECDSA P-256 (Algorithm 13), RSA SHA-256 (Algorithm 8), Ed25519 (Algorithm 15), and Ed448 (Algorithm 16) signatures.
 func VerifyRRSet(rrset []DNSRecord, rrsig DNSRecord, dnskey DNSRecord, now uint32) (bool, error) {
 	if len(rrset) == 0 {
 		return false, errors.New("dnssec: empty rrset")
@@ -360,6 +362,15 @@ func VerifyRRSet(rrset []DNSRecord, rrsig DNSRecord, dnskey DNSRecord, now uint3
 			return false, ErrInvalidSignature
 		}
 
+	case AlgorithmED448:
+		publicKey, err := extractED448PublicKey(dnskey)
+		if err != nil {
+			return false, err
+		}
+		if !ed448.Verify(publicKey, buf.Buf[:buf.Position()], rrsig.Signature, "") {
+			return false, ErrInvalidSignature
+		}
+
 	default:
 		return false, ErrUnsupportedAlgorithm
 	}
@@ -425,6 +436,15 @@ func extractED25519PublicKey(dnskey DNSRecord) (ed25519.PublicKey, error) {
 		return nil, ErrNoPublicKey
 	}
 	return ed25519.PublicKey(dnskey.PublicKey), nil
+}
+
+// extractED448PublicKey extracts an Ed448 public key from a DNSKEY record.
+// RFC 8080 defines Ed448 for DNSSEC.
+func extractED448PublicKey(dnskey DNSRecord) (ed448.PublicKey, error) {
+	if len(dnskey.PublicKey) != ed448.PublicKeySize {
+		return nil, ErrNoPublicKey
+	}
+	return ed448.PublicKey(dnskey.PublicKey), nil
 }
 
 // writeCanonicalRData writes the RDATA portion of a record in canonical form.
@@ -571,6 +591,8 @@ func ValidateDNSKEYFormat(dnskey DNSRecord) (bool, error) {
 		_, err = extractRSAPublicKey(dnskey)
 	case AlgorithmED25519:
 		_, err = extractED25519PublicKey(dnskey)
+	case AlgorithmED448:
+		_, err = extractED448PublicKey(dnskey)
 	default:
 		err = ErrUnsupportedAlgorithm
 	}

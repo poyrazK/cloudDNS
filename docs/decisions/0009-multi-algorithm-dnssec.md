@@ -5,12 +5,12 @@ Accepted
 
 ## Context
 
-cloudDNS implemented ECDSA P-256 (Algorithm 13) DNSSEC signing and validation as its initial algorithm. However, RSA SHA-256 (Algorithm 8) and Ed25519 (Algorithm 15) are widely deployed in production DNS infrastructure, particularly for compatibility with older resolvers and compliance requirements.
+cloudDNS implemented ECDSA P-256 (Algorithm 13) DNSSEC signing and validation as its initial algorithm. However, RSA SHA-256 (Algorithm 8), Ed25519 (Algorithm 15), and Ed448 (Algorithm 16) are widely deployed in production DNS infrastructure, particularly for compatibility with older resolvers and compliance requirements.
 
 Adding multi-algorithm support required changes across the entire DNSSEC stack:
 
-1. **Signing** (`SignRRSet`) - Accept algorithm parameter and switch between RSA PKCS#1 v1.5, ECDSA, and Ed25519 signing
-2. **Verification** (`VerifyRRSet`) - Handle all three algorithms with separate key extraction paths
+1. **Signing** (`SignRRSet`) - Accept algorithm parameter and switch between RSA PKCS#1 v1.5, ECDSA, Ed25519, and Ed448 signing
+2. **Verification** (`VerifyRRSet`) - Handle all four algorithms with separate key extraction paths
 3. **Key Generation** (`GenerateKey`) - Support multiple algorithm types with appropriate key sizes
 4. **Call sites** - Update all callers of `SignRRSet` to pass the algorithm parameter
 
@@ -27,6 +27,7 @@ const (
     AlgorithmRSASHA256 uint8 = 8
     AlgorithmECDSAP256 uint8 = 13
     AlgorithmED25519   uint8 = 15
+    AlgorithmED448     uint8 = 16
 )
 ```
 
@@ -43,12 +44,14 @@ The function switches on algorithm type:
 - **Algorithm 13**: Uses `ecdsa.Sign` with P-256, produces 64-byte R||S signature
 - **Algorithm 8**: Uses `rsa.SignPKCS1v15` with SHA-256
 - **Algorithm 15**: Uses `ed25519.Sign` with 32-byte seed
+- **Algorithm 16**: Uses `ed448.Sign` with 57-byte public key (via `github.com/cloudflare/circl/sign/ed448`)
 
 ### Phase 3: Modify VerifyRRSet for Multi-Algorithm
 
 Added separate key extraction functions per RFC specifications:
 - `extractRSAPublicKey` - RSA public key stored as big-endian integer, E=65537
 - `extractED25519PublicKey` - 32-byte Ed25519 public key
+- `extractED448PublicKey` - 57-byte Ed448 public key
 - `extractECDSAPublicKey` - Extended to handle both RFC 6605 (64-byte X||Y) and SEC1 uncompressed (65-byte 0x04||X||Y) formats
 
 Verification switch in `VerifyRRSet` routes to the appropriate verification function based on the RRSIG algorithm.
@@ -93,6 +96,20 @@ if !ok {
 sigData = ed25519.Sign(ed25519Priv[:], buf.Buf[:buf.Position()])
 ```
 
+### Ed448 Key Handling
+
+`SignRRSet` receives Ed448 private key as `ed448.PrivateKey` (114 bytes) to match the `github.com/cloudflare/circl/sign/ed448` API:
+
+```go
+ed448Priv, ok := privKey.(ed448.PrivateKey)
+if !ok {
+    return DNSRecord{}, ErrInvalidSignature
+}
+sigData = ed448.Sign(ed448Priv, buf.Buf[:buf.Position()], "")
+```
+
+Note: Ed448 requires a context string for domain separation (RFC 8032). An empty context (`""`) is used for standard DNSSEC signatures.
+
 ### DNSKEY Protocol Field
 
 All DNSKEY records use protocol 3 (required by RFC 4034). This is enforced in `ComputeKeyTag` and `SignRRSet`.
@@ -100,14 +117,14 @@ All DNSKEY records use protocol 3 (required by RFC 4034). This is enforced in `C
 ## Consequences
 
 ### Positive
-- Full compatibility with production DNS infrastructure using RSA or Ed25519
-- All three RFC 8624 algorithms now supported for both signing and validation
+- Full compatibility with production DNS infrastructure using RSA, Ed25519, or Ed448
+- All four RFC 8624 algorithms now supported for both signing and validation
 - Minimal code duplication through shared canonical wire format functions
 - Algorithm-specific code paths keep the core verification logic clean
 
 ### Negative
-- Larger `SignRRSet` function with three code paths instead of one
-- Test coverage must verify all three algorithms independently
+- Larger `SignRRSet` function with four code paths instead of one
+- Test coverage must verify all four algorithms independently
 
 ### Trade-offs
 - Chose `any` for private key type rather than `crypto.Signer` interface to avoid interface conversion complexity in tests
