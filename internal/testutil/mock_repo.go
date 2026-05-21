@@ -190,8 +190,8 @@ func (m *MockRepo) Ping(_ context.Context) error {
 }
 
 // ApplyZoneUpdate implements ports.DNSRepository for testing.
-func (m *MockRepo) ApplyZoneUpdate(_ context.Context, zoneID string, operations []domain.UpdateOperation, changes []domain.ZoneChange) (uint32, error) {
-	args := m.Called(zoneID, operations, changes)
+func (m *MockRepo) ApplyZoneUpdate(_ context.Context, zoneID string, tenantID string, operations []domain.UpdateOperation, changes []domain.ZoneChange) (uint32, error) {
+	args := m.Called(zoneID, tenantID, operations, changes)
 	return args.Get(0).(uint32), args.Error(1)
 }
 

@@ -47,7 +47,8 @@ type DNSRepository interface {
 
 	// ApplyZoneUpdate applies a batch of updates and records historical changes atomically.
 	// Returns the new serial if SOA was updated, or 0 if no SOA changes.
-	ApplyZoneUpdate(ctx context.Context, zoneID string, operations []domain.UpdateOperation, changes []domain.ZoneChange) (uint32, error)
+	// tenantID is required for authorization - verifies the caller owns the zone.
+	ApplyZoneUpdate(ctx context.Context, zoneID string, tenantID string, operations []domain.UpdateOperation, changes []domain.ZoneChange) (uint32, error)
 
 	// DNSSEC Key Management
 	CreateKey(ctx context.Context, key *domain.DNSSECKey) error

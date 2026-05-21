@@ -971,16 +971,29 @@ func (r *PostgresRepository) GetAuditLogs(ctx context.Context, tenantID string) 
 // ApplyZoneUpdate implements ports.DNSRepository.
 // It fetches the current SOA serial inside the transaction and increments it atomically
 // only if all operations succeed. Returns the new serial.
-func (r *PostgresRepository) ApplyZoneUpdate(ctx context.Context, zoneID string, operations []domain.UpdateOperation, changes []domain.ZoneChange) (uint32, error) {
+func (r *PostgresRepository) ApplyZoneUpdate(ctx context.Context, zoneID string, tenantID string, operations []domain.UpdateOperation, changes []domain.ZoneChange) (uint32, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
 	defer func() {
-		if errRollback := tx.Rollback(); errRollback != nil && !errors.Is(errRollback, sql.ErrTxDone) {
-			r.logger.Error("failed to rollback transaction", "error", errRollback)
+		if tx != nil {
+			_ = tx.Rollback() // best effort
 		}
 	}()
+
+	// Verify zone ownership inside transaction
+	var ownerTenantID string
+	err = tx.QueryRowContext(ctx, `SELECT tenant_id FROM dns_zones WHERE id = $1`, zoneID).Scan(&ownerTenantID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, fmt.Errorf("zone not found")
+		}
+		return 0, fmt.Errorf("failed to verify zone ownership: %w", err)
+	}
+	if ownerTenantID != tenantID {
+		return 0, fmt.Errorf("unauthorized: zone does not belong to tenant")
+	}
 
 	// Fetch current SOA serial inside the transaction
 	var currentSerial uint32

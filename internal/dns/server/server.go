@@ -762,20 +762,23 @@ func (s *Server) handleAXFR(ctx context.Context, conn net.Conn, request *packet.
 		q.Name += "."
 	}
 
-	// Validate TSIG if present
-	if request.TSIGStart != -1 && len(request.Resources) > 0 {
-		tsig := request.Resources[len(request.Resources)-1]
-		secret, ok := s.TsigKeys[tsig.Name]
-		if !ok {
-			s.Logger.Debug("AXFR failed: unknown TSIG key", "key", tsig.Name, "zone", q.Name)
-			s.sendTCPError(conn, request.Header.ID, 5) // NotAuth
-			return
-		}
-		if errVerify := request.VerifyTSIG(rawData, request.TSIGStart, secret); errVerify != nil {
-			s.Logger.Warn("AXFR failed: TSIG verification failed", "error", errVerify, "zone", q.Name)
-			s.sendTCPError(conn, request.Header.ID, 5) // NotAuth
-			return
-		}
+	// Validate TSIG - AXFR requires authentication
+	if request.TSIGStart == -1 || len(request.Resources) == 0 {
+		s.Logger.Warn("AXFR rejected: missing TSIG authentication", "zone", q.Name)
+		s.sendTCPError(conn, request.Header.ID, 5) // NotAuth
+		return
+	}
+	tsig := request.Resources[len(request.Resources)-1]
+	secret, ok := s.TsigKeys[tsig.Name]
+	if !ok {
+		s.Logger.Debug("AXFR failed: unknown TSIG key", "key", tsig.Name, "zone", q.Name)
+		s.sendTCPError(conn, request.Header.ID, 5) // NotAuth
+		return
+	}
+	if errVerify := request.VerifyTSIG(rawData, request.TSIGStart, secret); errVerify != nil {
+		s.Logger.Warn("AXFR failed: TSIG verification failed", "error", errVerify, "zone", q.Name)
+		s.sendTCPError(conn, request.Header.ID, 5) // NotAuth
+		return
 	}
 
 	zone, err := s.Repo.GetZone(ctx, q.Name)
@@ -950,7 +953,19 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 	if !strings.HasSuffix(q.Name, ".") {
 		q.Name += "."
 	}
-	cacheKey := fmt.Sprintf("%s:%d", strings.ToLower(q.Name), q.QType)
+
+	// Zone lookup for tenant-aware cache key (moved before cache check for tenant isolation)
+	var zone *domain.Zone
+	if s.Repo != nil {
+		zone, _ = s.Repo.GetZoneLongestMatch(ctx, q.Name)
+	}
+	tenantID := ""
+	zoneID := ""
+	if zone != nil {
+		tenantID = zone.TenantID
+		zoneID = zone.ID
+	}
+	cacheKey := fmt.Sprintf("%s:%s:%s:%d", tenantID, zoneID, strings.ToLower(q.Name), q.QType)
 
 	// Cache check (L1 + L2)
 	if cached := s.checkCache(ctx, request, cacheKey, clientIP, qTypeLabel, protocol, sendFn); cached != nil {
@@ -971,9 +986,6 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 	if s.Repo == nil {
 		return s.sendServFail(response, sendFn, qTypeLabel, protocol)
 	}
-
-	// Zone lookup
-	zone, _ := s.Repo.GetZoneLongestMatch(ctx, q.Name)
 
 	// Record resolution + wildcard
 	records, errRepo := s.Repo.GetRecords(ctx, q.Name, queryTypeToRecordType(q.QType), clientIP)
@@ -1575,7 +1587,8 @@ func (s *Server) handleUpdate(ctx context.Context, request *packet.DNSPacket, ra
 	if len(changes) > 0 {
 		// Apply everything in a single transaction
 		// Repository fetches current SOA serial inside the tx and increments atomically
-		newSerial, errApply := s.Repo.ApplyZoneUpdate(ctx, dbZone.ID, operations, changes)
+		// TODO: handleUpdate needs tenant context from TSIG key mapping for proper authorization
+		newSerial, errApply := s.Repo.ApplyZoneUpdate(ctx, dbZone.ID, dbZone.TenantID, operations, changes)
 		if errApply != nil {
 			s.Logger.Error("atomic update failed", "zone", dbZone.Name, "error", errApply)
 			response.Header.ResCode = packet.RcodeServFail
@@ -1622,20 +1635,23 @@ func (s *Server) handleIXFR(ctx context.Context, conn net.Conn, request *packet.
 		q.Name += "."
 	}
 
-	// Validate TSIG if present
-	if request.TSIGStart != -1 && len(request.Resources) > 0 {
-		tsig := request.Resources[len(request.Resources)-1]
-		secret, ok := s.TsigKeys[tsig.Name]
-		if !ok {
-			s.Logger.Debug("IXFR failed: unknown TSIG key", "key", tsig.Name, "zone", q.Name)
-			s.sendTCPError(conn, request.Header.ID, 5) // NotAuth
-			return
-		}
-		if errVerify := request.VerifyTSIG(rawData, request.TSIGStart, secret); errVerify != nil {
-			s.Logger.Warn("IXFR failed: TSIG verification failed", "error", errVerify, "zone", q.Name)
-			s.sendTCPError(conn, request.Header.ID, 5) // NotAuth
-			return
-		}
+	// Validate TSIG - IXFR requires authentication
+	if request.TSIGStart == -1 || len(request.Resources) == 0 {
+		s.Logger.Warn("IXFR rejected: missing TSIG authentication", "zone", q.Name)
+		s.sendTCPError(conn, request.Header.ID, 5) // NotAuth
+		return
+	}
+	tsig := request.Resources[len(request.Resources)-1]
+	secret, ok := s.TsigKeys[tsig.Name]
+	if !ok {
+		s.Logger.Debug("IXFR failed: unknown TSIG key", "key", tsig.Name, "zone", q.Name)
+		s.sendTCPError(conn, request.Header.ID, 5) // NotAuth
+		return
+	}
+	if errVerify := request.VerifyTSIG(rawData, request.TSIGStart, secret); errVerify != nil {
+		s.Logger.Warn("IXFR failed: TSIG verification failed", "error", errVerify, "zone", q.Name)
+		s.sendTCPError(conn, request.Header.ID, 5) // NotAuth
+		return
 	}
 
 	// RFC 1995: The client's current SOA is in the Authority section

@@ -559,7 +559,10 @@ func TestPostgresRepository_Extra_Unit(t *testing.T) {
 		repo := NewPostgresRepository(db)
 
 		mock.ExpectBegin()
-		// First query to fetch SOA - return a valid SOA
+		// First query to verify zone ownership
+		mock.ExpectQuery("SELECT tenant_id FROM dns_zones").WillReturnRows(
+			sqlmock.NewRows([]string{"tenant_id"}).AddRow("t1"))
+		// Second query to fetch SOA - return a valid SOA
 		mock.ExpectQuery("SELECT content FROM dns_records").WillReturnRows(
 			sqlmock.NewRows([]string{"content"}).AddRow("ns1. host. 1 3600 600 604800 300"))
 		mock.ExpectExec("INSERT INTO dns_records").WillReturnResult(sqlmock.NewResult(1, 1))
@@ -576,7 +579,7 @@ func TestPostgresRepository_Extra_Unit(t *testing.T) {
 			{Action: domain.ActionDeleteSpecific, Record: domain.Record{Name: "del-spec.", Content: "c"}},
 		}
 		changes := []domain.ZoneChange{{Name: "c1"}}
-		newSerial, err := repo.ApplyZoneUpdate(ctx, "z1", ops, changes)
+		newSerial, err := repo.ApplyZoneUpdate(ctx, "z1", "t1", ops, changes)
 		if err != nil { t.Errorf("ApplyZoneUpdate failed: %v", err) }
 		if newSerial != 2 { t.Errorf("Expected newSerial 2, got %d", newSerial) }
 
@@ -592,7 +595,7 @@ func TestPostgresRepository_Extra_Unit(t *testing.T) {
 
 		t.Run("BeginError", func(t *testing.T) {
 			mock.ExpectBegin().WillReturnError(errors.New("begin fail"))
-			_, err := repo.ApplyZoneUpdate(ctx, "z1", nil, nil)
+			_, err := repo.ApplyZoneUpdate(ctx, "z1", "t1", nil, nil)
 			if err == nil { t.Error("expected error") }
 		})
 
@@ -601,7 +604,7 @@ func TestPostgresRepository_Extra_Unit(t *testing.T) {
 			mock.ExpectQuery("SELECT content FROM dns_records").WillReturnError(sql.ErrNoRows)
 			mock.ExpectExec("DELETE FROM dns_records").WillReturnError(errors.New("delete fail"))
 			mock.ExpectRollback()
-			_, err := repo.ApplyZoneUpdate(ctx, "z1", []domain.UpdateOperation{{Action: domain.ActionDeleteAll, Record: domain.Record{Name: "test"}}}, nil)
+			_, err := repo.ApplyZoneUpdate(ctx, "z1", "t1", []domain.UpdateOperation{{Action: domain.ActionDeleteAll, Record: domain.Record{Name: "test"}}}, nil)
 			if err == nil { t.Error("expected error") }
 		})
 
@@ -609,7 +612,7 @@ func TestPostgresRepository_Extra_Unit(t *testing.T) {
 			mock.ExpectBegin()
 			mock.ExpectQuery("SELECT content FROM dns_records").WillReturnError(sql.ErrNoRows)
 			mock.ExpectCommit().WillReturnError(errors.New("commit fail"))
-			_, err := repo.ApplyZoneUpdate(ctx, "z1", nil, nil)
+			_, err := repo.ApplyZoneUpdate(ctx, "z1", "t1", nil, nil)
 			if err == nil { t.Error("expected error") }
 		})
 	})

@@ -471,7 +471,7 @@ func (m *mockServerRepo) RecordZoneChange(ctx context.Context, change *domain.Zo
 	return nil
 }
 
-func (m *mockServerRepo) ApplyZoneUpdate(ctx context.Context, zoneID string, operations []domain.UpdateOperation, changes []domain.ZoneChange) (uint32, error) {
+func (m *mockServerRepo) ApplyZoneUpdate(ctx context.Context, zoneID string, tenantID string, operations []domain.UpdateOperation, changes []domain.ZoneChange) (uint32, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
