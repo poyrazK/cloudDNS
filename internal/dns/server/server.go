@@ -335,16 +335,37 @@ func (s *Server) startInvalidationListener(ctx context.Context, done <-chan stru
 			s.Logger.Info("stopping global cache invalidation listener")
 			return
 		case msg := <-ch:
-			// msg.Payload format is "name:type" for record-level, or just "name" for zone-level
+			// msg.Payload format is "tenant_id:name:type" for record-level
+			// or "tenant_id:name" for zone-level (NEW format with tenant_id)
+			// Legacy format without tenant_id: "name:type" or just "name"
 			s.Logger.Debug("received cache invalidation event", "key", msg.Payload)
 
-			// Zone-level invalidation: flush entire L1 cache
-			if !strings.Contains(msg.Payload, ":") {
-				s.Logger.Debug("zone-level cache invalidation, flushing L1", "zone", msg.Payload)
+			// Split into up to 3 parts: tenant_id:name:type
+			parts := strings.SplitN(msg.Payload, ":", 3)
+
+			// Determine if this is a zone-level or record-level invalidation
+			if len(parts) == 1 || (len(parts) == 2 && parts[1] == "") {
+				// Zone-level invalidation: "tenant_id:name" or legacy "name"
+				var tenantID, zoneName string
+				if len(parts) == 2 {
+					tenantID, zoneName = parts[0], parts[1]
+				} else {
+					// Legacy format - do zone lookup
+					zoneName = msg.Payload
+					if s.Repo != nil {
+						if zone, err := s.Repo.GetZoneLongestMatch(ctx, zoneName); err == nil && zone != nil {
+							tenantID = zone.TenantID
+						}
+					}
+				}
+				s.Logger.Debug("zone-level cache invalidation, flushing L1", "zone", zoneName, "tenant", tenantID)
 				s.Cache.Flush()
-				// Also delete from Redis for this zone
 				if s.Redis != nil {
-					_ = s.Redis.client.Del(ctx, "dns:"+msg.Payload+":").Err()
+					if tenantID != "" {
+						_ = s.Redis.client.Del(ctx, "dns:"+tenantID+":"+zoneName+":").Err()
+					} else {
+						_ = s.Redis.client.Del(ctx, "dns:"+zoneName+":").Err()
+					}
 				}
 				continue
 			}
@@ -353,7 +374,7 @@ func (s *Server) startInvalidationListener(ctx context.Context, done <-chan stru
 			// Standardize key for L1 cache lookup (lowercase name)
 			// New format: tenant_id:name:type (3 parts)
 			// Legacy format: name:type (2 parts)
-			parts := strings.SplitN(msg.Payload, ":", 3)
+			parts = strings.SplitN(msg.Payload, ":", 3)
 			var nameLower, tenantID string
 			var qType int
 
@@ -389,7 +410,6 @@ func (s *Server) startInvalidationListener(ctx context.Context, done <-chan stru
 					continue
 				}
 				s.Cache.Invalidate(l1Key)
-				// Also delete from Redis with tenant-aware key
 				if s.Redis != nil {
 					_ = s.Redis.client.Del(ctx, "dns:"+l1Key).Err()
 				}
@@ -478,8 +498,6 @@ func (s *Server) dlqRetryWorker(ctx context.Context, done <-chan struct{}) {
 			s.Cache.Invalidate(l1Key)
 			s.Logger.Debug("DLQ message processed successfully", "key", l1Key)
 		} else {
-			// Cache still nil, log and drop (malformed messages from startInvalidationListener
-			// are already dropped there; if we get here with nil cache, something is wrong)
 			s.Logger.Warn("cache still nil, dropping DLQ message", "key", l1Key)
 		}
 	}
