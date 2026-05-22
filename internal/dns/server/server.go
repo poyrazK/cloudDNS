@@ -790,6 +790,12 @@ func (s *Server) handleAXFR(ctx context.Context, conn net.Conn, request *packet.
 	// Validate TSIG if present
 	if request.TSIGStart != -1 && len(request.Resources) > 0 {
 		tsig := request.Resources[len(request.Resources)-1]
+		// Validate TSIG key name (issue #261)
+		if err := domain.ValidateTSIGName(tsig.Name); err != nil {
+			s.Logger.Debug("AXFR failed: invalid TSIG key name", "key", tsig.Name, "error", err)
+			s.sendTCPError(conn, request.Header.ID, 5) // NotAuth
+			return
+		}
 		secret, ok := s.TsigKeys[tsig.Name]
 		if !ok {
 			s.Logger.Debug("AXFR failed: unknown TSIG key", "key", tsig.Name, "zone", q.Name)
@@ -1641,6 +1647,12 @@ func (s *Server) handleUpdate(ctx context.Context, request *packet.DNSPacket, ra
 	// 1. Validate TSIG if present
 	if request.TSIGStart != -1 && len(request.Resources) > 0 {
 		tsig := request.Resources[len(request.Resources)-1]
+		// Validate TSIG key name (issue #261)
+		if err := domain.ValidateTSIGName(tsig.Name); err != nil {
+			s.Logger.Debug("update failed: invalid TSIG key name", "key", tsig.Name, "error", err)
+			response.Header.ResCode = packet.RcodeNotAuth
+			return s.sendUpdateResponse(response, sendFn)
+		}
 		secret, ok := s.TsigKeys[tsig.Name]
 		if !ok {
 			s.Logger.Debug("update failed: unknown TSIG key", "key", tsig.Name)
@@ -1757,6 +1769,12 @@ func (s *Server) handleIXFR(ctx context.Context, conn net.Conn, request *packet.
 	// Validate TSIG if present
 	if request.TSIGStart != -1 && len(request.Resources) > 0 {
 		tsig := request.Resources[len(request.Resources)-1]
+		// Validate TSIG key name (issue #261)
+		if err := domain.ValidateTSIGName(tsig.Name); err != nil {
+			s.Logger.Debug("IXFR failed: invalid TSIG key name", "key", tsig.Name, "error", err)
+			s.sendTCPError(conn, request.Header.ID, 5) // NotAuth
+			return
+		}
 		secret, ok := s.TsigKeys[tsig.Name]
 		if !ok {
 			s.Logger.Debug("IXFR failed: unknown TSIG key", "key", tsig.Name, "zone", q.Name)

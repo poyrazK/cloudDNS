@@ -30,6 +30,32 @@ func TestValidateZoneName(t *testing.T) {
 	}
 }
 
+func TestValidateTSIGName(t *testing.T) {
+	tests := []struct {
+		name    string
+		wantErr bool
+	}{
+		{"example.com.", false},
+		{"tsig-key", false},
+		{"a.b.c", false},
+		{"", true},
+		{"toolonglabel-" + string(make([]byte, 50)) + ".com.", true},
+		{"invalid\x00char.com.", true},
+		{"../traversal.com.", true},
+		{"/slash.com.", true},
+		{"-start.com.", true},
+		{"end-.com.", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := ValidateTSIGName(tt.name); (err != nil) != tt.wantErr {
+				t.Errorf("ValidateTSIGName(%q) error = %v, wantErr %v", tt.name, err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestValidateRecord(t *testing.T) {
 	tests := []struct {
 		name    string

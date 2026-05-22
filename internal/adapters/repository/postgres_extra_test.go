@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/google/uuid"
@@ -145,5 +146,63 @@ func TestConvertPacketRecordToDomain_Extra(t *testing.T) {
 	_, err = ConvertPacketRecordToDomain(packet.DNSRecord{Type: 999}, zoneID)
 	if err == nil {
 		t.Errorf("Expected error for unsupported type 999")
+	}
+}
+
+// TestGetZoneLongestMatch_LIKEWildcardEscaping verifies that LIKE wildcards in
+// the query name are properly escaped to prevent pattern injection (issue #257).
+func TestGetZoneLongestMatch_LIKEWildcardEscaping(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("failed to create sqlmock: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	repo := NewPostgresRepository(db)
+	ctx := context.Background()
+
+	now := time.Now()
+
+	// Query name with LIKE wildcards - should be escaped before use in query
+	qName := "test%.example.com"
+	rows := sqlmock.NewRows([]string{"id", "tenant_id", "name", "vpc_id", "description", "role", "master_server", "created_at", "updated_at"}).
+		AddRow("z1", "t1", "test.example.com.", nil, "", "master", nil, now, now)
+	// The escaped name should be passed, not the raw one with wildcards
+	mock.ExpectQuery("SELECT .* FROM dns_zones").WithArgs("test\\%.example.com").WillReturnRows(rows)
+
+	zone, err := repo.GetZoneLongestMatch(ctx, qName)
+	if err != nil {
+		t.Fatalf("GetZoneLongestMatch failed: %v", err)
+	}
+	if zone == nil || zone.Name != "test.example.com." {
+		t.Errorf("unexpected zone: %v", zone)
+	}
+
+	// Also test underscore wildcard
+	qName2 := "test_.example.com"
+	rows2 := sqlmock.NewRows([]string{"id", "tenant_id", "name", "vpc_id", "description", "role", "master_server", "created_at", "updated_at"}).
+		AddRow("z1", "t1", "testa.example.com.", nil, "", "master", nil, now, now)
+	mock.ExpectQuery("SELECT .* FROM dns_zones").WithArgs("test\\_.example.com").WillReturnRows(rows2)
+
+	zone2, err := repo.GetZoneLongestMatch(ctx, qName2)
+	if err != nil {
+		t.Fatalf("GetZoneLongestMatch failed: %v", err)
+	}
+	if zone2 == nil || zone2.Name != "testa.example.com." {
+		t.Errorf("unexpected zone: %v", zone2)
+	}
+
+	// Also test backslash escaping
+	qName3 := "test\\example.com"
+	rows3 := sqlmock.NewRows([]string{"id", "tenant_id", "name", "vpc_id", "description", "role", "master_server", "created_at", "updated_at"}).
+		AddRow("z1", "t1", "test\\example.com.", nil, "", "master", nil, now, now)
+	mock.ExpectQuery("SELECT .* FROM dns_zones").WithArgs("test\\\\example.com").WillReturnRows(rows3)
+
+	zone3, err := repo.GetZoneLongestMatch(ctx, qName3)
+	if err != nil {
+		t.Fatalf("GetZoneLongestMatch failed: %v", err)
+	}
+	if zone3 == nil || zone3.Name != "test\\example.com." {
+		t.Errorf("unexpected zone: %v", zone3)
 	}
 }
