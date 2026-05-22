@@ -1227,8 +1227,8 @@ func TestHandleAXFR_TSIGUnknownKey(t *testing.T) {
 		},
 	}
 	srv := NewServer(":0", repo, nil)
-	srv.TsigKeys = map[string][]byte{
-		"real-key.": []byte("secret"),
+	srv.TsigKeys = map[string]TsigKey{
+		"real-key.": {Secret: []byte("secret"), TenantID: ""},
 	}
 
 	req := packet.NewDNSPacket()
@@ -1263,8 +1263,8 @@ func TestHandleAXFR_TSIGVerifyFailed(t *testing.T) {
 		},
 	}
 	srv := NewServer(":0", repo, nil)
-	srv.TsigKeys = map[string][]byte{
-		"real-key.": []byte("secret"),
+	srv.TsigKeys = map[string]TsigKey{
+		"real-key.": {Secret: []byte("secret"), TenantID: ""},
 	}
 
 	req := packet.NewDNSPacket()
@@ -1339,8 +1339,8 @@ func TestHandleIXFR_TSIGUnknownKey(t *testing.T) {
 		},
 	}
 	srv := NewServer(":0", repo, nil)
-	srv.TsigKeys = map[string][]byte{
-		"real-key.": []byte("secret"),
+	srv.TsigKeys = map[string]TsigKey{
+		"real-key.": {Secret: []byte("secret"), TenantID: ""},
 	}
 
 	req := packet.NewDNSPacket()
@@ -1380,8 +1380,8 @@ func TestHandleIXFR_TSIGVerifyFailed(t *testing.T) {
 		},
 	}
 	srv := NewServer(":0", repo, nil)
-	srv.TsigKeys = map[string][]byte{
-		"real-key.": []byte("secret"),
+	srv.TsigKeys = map[string]TsigKey{
+		"real-key.": {Secret: []byte("secret"), TenantID: ""},
 	}
 
 	req := packet.NewDNSPacket()

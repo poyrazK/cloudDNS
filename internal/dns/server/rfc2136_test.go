@@ -266,7 +266,9 @@ func TestHandleUpdateTSIG(t *testing.T) {
 		},
 	}
 	srv := NewServer("127.0.0.1:0", repo, nil)
-	srv.TsigKeys["testkey."] = []byte("secret123")
+	srv.TsigKeys = map[string]TsigKey{
+		"testkey.": {Secret: []byte("secret123"), TenantID: ""},
+	}
 
 	req := packet.NewDNSPacket()
 	req.Header.Opcode = packet.OpcodeUpdate
@@ -325,7 +327,7 @@ func TestHandleUpdate_ErrorCases(t *testing.T) {
 		zones: []domain.Zone{{ID: "z1", Name: "error.test."}},
 	}
 	srv := NewServer("127.0.0.1:0", repo, nil)
-	srv.TsigKeys["key1"] = []byte("secret")
+	srv.TsigKeys["key1"] = TsigKey{Secret: []byte("secret"), TenantID: ""}
 
 	// 1. Invalid ZOCOUNT != 1
 	req := packet.NewDNSPacket()
