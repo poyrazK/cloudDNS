@@ -805,40 +805,25 @@ func (s *Server) handleAXFR(ctx context.Context, conn net.Conn, request *packet.
 	}
 
 	// Lookup zone (needed regardless of TSIG for AXFR streaming)
-	var zone *domain.Zone
-	var err error
+	zone, err := s.Repo.GetZone(ctx, q.Name)
+	if err != nil {
+		s.Logger.Error("AXFR failed to look up zone", "zone", q.Name, "error", err)
+		s.sendTCPError(conn, request.Header.ID, 2) // SERVFAIL
+		return
+	}
+	if zone == nil {
+		s.Logger.Warn("AXFR requested for non-existent zone", "name", q.Name)
+		s.sendTCPError(conn, request.Header.ID, 3) // NXDOMAIN
+		return
+	}
+
+	// Issue #256: tenant authorization check for TSIG-authenticated requests
 	if request.TSIGStart != -1 && len(request.Resources) > 0 {
 		tsig := request.Resources[len(request.Resources)-1]
 		key := s.TsigKeys[tsig.Name]
-
-		zone, err = s.Repo.GetZone(ctx, q.Name)
-		if err != nil {
-			s.Logger.Error("AXFR failed to look up zone", "zone", q.Name, "error", err)
-			s.sendTCPError(conn, request.Header.ID, 2) // SERVFAIL
-			return
-		}
-		if zone == nil {
-			s.Logger.Warn("AXFR requested for non-existent zone", "name", q.Name)
-			s.sendTCPError(conn, request.Header.ID, 3) // NXDOMAIN
-			return
-		}
-
-		// Issue #256: tenant authorization check
 		if key.TenantID != "" && key.TenantID != zone.TenantID {
 			s.Logger.Warn("AXFR rejected: tenant mismatch", "key", tsig.Name, "zone", q.Name, "zone_tenant", zone.TenantID, "key_tenant", key.TenantID)
 			s.sendTCPError(conn, request.Header.ID, 5) // NotAuth
-			return
-		}
-	} else {
-		zone, err = s.Repo.GetZone(ctx, q.Name)
-		if err != nil {
-			s.Logger.Error("AXFR failed to look up zone", "zone", q.Name, "error", err)
-			s.sendTCPError(conn, request.Header.ID, 2) // SERVFAIL
-			return
-		}
-		if zone == nil {
-			s.Logger.Warn("AXFR requested for non-existent zone", "name", q.Name)
-			s.sendTCPError(conn, request.Header.ID, 3) // NXDOMAIN
 			return
 		}
 	}
@@ -1825,30 +1810,20 @@ func (s *Server) handleIXFR(ctx context.Context, conn net.Conn, request *packet.
 	clientSerial := clientSOA.Serial
 
 	// Lookup zone (needed regardless of TSIG for IXFR)
-	var zone *domain.Zone
-	var err error
+	zone, err := s.Repo.GetZone(ctx, q.Name)
+	if err != nil || zone == nil {
+		s.Logger.Warn("IXFR requested for non-existent zone", "name", q.Name, "error", err)
+		s.sendTCPError(conn, request.Header.ID, 3) // NXDOMAIN
+		return
+	}
+
+	// Issue #259: tenant authorization check for TSIG-authenticated requests
 	if request.TSIGStart != -1 && len(request.Resources) > 0 {
 		tsig := request.Resources[len(request.Resources)-1]
 		key := s.TsigKeys[tsig.Name]
-
-		zone, err = s.Repo.GetZone(ctx, q.Name)
-		if err != nil || zone == nil {
-			s.Logger.Warn("IXFR requested for non-existent zone", "name", q.Name, "error", err)
-			s.sendTCPError(conn, request.Header.ID, 3) // NXDOMAIN
-			return
-		}
-
-		// Issue #259: tenant authorization check
 		if key.TenantID != "" && key.TenantID != zone.TenantID {
 			s.Logger.Warn("IXFR rejected: tenant mismatch", "key", tsig.Name, "zone", q.Name, "zone_tenant", zone.TenantID, "key_tenant", key.TenantID)
 			s.sendTCPError(conn, request.Header.ID, 5) // NotAuth
-			return
-		}
-	} else {
-		zone, err = s.Repo.GetZone(ctx, q.Name)
-		if err != nil || zone == nil {
-			s.Logger.Warn("IXFR requested for non-existent zone", "name", q.Name, "error", err)
-			s.sendTCPError(conn, request.Header.ID, 3) // NXDOMAIN
 			return
 		}
 	}

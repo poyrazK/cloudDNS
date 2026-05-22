@@ -1295,6 +1295,42 @@ func TestHandleAXFR_TSIGVerifyFailed(t *testing.T) {
 	}
 }
 
+func TestHandleAXFR_TenantMismatch(t *testing.T) {
+	repo := &mockServerRepo{
+		zones: []domain.Zone{{ID: "z1", Name: "tsig.test.", TenantID: "tenant-a"}},
+		records: []domain.Record{
+			{ZoneID: "z1", Name: "tsig.test.", Type: domain.TypeSOA, Content: "ns1. ns2. 1 2 3 4 5"},
+		},
+	}
+	srv := NewServer(":0", repo, nil)
+	srv.TsigKeys = map[string]TsigKey{
+		"real-key.": {Secret: []byte("secret"), TenantID: "tenant-b"}, // different tenant
+	}
+
+	req := packet.NewDNSPacket()
+	req.Header.ID = 1234
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "tsig.test.", QType: packet.AXFR})
+
+	buf := packet.NewBytePacketBuffer()
+	_ = req.Write(buf)
+	_ = req.SignTSIG(buf, "real-key.", []byte("secret"))
+
+	conn := &mockTCPConn{}
+	srv.handleAXFR(context.Background(), conn, req, buf.Buf[:buf.Position()], nil)
+
+	if len(conn.captured) != 1 {
+		t.Fatalf("Expected 1 response, got %d", len(conn.captured))
+	}
+
+	res := packet.NewDNSPacket()
+	pb := packet.NewBytePacketBuffer()
+	pb.Load(conn.captured[0])
+	_ = res.FromBuffer(pb)
+	if res.Header.ResCode != packet.RcodeRefused {
+		t.Errorf("Expected Refused (5), got %d", res.Header.ResCode)
+	}
+}
+
 func TestServer_Run_NonBlockingOnTCPDoTFailure(t *testing.T) {
 	t.Setenv("DOH_PORT", "10443")
 	// Bind to a port first to force TCP error in Run
