@@ -8,6 +8,7 @@ import (
 	"crypto/rsa"
 	"crypto/sha1" // #nosec G505 -- SHA-1 required for DNSSEC DS records (RFC 4034)
 	"crypto/sha256"
+	"crypto/sha512"
 	"strings"
 
 	"github.com/cloudflare/circl/sign/ed448"
@@ -17,6 +18,7 @@ import (
 const (
 	AlgorithmRSASHA256 uint8 = 8
 	AlgorithmECDSAP256 uint8 = 13
+	AlgorithmECDSAP384 uint8 = 14
 	AlgorithmED25519   uint8 = 15
 	AlgorithmED448     uint8 = 16
 )
@@ -114,7 +116,7 @@ func (r *DNSRecord) ComputeDS(digestType uint8) (DNSRecord, error) {
 }
 
 // SignRRSet generates an RRSIG for a set of records.
-// Supports ECDSA P-256 (Algorithm 13), RSA SHA-256 (Algorithm 8), Ed25519 (Algorithm 15), and Ed448 (Algorithm 16).
+// Supports ECDSA P-256 (13), ECDSA P-384 (14), RSA SHA-256 (8), Ed25519 (15), and Ed448 (16).
 func SignRRSet(records []DNSRecord, privKey any, algorithm uint8, signerName string, keyTag uint16, inception, expiration uint32) (DNSRecord, error) {
 	if len(records) == 0 {
 		return DNSRecord{}, nil
@@ -183,18 +185,15 @@ func SignRRSet(records []DNSRecord, privKey any, algorithm uint8, signerName str
 		}
 	}
 
-	hashed := crypto.SHA256.New()
-	hashed.Write(buf.Buf[:buf.Position()])
-	h := hashed.Sum(nil)
-
 	var sigData []byte
 	switch algorithm {
 	case AlgorithmECDSAP256:
+		hashed := sha256.Sum256(buf.Buf[:buf.Position()])
 		ecdsaPriv, ok := privKey.(*ecdsa.PrivateKey)
 		if !ok {
 			return DNSRecord{}, ErrInvalidSignature
 		}
-		rb, sb, err := ecdsa.Sign(rand.Reader, ecdsaPriv, h)
+		rb, sb, err := ecdsa.Sign(rand.Reader, ecdsaPriv, hashed[:])
 		if err != nil {
 			return DNSRecord{}, err
 		}
@@ -204,30 +203,49 @@ func SignRRSet(records []DNSRecord, privKey any, algorithm uint8, signerName str
 		copy(sigData[0:32], rBytes)
 		copy(sigData[32:64], sBytes)
 
+	case AlgorithmECDSAP384:
+		hashed := sha512.Sum384(buf.Buf[:buf.Position()])
+		ecdsaPriv, ok := privKey.(*ecdsa.PrivateKey)
+		if !ok {
+			return DNSRecord{}, ErrInvalidSignature
+		}
+		rb, sb, err := ecdsa.Sign(rand.Reader, ecdsaPriv, hashed[:])
+		if err != nil {
+			return DNSRecord{}, err
+		}
+		rBytes := rb.FillBytes(make([]byte, 48))
+		sBytes := sb.FillBytes(make([]byte, 48))
+		sigData = make([]byte, 96)
+		copy(sigData[0:48], rBytes)
+		copy(sigData[48:96], sBytes)
+
 	case AlgorithmRSASHA256:
+		hashed := sha256.Sum256(buf.Buf[:buf.Position()])
 		rsaPriv, ok := privKey.(*rsa.PrivateKey)
 		if !ok {
 			return DNSRecord{}, ErrInvalidSignature
 		}
 		var err error
-		sigData, err = rsa.SignPKCS1v15(rand.Reader, rsaPriv, crypto.SHA256, h)
+		sigData, err = rsa.SignPKCS1v15(rand.Reader, rsaPriv, crypto.SHA256, hashed[:])
 		if err != nil {
 			return DNSRecord{}, err
 		}
 
 	case AlgorithmED25519:
+		hashed := sha256.Sum256(buf.Buf[:buf.Position()])
 		ed25519Priv, ok := privKey.([ed25519.PrivateKeySize]byte)
 		if !ok {
 			return DNSRecord{}, ErrInvalidSignature
 		}
-		sigData = ed25519.Sign(ed25519Priv[:], buf.Buf[:buf.Position()])
+		sigData = ed25519.Sign(ed25519Priv[:], hashed[:])
 
 	case AlgorithmED448:
+		hashed := sha512.Sum384(buf.Buf[:buf.Position()])
 		ed448Priv, ok := privKey.(ed448.PrivateKey)
 		if !ok {
 			return DNSRecord{}, ErrInvalidSignature
 		}
-		sigData = ed448.Sign(ed448Priv, buf.Buf[:buf.Position()], "")
+		sigData = ed448.Sign(ed448Priv, hashed[:], "")
 
 	default:
 		return DNSRecord{}, ErrUnsupportedAlgorithm

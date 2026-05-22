@@ -1126,6 +1126,16 @@ func encodeECDSAPublicKey(pub *ecdsa.PublicKey) []byte {
 	return result
 }
 
+func encodeECDSAP384PublicKey(pub *ecdsa.PublicKey) []byte {
+	// X || Y format per RFC 6605 (96 bytes total for P-384)
+	result := make([]byte, 96)
+	xBytes := pub.X.FillBytes(make([]byte, 48))
+	yBytes := pub.Y.FillBytes(make([]byte, 48))
+	copy(result[0:48], xBytes)
+	copy(result[48:96], yBytes)
+	return result
+}
+
 // containsLowercase checks if a string contains lowercase letters.
 func containsLowercase(s string) bool {
 	for _, c := range s {
@@ -1425,13 +1435,13 @@ func TestVerifyRRSet_UnsupportedAlgorithm(t *testing.T) {
 	privKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	pubKeyBytes := encodeECDSAPublicKey(&privKey.PublicKey)
 
-	// Build DNSKEY with unsupported algorithm 14 from the start so ComputeKeyTag uses it.
+	// Build DNSKEY with unsupported algorithm 17 from the start so ComputeKeyTag uses it.
 	dnskey := DNSRecord{
 		Name:      "example.com.",
 		Type:      DNSKEY,
 		Flags:     256,
 		Protocol:  3,
-		Algorithm: 14, // ECDSAP384 - unsupported
+		Algorithm: 17, // Reserved/unassigned algorithm - unsupported
 		PublicKey: pubKeyBytes,
 	}
 
@@ -1440,11 +1450,11 @@ func TestVerifyRRSet_UnsupportedAlgorithm(t *testing.T) {
 	}
 
 	now := uint32(time.Now().Unix())
-	// Build RRSIG manually with matching key tag and algorithm 14 so all pre-checks pass.
+	// Build RRSIG manually with matching key tag and algorithm 17 so all pre-checks pass.
 	rrsig := DNSRecord{
 		Type:        RRSIG,
 		TypeCovered: uint16(A),
-		Algorithm:   14,
+		Algorithm:   17,
 		Labels:      3,
 		OrigTTL:     300,
 		Expiration:  now + 86400,
@@ -2083,5 +2093,84 @@ func TestValidateDNSKEYFormat_ED448_WrongSize(t *testing.T) {
 	_, err := ValidateDNSKEYFormat(dnskey)
 	if err == nil {
 		t.Error("Expected error for wrong-sized Ed448 key")
+	}
+}
+
+// TestSignAndVerify_ECDSA_P384 tests sign and verify round-trip using ECDSA P-384 (Algorithm 14).
+func TestSignAndVerify_ECDSA_P384(t *testing.T) {
+	privKey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	if err != nil {
+		t.Fatalf("ecdsa.GenerateKey(P-384) failed: %v", err)
+	}
+
+	dnskey := DNSRecord{
+		Name:      "example.com.",
+		Type:      DNSKEY,
+		Flags:     256,
+		Protocol:  3,
+		Algorithm: AlgorithmECDSAP384,
+		PublicKey: encodeECDSAP384PublicKey(&privKey.PublicKey),
+	}
+
+	rrset := []DNSRecord{
+		{Name: "www.example.com.", Type: A, Class: 1, TTL: 300, IP: []byte{1, 2, 3, 4}},
+	}
+
+	now := uint32(time.Now().Unix())
+	keyTag := dnskey.ComputeKeyTag()
+
+	sig, err := SignRRSet(rrset, privKey, AlgorithmECDSAP384, "example.com.", keyTag, now-3600, now+86400)
+	if err != nil {
+		t.Fatalf("SignRRSet (P-384) failed: %v", err)
+	}
+
+	valid, err := VerifyRRSet(rrset, sig, dnskey, now)
+	if err != nil {
+		t.Fatalf("VerifyRRSet (P-384) failed: %v", err)
+	}
+	if !valid {
+		t.Error("Expected valid P-384 signature")
+	}
+}
+
+// TestValidateDNSKEYFormat_ECDSA_P384 tests ECDSA P-384 key format validation.
+func TestValidateDNSKEYFormat_ECDSA_P384(t *testing.T) {
+	privKey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	if err != nil {
+		t.Fatalf("ecdsa.GenerateKey(P-384) failed: %v", err)
+	}
+
+	dnskey := DNSRecord{
+		Name:      "example.com.",
+		Type:      DNSKEY,
+		Flags:     257,
+		Protocol:  3,
+		Algorithm: AlgorithmECDSAP384,
+		PublicKey: encodeECDSAP384PublicKey(&privKey.PublicKey),
+	}
+
+	valid, err := ValidateDNSKEYFormat(dnskey)
+	if err != nil {
+		t.Fatalf("ValidateDNSKEYFormat returned error: %v", err)
+	}
+	if !valid {
+		t.Error("Expected valid P-384 DNSKEY to pass validation")
+	}
+}
+
+// TestValidateDNSKEYFormat_ECDSA_P384_WrongSize tests that wrong-sized P-384 keys are rejected.
+func TestValidateDNSKEYFormat_ECDSA_P384_WrongSize(t *testing.T) {
+	dnskey := DNSRecord{
+		Name:      "example.com.",
+		Type:      DNSKEY,
+		Flags:     257,
+		Protocol:  3,
+		Algorithm: AlgorithmECDSAP384,
+		PublicKey: make([]byte, 64), // Wrong size — must be 96 bytes
+	}
+
+	_, err := ValidateDNSKEYFormat(dnskey)
+	if err == nil {
+		t.Error("Expected error for wrong-sized P-384 key")
 	}
 }

@@ -5,12 +5,12 @@ Accepted
 
 ## Context
 
-cloudDNS implemented ECDSA P-256 (Algorithm 13) DNSSEC signing and validation as its initial algorithm. However, RSA SHA-256 (Algorithm 8), Ed25519 (Algorithm 15), and Ed448 (Algorithm 16) are widely deployed in production DNS infrastructure, particularly for compatibility with older resolvers and compliance requirements.
+cloudDNS implemented ECDSA P-256 (Algorithm 13) DNSSEC signing and validation as its initial algorithm. However, RSA SHA-256 (Algorithm 8), ECDSA P-384 (Algorithm 14), Ed25519 (Algorithm 15), and Ed448 (Algorithm 16) are widely deployed in production DNS infrastructure, particularly for compatibility with older resolvers and compliance requirements.
 
 Adding multi-algorithm support required changes across the entire DNSSEC stack:
 
-1. **Signing** (`SignRRSet`) - Accept algorithm parameter and switch between RSA PKCS#1 v1.5, ECDSA, Ed25519, and Ed448 signing
-2. **Verification** (`VerifyRRSet`) - Handle all four algorithms with separate key extraction paths
+1. **Signing** (`SignRRSet`) - Accept algorithm parameter and switch between RSA PKCS#1 v1.5, ECDSA P-256, ECDSA P-384, Ed25519, and Ed448 signing
+2. **Verification** (`VerifyRRSet`) - Handle all five algorithms with separate key extraction paths
 3. **Key Generation** (`GenerateKey`) - Support multiple algorithm types with appropriate key sizes
 4. **Call sites** - Update all callers of `SignRRSet` to pass the algorithm parameter
 
@@ -26,6 +26,7 @@ Added algorithm constants to `internal/dns/packet/dnssec.go`:
 const (
     AlgorithmRSASHA256 uint8 = 8
     AlgorithmECDSAP256 uint8 = 13
+    AlgorithmECDSAP384 uint8 = 14
     AlgorithmED25519   uint8 = 15
     AlgorithmED448     uint8 = 16
 )
@@ -42,6 +43,7 @@ func SignRRSet(records []DNSRecord, privKey any, algorithm uint8, signerName str
 
 The function switches on algorithm type:
 - **Algorithm 13**: Uses `ecdsa.Sign` with P-256, produces 64-byte R||S signature
+- **Algorithm 14**: Uses `ecdsa.Sign` with P-384, produces 96-byte R||S signature
 - **Algorithm 8**: Uses `rsa.SignPKCS1v15` with SHA-256
 - **Algorithm 15**: Uses `ed25519.Sign` with 32-byte seed
 - **Algorithm 16**: Uses `ed448.Sign` with 57-byte public key (via `github.com/cloudflare/circl/sign/ed448`)
@@ -50,9 +52,9 @@ The function switches on algorithm type:
 
 Added separate key extraction functions per RFC specifications:
 - `extractRSAPublicKey` - RSA public key stored as big-endian integer, E=65537
+- `extractECDSAPublicKey` - Handles both P-256 (64-byte X||Y) and P-384 (96-byte X||Y) per RFC 6605
 - `extractED25519PublicKey` - 32-byte Ed25519 public key
 - `extractED448PublicKey` - 57-byte Ed448 public key
-- `extractECDSAPublicKey` - Extended to handle both RFC 6605 (64-byte X||Y) and SEC1 uncompressed (65-byte 0x04||X||Y) formats
 
 Verification switch in `VerifyRRSet` routes to the appropriate verification function based on the RRSIG algorithm.
 
@@ -117,8 +119,8 @@ All DNSKEY records use protocol 3 (required by RFC 4034). This is enforced in `C
 ## Consequences
 
 ### Positive
-- Full compatibility with production DNS infrastructure using RSA, Ed25519, or Ed448
-- All four RFC 8624 algorithms now supported for both signing and validation
+- Full compatibility with production DNS infrastructure using RSA, ECDSA P-256, ECDSA P-384, Ed25519, or Ed448
+- All five RFC 8624 algorithms now supported for both signing and validation
 - Minimal code duplication through shared canonical wire format functions
 - Algorithm-specific code paths keep the core verification logic clean
 

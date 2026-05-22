@@ -52,7 +52,7 @@ func NewDNSSECService(repo ports.DNSRepository) *DNSSECService {
 }
 
 // GenerateKey creates a new DNSSEC key pair for a zone.
-// Supported algorithms: ECDSA P-256 (keyType contains "ecdsa"), Ed448 (keyType contains "ed448").
+// Supported algorithms: ECDSA P-256 (default), ECDSA P-384 (keyType contains "ecdsa384"), Ed448 (keyType contains "ed448").
 func (s *DNSSECService) GenerateKey(ctx context.Context, zoneID string, keyType string) (*domain.DNSSECKey, error) {
 	var algorithm uint8
 	var privBytes, pubBytes []byte
@@ -66,6 +66,20 @@ func (s *DNSSECService) GenerateKey(ctx context.Context, zoneID string, keyType 
 		}
 		privBytes = priv
 		pubBytes = pub
+	case strings.Contains(strings.ToLower(keyType), "ecdsa384"):
+		algorithm = packet.AlgorithmECDSAP384
+		priv, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate key: %w", err)
+		}
+		privBytes, err = x509.MarshalECPrivateKey(priv)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal ECDSA private key: %w", err)
+		}
+		pubBytes, err = x509.MarshalPKIXPublicKey(&priv.PublicKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal ECDSA public key: %w", err)
+		}
 	default:
 		algorithm = packet.AlgorithmECDSAP256
 		priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
