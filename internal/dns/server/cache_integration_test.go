@@ -35,9 +35,10 @@ func TestCacheInvalidation_Integration(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// 4. Prime the L1 cache
+	// Use "recursive:" prefix since no Repo is configured (no tenant context)
 	name := "example.com."
 	qtype := packet.A
-	cacheKey := fmt.Sprintf("%s:%d", name, qtype)
+	cacheKey := fmt.Sprintf("recursive:%s:%d", name, qtype)
 	data := []byte("cached-data")
 	srv.Cache.Set(cacheKey, data, 1*time.Hour)
 
@@ -46,7 +47,7 @@ func TestCacheInvalidation_Integration(t *testing.T) {
 	assert.True(t, found, "Expected key to be in L1 cache")
 
 	// 5. Trigger invalidation via Redis
-	err = srv.Redis.Invalidate(ctx, name, domain.TypeA)
+	err = srv.Redis.Invalidate(ctx, "recursive", name, domain.TypeA)
 	assert.NoError(t, err)
 
 	// 6. Wait for async invalidation to propagate

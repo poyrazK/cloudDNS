@@ -711,11 +711,15 @@ func TestHandlePacketLocalHit(t *testing.T) {
 }
 
 func TestHandlePacketCacheHit(t *testing.T) {
-	repo := &mockServerRepo{}
+	repo := &mockServerRepo{
+		zones: []domain.Zone{
+			{ID: "zone-1", TenantID: "tenant-1", Name: "test."},
+		},
+	}
 	srv := NewServer("127.0.0.1:0", repo, nil)
 
-	// Pre-populate cache
-	cacheKey := "cached.test.:1" // A record
+	// Pre-populate cache with tenant-aware key
+	cacheKey := "tenant-1:cached.test.:1" // tenant_id:name:type (A record)
 	cachedPacket := packet.NewDNSPacket()
 	cachedPacket.Header.Response = true
 	cachedPacket.Questions = append(cachedPacket.Questions, packet.DNSQuestion{Name: "cached.test.", QType: packet.A})

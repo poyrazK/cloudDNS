@@ -342,28 +342,67 @@ func (s *Server) startInvalidationListener(ctx context.Context, done <-chan stru
 			if !strings.Contains(msg.Payload, ":") {
 				s.Logger.Debug("zone-level cache invalidation, flushing L1", "zone", msg.Payload)
 				s.Cache.Flush()
+				// Also delete from Redis for this zone
+				if s.Redis != nil {
+					_ = s.Redis.client.Del(ctx, "dns:"+msg.Payload+":").Err()
+				}
 				continue
 			}
 
 			// Record-level invalidation
 			// Standardize key for L1 cache lookup (lowercase name)
-			parts := strings.SplitN(msg.Payload, ":", 2)
-			if len(parts) != 2 {
+			// New format: tenant_id:name:type (3 parts)
+			// Legacy format: name:type (2 parts)
+			parts := strings.SplitN(msg.Payload, ":", 3)
+			var nameLower, tenantID string
+			var qType int
+
+			if len(parts) == 3 {
+				// New format: tenant_id:name:type
+				tenantID = parts[0]
+				nameLower = strings.ToLower(parts[1])
+				qType = int(packet.RecordTypeToQueryType(domain.RecordType(parts[2])))
+			} else if len(parts) == 2 {
+				// Legacy format: name:type — need to look up tenant_id via zone lookup
+				nameLower = strings.ToLower(parts[0])
+				qType = int(packet.RecordTypeToQueryType(domain.RecordType(parts[1])))
+
+				if s.Repo != nil {
+					zone, err := s.Repo.GetZoneLongestMatch(ctx, parts[0])
+					if err == nil && zone != nil {
+						tenantID = zone.TenantID
+					}
+				}
+			} else {
 				s.Logger.Warn("malformed cache invalidation payload, dropping", "payload", msg.Payload)
 				continue
 			}
 
-			qType := packet.RecordTypeToQueryType(domain.RecordType(parts[1]))
-			l1Key := fmt.Sprintf("%s:%d", strings.ToLower(parts[0]), qType)
-			if s.Cache == nil {
-				s.Logger.Warn("cache is nil, pushing to DLQ", "key", l1Key)
-				if errDLQ := s.Redis.PushToDLQ(ctx, msg.Payload); errDLQ != nil {
-					s.Logger.Error("failed to push nil-cache message to DLQ", "error", errDLQ)
+			if tenantID != "" {
+				// Build tenant-aware cache key
+				l1Key := fmt.Sprintf("%s:%s:%d", tenantID, nameLower, qType)
+				if s.Cache == nil {
+					s.Logger.Warn("cache is nil, pushing to DLQ", "key", l1Key)
+					if errDLQ := s.Redis.PushToDLQ(ctx, msg.Payload); errDLQ != nil {
+						s.Logger.Error("failed to push nil-cache message to DLQ", "error", errDLQ)
+					}
+					continue
 				}
-				continue
+				s.Cache.Invalidate(l1Key)
+				// Also delete from Redis with tenant-aware key
+				if s.Redis != nil {
+					_ = s.Redis.client.Del(ctx, "dns:"+l1Key).Err()
+				}
+			} else {
+				// No tenant (recursive query cache) — use recursive prefix
+				l1Key := fmt.Sprintf("recursive:%s:%d", nameLower, qType)
+				if s.Cache != nil {
+					s.Cache.Invalidate(l1Key)
+				}
+				if s.Redis != nil {
+					_ = s.Redis.client.Del(ctx, "dns:"+l1Key).Err()
+				}
 			}
-
-			s.Cache.Invalidate(l1Key)
 		}
 	}
 }
@@ -401,14 +440,39 @@ func (s *Server) dlqRetryWorker(ctx context.Context, done <-chan struct{}) {
 		}
 
 		s.Logger.Debug("retrying DLQ message", "msg", msg)
-		parts := strings.SplitN(msg, ":", 2)
-		if len(parts) != 2 {
+		// New format: tenant_id:name:type (3 parts)
+		// Legacy format: name:type (2 parts)
+		parts := strings.SplitN(msg, ":", 3)
+		var nameLower, tenantID string
+		var qType int
+
+		if len(parts) == 3 {
+			// New format: tenant_id:name:type
+			tenantID = parts[0]
+			nameLower = strings.ToLower(parts[1])
+			qType = int(packet.RecordTypeToQueryType(domain.RecordType(parts[2])))
+		} else if len(parts) == 2 {
+			// Legacy format: name:type — need to look up tenant_id via zone lookup
+			nameLower = strings.ToLower(parts[0])
+			qType = int(packet.RecordTypeToQueryType(domain.RecordType(parts[1])))
+
+			if s.Repo != nil {
+				zone, err := s.Repo.GetZoneLongestMatch(ctx, parts[0])
+				if err == nil && zone != nil {
+					tenantID = zone.TenantID
+				}
+			}
+		} else {
 			s.Logger.Warn("DLQ message malformed, dropping", "msg", msg)
 			continue
 		}
 
-		qType := packet.RecordTypeToQueryType(domain.RecordType(parts[1]))
-		l1Key := fmt.Sprintf("%s:%d", strings.ToLower(parts[0]), qType)
+		var l1Key string
+		if tenantID != "" {
+			l1Key = fmt.Sprintf("%s:%s:%d", tenantID, nameLower, qType)
+		} else {
+			l1Key = fmt.Sprintf("recursive:%s:%d", nameLower, qType)
+		}
 
 		if s.Cache != nil {
 			s.Cache.Invalidate(l1Key)
@@ -1010,7 +1074,22 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 	if !strings.HasSuffix(q.Name, ".") {
 		q.Name += "."
 	}
-	cacheKey := lowerName + ":" + strconv.Itoa(int(q.QType))
+
+	// Zone lookup to get tenant_id for cache key (before cache check)
+	var tenantID string
+	zone, errZone := s.Repo.GetZoneLongestMatch(ctx, q.Name)
+	if errZone == nil && zone != nil {
+		tenantID = zone.TenantID
+	}
+
+	// Create tenant-aware cache key
+	var cacheKey string
+	if tenantID != "" {
+		cacheKey = tenantID + ":" + lowerName + ":" + strconv.Itoa(int(q.QType))
+	} else {
+		// Recursive or no-zone query — use special prefix
+		cacheKey = "recursive:" + lowerName + ":" + strconv.Itoa(int(q.QType))
+	}
 
 	// Cache check (L1 + L2)
 	if cached := s.checkCache(ctx, request, cacheKey, clientIP, qTypeLabel, protocol, sendFn); cached != nil {
@@ -1791,7 +1870,7 @@ func (s *Server) handleUpdate(ctx context.Context, request *packet.DNSPacket, ra
 
 		s.Cache.Flush()
 		if s.Redis != nil {
-			_ = s.Redis.Invalidate(ctx, zone.Name, "")
+			_ = s.Redis.Invalidate(ctx, dbZone.TenantID, zone.Name, "")
 		}
 		if !s.DisableAsync {
 			go s.notifySlaves(ctx, zone.Name)
@@ -1805,7 +1884,7 @@ func (s *Server) handleUpdate(ctx context.Context, request *packet.DNSPacket, ra
 	s.Logger.Info("dynamic update processed", "zone", zone.Name)
 	s.Cache.Flush()
 	if s.Redis != nil {
-		_ = s.Redis.Invalidate(ctx, zone.Name, "")
+		_ = s.Redis.Invalidate(ctx, dbZone.TenantID, zone.Name, "")
 	}
 
 	if !s.DisableAsync {

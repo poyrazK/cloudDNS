@@ -105,14 +105,15 @@ func (r *RedisCache) Ping(ctx context.Context) error {
 
 // Invalidate deletes the key from Redis and publishes an invalidation event to all nodes.
 // When qType is empty, publishes a zone-level invalidation (zone name only, no type suffix).
-func (r *RedisCache) Invalidate(ctx context.Context, name string, qType domain.RecordType) error {
-	key := "dns:" + name + ":" + string(qType)
+// Message format: tenantID:name:type for record-level, tenantID:name for zone-level.
+func (r *RedisCache) Invalidate(ctx context.Context, tenantID string, name string, qType domain.RecordType) error {
+	key := "dns:" + tenantID + ":" + name + ":" + string(qType)
 	r.client.Del(ctx, key)
 	var msg string
 	if qType == "" {
-		msg = name
+		msg = fmt.Sprintf("%s:%s", tenantID, name)
 	} else {
-		msg = fmt.Sprintf("%s:%s", name, string(qType))
+		msg = fmt.Sprintf("%s:%s:%s", tenantID, name, string(qType))
 	}
 	return r.client.Publish(ctx, InvalidationChannel, msg).Err()
 }
