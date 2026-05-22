@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -28,7 +29,7 @@ func TestCacheInvalidation_Integration(t *testing.T) {
 	defer cancel()
 
 	// 3. Start the invalidation listener in a goroutine
-	go srv.startInvalidationListener(ctx)
+	go srv.startInvalidationListener(ctx, make(chan struct{}))
 	
 	// Give it a moment to subscribe
 	time.Sleep(100 * time.Millisecond)
@@ -65,7 +66,7 @@ func TestCacheInvalidation_MalformedPayload(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go srv.startInvalidationListener(ctx)
+	go srv.startInvalidationListener(ctx, make(chan struct{}))
 	time.Sleep(100 * time.Millisecond)
 
 	// Publish malformed payload directly to channel
@@ -73,4 +74,43 @@ func TestCacheInvalidation_MalformedPayload(t *testing.T) {
 	
 	// Server should just log a warning and not crash
 	time.Sleep(100 * time.Millisecond)
+}
+
+func TestCacheInvalidation_ListenerDoneSignal(t *testing.T) {
+	mr, _ := miniredis.Run()
+	defer mr.Close()
+
+	srv := NewServer("127.0.0.1:0", nil, nil)
+	srv.Redis = NewRedisCache(mr.Addr(), "", 0, RedisPoolConfig{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		srv.startInvalidationListener(ctx, done)
+	}()
+
+	// Give it a moment to subscribe
+	time.Sleep(100 * time.Millisecond)
+
+	// Close done - should trigger exit via case <-done:
+	close(done)
+
+	// Wait for goroutine to exit
+	wgDone := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(wgDone)
+	}()
+
+	select {
+	case <-wgDone:
+		// Pass - exited via done signal
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("startInvalidationListener did not exit within 500ms after done close")
+	}
 }

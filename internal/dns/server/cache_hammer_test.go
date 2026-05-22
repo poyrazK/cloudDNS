@@ -33,7 +33,7 @@ func TestCache_ConcurrencyHammer(t *testing.T) {
 	defer cancel()
 
 	// Start invalidation listener
-	go srv.startInvalidationListener(ctx)
+	go srv.startInvalidationListener(ctx, make(chan struct{}))
 	// Give it a moment to subscribe
 	time.Sleep(100 * time.Millisecond)
 
