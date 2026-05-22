@@ -305,7 +305,7 @@ func (s *Server) updateDNSSECMetrics(ctx context.Context) {
 }
 
 // startInvalidationListener listens for cache invalidation events from Redis pub/sub.
-func (s *Server) startInvalidationListener(ctx context.Context) {
+func (s *Server) startInvalidationListener(ctx context.Context, done <-chan struct{}) {
 	pubsub := s.Redis.Subscribe(ctx)
 	defer func() {
 		if errClose := pubsub.Close(); errClose != nil {
@@ -318,6 +318,9 @@ func (s *Server) startInvalidationListener(ctx context.Context) {
 
 	for {
 		select {
+		case <-done:
+			s.Logger.Info("stopping global cache invalidation listener via done")
+			return
 		case <-ctx.Done():
 			s.Logger.Info("stopping global cache invalidation listener")
 			return
@@ -357,7 +360,7 @@ func (s *Server) startInvalidationListener(ctx context.Context) {
 
 // dlqRetryWorker processes messages from the dead letter queue with retry logic.
 // It runs until the context is canceled.
-func (s *Server) dlqRetryWorker(ctx context.Context) {
+func (s *Server) dlqRetryWorker(ctx context.Context, done <-chan struct{}) {
 	s.Logger.Info("starting DLQ retry worker")
 
 	ticker := time.NewTicker(5 * time.Second)
@@ -365,6 +368,9 @@ func (s *Server) dlqRetryWorker(ctx context.Context) {
 
 	for {
 		select {
+		case <-done:
+			s.Logger.Info("stopping DLQ retry worker via done")
+			return
 		case <-ctx.Done():
 			s.Logger.Info("stopping DLQ retry worker")
 			return
@@ -491,14 +497,14 @@ func (s *Server) Run(ctx context.Context) error {
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
-			s.startInvalidationListener(ctx)
+			s.startInvalidationListener(ctx, s.done)
 		}()
 
 		// Start DLQ retry worker
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
-			s.dlqRetryWorker(ctx)
+			s.dlqRetryWorker(ctx, s.done)
 		}()
 	}
 

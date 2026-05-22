@@ -1437,22 +1437,23 @@ func TestDLQRetryWorker_Shutdown(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Add(1)
+	done := make(chan struct{})
 	go func() {
 		defer wg.Done()
-		srv.dlqRetryWorker(ctx)
+		srv.dlqRetryWorker(ctx, done)
 	}()
 
 	// Cancel immediately — worker should exit promptly, not after 5s
 	cancel()
 
-	done := make(chan struct{})
+	wgDone := make(chan struct{})
 	go func() {
 		wg.Wait()
-		close(done)
+		close(wgDone)
 	}()
 
 	select {
-	case <-done:
+	case <-wgDone:
 		// Pass — exited promptly after context cancel
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("dlqRetryWorker did not exit within 500ms after context cancel")

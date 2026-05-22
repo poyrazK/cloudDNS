@@ -28,7 +28,7 @@ func TestCacheInvalidation_Integration(t *testing.T) {
 	defer cancel()
 
 	// 3. Start the invalidation listener in a goroutine
-	go srv.startInvalidationListener(ctx)
+	go srv.startInvalidationListener(ctx, make(chan struct{}))
 	
 	// Give it a moment to subscribe
 	time.Sleep(100 * time.Millisecond)
@@ -65,7 +65,7 @@ func TestCacheInvalidation_MalformedPayload(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go srv.startInvalidationListener(ctx)
+	go srv.startInvalidationListener(ctx, make(chan struct{}))
 	time.Sleep(100 * time.Millisecond)
 
 	// Publish malformed payload directly to channel
