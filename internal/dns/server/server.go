@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/poyrazK/cloudDNS/internal/adapters/repository"
 	"github.com/poyrazK/cloudDNS/internal/core/config"
@@ -130,6 +131,9 @@ type Server struct {
 
 	// l1TTLCap is cached at startup to avoid repeated os.Getenv calls in hot path
 	l1TTLCap time.Duration
+
+	// querySingleflight ensures only one goroutine performs DB query per cache key.
+	querySingleflight singleflight.Group
 }
 
 // inflightEntry holds state for an in-progress L2 cache fetch.
@@ -1028,33 +1032,14 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 		return s.sendServFail(response, sendFn, qTypeLabel, protocol)
 	}
 
-	// Zone lookup + record resolution — run in parallel since they query different tables
-	var (
-		zone    *domain.Zone
-		records []domain.Record
-		errRepo error
-	)
-
-	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(2)
-
-	g.Go(func() error {
-		var err error
-		zone, err = s.Repo.GetZoneLongestMatch(ctx, q.Name)
-		return err
+	// Issue #254: Use singleflight to prevent thundering herd on cache miss.
+	// Only one goroutine performs the DB query, others wait for the result.
+	queryResult, _, _ := s.querySingleflight.Do(cacheKey, func() (interface{}, error) {
+		result := s.queryDB(ctx, &q, clientIP)
+		return result, nil
 	})
-
-	g.Go(func() error {
-		var err error
-		records, err = s.Repo.GetRecords(ctx, q.Name, queryTypeToRecordType(q.QType), clientIP)
-		errRepo = err
-		return err
-	})
-
-	// errgroup returns the first non-nil error, but we intentionally allow partial
-	// results since zone lookup failure should not block record lookup (and vice versa).
-	// Both goroutines run to completion before Wait returns.
-	_ = g.Wait()
+	result := queryResult.(*queryDBResult)
+	zone, records, errRepo := result.zone, result.records, result.err
 
 	if errRepo == nil && len(records) > 0 {
 		s.appendRecordsToResponse(response, records)
@@ -1110,6 +1095,43 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 	metrics.QueriesTotal.WithLabelValues(qTypeLabel, fmt.Sprintf("%d", response.Header.ResCode), protocol).Inc()
 	s.Logger.Info("query processed", "name", q.Name, "src", source, "lat", time.Since(start).Milliseconds())
 	return sendFn(resData)
+}
+
+// queryDBResult holds the results of a DB query for use with singleflight.
+type queryDBResult struct {
+	zone    *domain.Zone
+	records []domain.Record
+	err     error
+}
+
+// queryDB performs zone and record lookups in parallel. Used by singleflight to prevent thundering herd.
+func (s *Server) queryDB(ctx context.Context, q *packet.DNSQuestion, clientIP string) *queryDBResult {
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(2)
+
+	var zone *domain.Zone
+	var records []domain.Record
+	var errRepo error
+
+	g.Go(func() error {
+		var err error
+		zone, err = s.Repo.GetZoneLongestMatch(ctx, q.Name)
+		return err
+	})
+
+	g.Go(func() error {
+		var err error
+		records, err = s.Repo.GetRecords(ctx, q.Name, queryTypeToRecordType(q.QType), clientIP)
+		errRepo = err
+		return err
+	})
+
+	// errgroup returns the first non-nil error, but we intentionally allow partial
+	// results since zone lookup failure should not block record lookup (and vice versa).
+	// Both goroutines run to completion before Wait returns.
+	_ = g.Wait()
+
+	return &queryDBResult{zone: zone, records: records, err: errRepo}
 }
 
 func rcodeLabel(err error, req *packet.DNSPacket) string {
