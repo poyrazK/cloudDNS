@@ -191,4 +191,18 @@ func TestGetZoneLongestMatch_LIKEWildcardEscaping(t *testing.T) {
 	if zone2 == nil || zone2.Name != "testa.example.com." {
 		t.Errorf("unexpected zone: %v", zone2)
 	}
+
+	// Also test backslash escaping
+	qName3 := "test\\example.com"
+	rows3 := sqlmock.NewRows([]string{"id", "tenant_id", "name", "vpc_id", "description", "role", "master_server", "created_at", "updated_at"}).
+		AddRow("z1", "t1", "test\\example.com.", nil, "", "master", nil, now, now)
+	mock.ExpectQuery("SELECT .* FROM dns_zones").WithArgs("test\\\\example.com").WillReturnRows(rows3)
+
+	zone3, err := repo.GetZoneLongestMatch(ctx, qName3)
+	if err != nil {
+		t.Fatalf("GetZoneLongestMatch failed: %v", err)
+	}
+	if zone3 == nil || zone3.Name != "test\\example.com." {
+		t.Errorf("unexpected zone: %v", zone3)
+	}
 }

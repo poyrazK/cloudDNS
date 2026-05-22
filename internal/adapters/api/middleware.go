@@ -189,6 +189,12 @@ func AuthMiddleware(repo ports.DNSRepository) func(http.Handler) http.Handler {
 				return
 			}
 
+			// Validate TenantID is non-empty (issue #260)
+			if apiKey.TenantID == "" {
+				http.Error(w, "Unauthorized: invalid tenant", http.StatusUnauthorized)
+				return
+			}
+
 			ctx := context.WithValue(r.Context(), CtxTenantID, apiKey.TenantID)
 			ctx = context.WithValue(ctx, CtxRole, apiKey.Role)
 

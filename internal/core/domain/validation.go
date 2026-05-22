@@ -41,6 +41,41 @@ func ValidateZoneName(name string) error {
 	return nil
 }
 
+// ValidateTSIGName checks if the provided TSIG key name is valid.
+// Unlike zone names, TSIG key names do not need to be FQDNs (no trailing dot).
+// Issue #261: TSIG key name from packet used directly without validation.
+func ValidateTSIGName(name string) error {
+	if name == "" {
+		return fmt.Errorf("TSIG key name cannot be empty")
+	}
+	if len(name) > 253 {
+		return fmt.Errorf("TSIG key name exceeds 253 characters")
+	}
+	// Check for null bytes
+	if strings.Contains(name, "\x00") {
+		return fmt.Errorf("TSIG key name contains null byte")
+	}
+	// Check for path traversal sequences
+	if strings.Contains(name, "..") || strings.Contains(name, "/") {
+		return fmt.Errorf("TSIG key name contains invalid path sequence")
+	}
+
+	// Validate label format
+	labels := strings.Split(name, ".")
+	for _, label := range labels {
+		if label == "" {
+			continue // Empty label at end is OK for TSIG names
+		}
+		if len(label) > 63 {
+			return fmt.Errorf("label '%s' exceeds 63 characters", label)
+		}
+		if !validLabelRegex.MatchString(label) {
+			return fmt.Errorf("label '%s' contains invalid characters", label)
+		}
+	}
+	return nil
+}
+
 // ValidateRecord performs general validation for a DNS record.
 func ValidateRecord(r *Record) error {
 	if r.Name == "" {

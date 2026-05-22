@@ -242,9 +242,10 @@ func (r *PostgresRepository) GetZone(ctx context.Context, name string) (*domain.
 // Finds the longest-matching zone for a query name using a single query.
 // This replaces the N+1 label-traversal loop with one efficient query.
 func (r *PostgresRepository) GetZoneLongestMatch(ctx context.Context, qName string) (*domain.Zone, error) {
-	// Escape LIKE wildcards to prevent pattern injection (issue #257)
-	// % and _ are LIKE meta-characters that could match unintended zones
-	escaped := strings.ReplaceAll(qName, "%", "\\%")
+	// Escape LIKE wildcards and backslashes to prevent pattern injection (issue #257)
+	// % and _ are LIKE meta-characters, and \ is the escape character itself
+	escaped := strings.ReplaceAll(qName, "\\", "\\\\")
+	escaped = strings.ReplaceAll(escaped, "%", "\\%")
 	escaped = strings.ReplaceAll(escaped, "_", "\\_")
 
 	query := `SELECT id, tenant_id, name, vpc_id, description, role, master_server, created_at, updated_at
