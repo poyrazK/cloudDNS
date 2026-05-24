@@ -1499,3 +1499,163 @@ func TestDLQRetryWorker_Shutdown(t *testing.T) {
 		t.Fatal("dlqRetryWorker did not exit within 500ms after context cancel")
 	}
 }
+
+func TestDLQRetryWorker_MalformedMessage(t *testing.T) {
+	mr, _ := miniredis.Run()
+	defer mr.Close()
+
+	redisCache := NewRedisCache(mr.Addr(), "", 0, RedisPoolConfig{})
+	defer redisCache.Close()
+
+	srv := &Server{
+		Redis:  redisCache,
+		Logger: slog.Default(),
+		Cache:  NewDNSCache(make(chan struct{}), nil),
+	}
+
+	// Push malformed messages (0 parts, 1 part, 4+ parts)
+	redisCache.PushToDLQ(context.Background(), "no-colons-at-all")
+	redisCache.PushToDLQ(context.Background(), "")
+	redisCache.PushToDLQ(context.Background(), "a:b:c:d") // 4 parts
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	_ = cancel // Timeout is for worker exit, not explicit cancellation
+	done := make(chan struct{})
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		srv.dlqRetryWorker(ctx, done)
+	}()
+
+	select {
+	case <-ctx.Done():
+		// Expected - worker processed messages and exited when context timed out
+	case <-time.After(1 * time.Second):
+		t.Fatal("Worker did not exit within expected time")
+	}
+	wg.Wait()
+}
+
+func TestDLQRetryWorker_DoneSignal(t *testing.T) {
+	mr, _ := miniredis.Run()
+	defer mr.Close()
+
+	redisCache := NewRedisCache(mr.Addr(), "", 0, RedisPoolConfig{})
+	defer redisCache.Close()
+
+	srv := &Server{
+		Redis:  redisCache,
+		Logger: slog.Default(),
+		Cache:  NewDNSCache(make(chan struct{}), nil),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	_ = cancel // Signal is via done channel, not context cancel
+	done := make(chan struct{})
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		srv.dlqRetryWorker(ctx, done)
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+
+	// Close done - worker should exit promptly
+	close(done)
+
+	wgDone := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(wgDone)
+	}()
+
+	select {
+	case <-wgDone:
+		// Pass - exited via done signal
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("dlqRetryWorker did not exit within 500ms after done close")
+	}
+}
+
+func TestDLQRetryWorker_EmptyMessage(t *testing.T) {
+	mr, _ := miniredis.Run()
+	defer mr.Close()
+
+	redisCache := NewRedisCache(mr.Addr(), "", 0, RedisPoolConfig{})
+	defer redisCache.Close()
+
+	srv := &Server{
+		Redis:  redisCache,
+		Logger: slog.Default(),
+		Cache:  NewDNSCache(make(chan struct{}), nil),
+	}
+
+	// Push empty message to DLQ
+	redisCache.PushToDLQ(context.Background(), "")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	done := make(chan struct{})
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		srv.dlqRetryWorker(ctx, done)
+	}()
+
+	// Wait for processing
+	time.Sleep(200 * time.Millisecond)
+	close(done)
+	wg.Wait()
+
+	// Test passes if no panic - empty message is logged and skipped
+}
+
+func TestStartInvalidationListener_ZoneLevelLegacy(t *testing.T) {
+	// Test that legacy zone-level messages (without tenant prefix) work
+	mr, _ := miniredis.Run()
+	defer mr.Close()
+
+	srv := &Server{
+		Redis:  NewRedisCache(mr.Addr(), "", 0, RedisPoolConfig{}),
+		Logger: slog.Default(),
+		Cache:  NewDNSCache(make(chan struct{}), nil),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Prime cache
+	srv.Cache.Set("example.com.:1", []byte("data1"), time.Hour)
+
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		srv.startInvalidationListener(ctx, done)
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Publish legacy zone-level (name without colons triggers zone-level flush)
+	mr.Publish(InvalidationChannel, "example.com.")
+
+	// Wait for invalidation
+	time.Sleep(200 * time.Millisecond)
+
+	// Key should be flushed (zone-level invalidation flushes entire L1)
+	_, found := srv.Cache.Get("example.com.:1")
+	if found {
+		t.Error("Zone-level invalidation should flush L1 cache")
+	}
+
+	close(done)
+	wg.Wait()
+}
