@@ -1477,7 +1477,7 @@ func TestHandleIXFR_ChunkCountExceedsLimit(t *testing.T) {
 	}
 
 	srv := NewServer(":0", repo, nil)
-	srv.TsigKeys = map[string][]byte{}
+	srv.TsigKeys = map[string]TsigKey{}
 
 	req := packet.NewDNSPacket()
 	req.Header.ID = 5679
@@ -1527,7 +1527,7 @@ func TestHandleIXFR_RecordsPerChunkExceedsLimit(t *testing.T) {
 	}
 
 	srv := NewServer(":0", repo, nil)
-	srv.TsigKeys = map[string][]byte{}
+	srv.TsigKeys = map[string]TsigKey{}
 
 	req := packet.NewDNSPacket()
 	req.Header.ID = 5680
