@@ -1888,12 +1888,18 @@ func (s *Server) handleIXFR(ctx context.Context, conn net.Conn, request *packet.
 		return
 	}
 
-	var currentSerial uint32
-	if _, err := fmt.Sscanf(fields[2], "%d", &currentSerial); err != nil {
+	var serial64 uint64
+	if _, err := fmt.Sscanf(fields[2], "%d", &serial64); err != nil {
 		s.Logger.Error("IXFR failed: invalid SOA serial", "zone", zone.Name, "serial", fields[2], "error", err)
 		s.sendTCPError(conn, request.Header.ID, 2)
 		return
 	}
+	if serial64 > math.MaxUint32 {
+		s.Logger.Error("IXFR failed: SOA serial exceeds uint32 max", "zone", zone.Name, "serial", fields[2])
+		s.sendTCPError(conn, request.Header.ID, 2)
+		return
+	}
+	currentSerial := uint32(serial64)
 
 	if clientSerial == currentSerial {
 		// Client is up to date, just send current SOA
