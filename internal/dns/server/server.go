@@ -892,14 +892,19 @@ func (s *Server) handleAXFR(ctx context.Context, conn net.Conn, request *packet.
 	s.sendAXFRRecord(conn, request.Header.ID, q, soa, 0)
 
 	// Stream all non-SOA records
-	index := 1
+	recordCount := 0
 	for iter.Next() {
+		recordCount++
+		if recordCount > MaxAXFRRecords {
+			s.Logger.Error("AXFR record count exceeds limit", "zone", zone.ID, "count", recordCount, "limit", MaxAXFRRecords)
+			s.sendTCPError(conn, request.Header.ID, 2)
+			return
+		}
 		rec := iter.Record()
 		if rec.Type == domain.TypeSOA {
 			continue
 		}
-		s.sendAXFRRecord(conn, request.Header.ID, q, rec, index)
-		index++
+		s.sendAXFRRecord(conn, request.Header.ID, q, rec, recordCount)
 	}
 	if err := iter.Err(); err != nil {
 		s.Logger.Error("AXFR failed during record streaming", "zone", zone.ID, "error", err)
@@ -908,7 +913,7 @@ func (s *Server) handleAXFR(ctx context.Context, conn net.Conn, request *packet.
 	}
 
 	// Stream SOA last
-	s.sendAXFRRecord(conn, request.Header.ID, q, soa, index)
+	s.sendAXFRRecord(conn, request.Header.ID, q, soa, recordCount)
 	s.Logger.Info("AXFR completed", "zone", zone.Name)
 }
 
@@ -1469,11 +1474,15 @@ func (s *Server) handleNxDomain(ctx context.Context, req *packet.DNSPacket, q pa
 		}
 		if dnssecOK {
 			if len(nsec3params) > 0 {
-				if nsec, err := s.generateNSEC3(ctx, zone, q.Name, ""); err == nil {
+				if nsec, err := s.generateNSEC3(ctx, zone, q.Name, ""); err != nil {
+					s.Logger.Error("NSEC3 generation failed, proceeding without DNSSEC proof", "zone", zone.Name, "query", q.Name, "error", err)
+				} else {
 					resp.Authorities = append(resp.Authorities, nsec)
 				}
 			} else {
-				if nsec, err := s.generateNSEC(ctx, zone, q.Name); err == nil {
+				if nsec, err := s.generateNSEC(ctx, zone, q.Name); err != nil {
+					s.Logger.Error("NSEC generation failed, proceeding without DNSSEC proof", "zone", zone.Name, "query", q.Name, "error", err)
+				} else {
 					resp.Authorities = append(resp.Authorities, nsec)
 				}
 			}
@@ -2784,7 +2793,13 @@ func (s *Server) generateNSEC3(ctx context.Context, zone *domain.Zone, queryName
 	nameToTypes := make(map[string][]domain.RecordType)
 	var ownerNames []string
 	seen := make(map[string]bool)
+	recordCount := 0
 	for iter.Next() {
+		recordCount++
+		if recordCount > MaxAXFRRecords {
+			s.Logger.Error("NSEC3 generation record count exceeds limit", "zone", zone.Name, "count", recordCount, "limit", MaxAXFRRecords)
+			return packet.DNSRecord{}, fmt.Errorf("NSEC3 generation exceeded record limit")
+		}
 		r := iter.Record()
 		if !seen[r.Name] {
 			ownerNames = append(ownerNames, r.Name)
