@@ -236,13 +236,18 @@ func TestRedisCache_PushToDLQ(t *testing.T) {
 }
 
 func TestNewRedisCache_MalformedURL(t *testing.T) {
-	// "redis://%" should fail to parse but not panic
+	// "redis://%" is a valid URL but with a weird host "%". url.Parse succeeds
+	// and sets host to "%", so addr becomes "%". The test verifies the
+	// client is created without panicking.
 	cache := NewRedisCache("redis://%", "", 0, RedisPoolConfig{})
 	defer cache.Close()
 
-	// Should fall back to using "%" as addr
-	if cache == nil {
-		t.Error("Expected non-nil cache")
+	// Verify the client was created
+	opts := cache.client.Options()
+	// Either url.Parse succeeded (addr=":%") or failed (addr="redis://%").
+	// Either way the client is created without panic.
+	if opts.Addr == "" {
+		t.Error("Expected non-empty addr")
 	}
 }
 

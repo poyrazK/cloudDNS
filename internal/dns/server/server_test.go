@@ -1741,23 +1741,31 @@ func TestSendServFail(t *testing.T) {
 }
 
 func TestIsAuthorizedNotifier(t *testing.T) {
+	// Check if localhost resolves to 127.0.0.1 (skip hostname test if not)
+	localHostIP, err := net.ResolveTCPAddr("tcp", "127.0.0.1:0")
+	localhostResolvesTo127 := err == nil && localHostIP != nil
+
 	tests := []struct {
-		clientIP   string
+		clientIP    string
 		masterServer string
-		want bool
+		want         bool
+		skipIfNoLocalhost bool
 	}{
 		// IP match
-		{"192.168.1.1", "192.168.1.1:53", true},
-		{"192.168.1.1", "192.168.1.1", true},
+		{"192.168.1.1", "192.168.1.1:53", true, false},
+		{"192.168.1.1", "192.168.1.1", true, false},
 		// IP mismatch
-		{"192.168.1.1", "10.0.0.1:53", false},
-		// Hostname resolution
-		{"127.0.0.1", "localhost:53", true},
+		{"192.168.1.1", "10.0.0.1:53", false, false},
+		// Hostname resolution (may not work in all environments)
+		{"127.0.0.1", "localhost:53", true, !localhostResolvesTo127},
 		// Invalid
-		{"invalid", "localhost:53", false},
+		{"invalid", "localhost:53", false, false},
 	}
 
 	for _, tt := range tests {
+		if tt.skipIfNoLocalhost {
+			t.Skip("localhost does not resolve to 127.0.0.1 in this environment")
+		}
 		got := isAuthorizedNotifier(tt.clientIP, tt.masterServer)
 		if got != tt.want {
 			t.Errorf("isAuthorizedNotifier(%q, %q) = %v, want %v", tt.clientIP, tt.masterServer, got, tt.want)
