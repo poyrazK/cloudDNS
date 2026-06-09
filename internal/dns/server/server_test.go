@@ -19,6 +19,7 @@ import (
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
 	"github.com/poyrazK/cloudDNS/internal/core/ports"
 	"github.com/poyrazK/cloudDNS/internal/dns/packet"
+	"github.com/stretchr/testify/assert"
 )
 
 type mockRecordIterator struct {
@@ -1658,4 +1659,108 @@ func TestStartInvalidationListener_ZoneLevelLegacy(t *testing.T) {
 
 	close(done)
 	wg.Wait()
+}
+
+func TestSendCHAOSIdentity(t *testing.T) {
+	srv := NewServer(":0", nil, slog.Default())
+	srv.NodeID = "test-node-id"
+
+	req := packet.NewDNSPacket()
+	req.Header.ID = 123
+	q := packet.DNSQuestion{Name: "hostname.bind.", QType: packet.TXT, QClass: ClassCHAOS}
+	req.Questions = append(req.Questions, q)
+
+	var captured []byte
+	err := srv.sendCHAOSIdentity(req, q, func(data []byte) error {
+		captured = data
+		return nil
+	}, "TXT", "udp")
+
+	assert.NoError(t, err)
+	assert.NotEmpty(t, captured)
+
+	// Verify it's a valid DNS packet (at least header is correct)
+	// Packet format: header (12 bytes) + question + answer
+	assert.GreaterOrEqual(t, len(captured), 20)
+}
+
+func TestCheckCache_L2Hit(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("Failed to run miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	srv := NewServer(":0", nil, slog.Default())
+	srv.Redis = NewRedisCache(mr.Addr(), "", 0, RedisPoolConfig{})
+
+	// Set data in Redis (L2 cache) with a tenant-aware key
+	cacheKey := "tenant1:example.com.:1"
+	srv.Redis.Set(context.Background(), cacheKey, []byte("cached-response-data"), time.Hour)
+
+	req := packet.NewDNSPacket()
+	req.Header.ID = 0x1234
+
+	var sent []byte
+	result := srv.checkCache(context.Background(), req, cacheKey, "", "A", "udp", func(data []byte) error {
+		sent = data
+		return nil
+	})
+
+	assert.NotNil(t, result)
+	// TX ID (0x1234) is written at offset 0, so sent = "\x12\x34" + "ched-response-data"
+	assert.Equal(t, "\x12\x34ched-response-data", string(sent))
+}
+
+func TestSendServFail(t *testing.T) {
+	srv := NewServer(":0", nil, slog.Default())
+	req := packet.NewDNSPacket()
+	req.Header.ID = 123
+
+	var sent []byte
+	err := srv.sendServFail(req, func(data []byte) error {
+		sent = data
+		return nil
+	}, "A", "udp")
+
+	if err != nil {
+		t.Fatalf("sendServFail failed: %v", err)
+	}
+	if len(sent) == 0 {
+		t.Error("Expected non-empty response")
+	}
+
+	// Verify response has SERVFAIL RCODE
+	resp := packet.NewDNSPacket()
+	buf := packet.NewBytePacketBuffer()
+	buf.Load(sent)
+	_ = resp.FromBuffer(buf)
+	if resp.Header.ResCode != packet.RcodeServFail {
+		t.Errorf("Expected SERVFAIL, got %d", resp.Header.ResCode)
+	}
+}
+
+func TestIsAuthorizedNotifier(t *testing.T) {
+	tests := []struct {
+		clientIP   string
+		masterServer string
+		want bool
+	}{
+		// IP match
+		{"192.168.1.1", "192.168.1.1:53", true},
+		{"192.168.1.1", "192.168.1.1", true},
+		// IP mismatch
+		{"192.168.1.1", "10.0.0.1:53", false},
+		// Hostname resolution
+		{"127.0.0.1", "localhost:53", true},
+		// Invalid
+		{"invalid", "localhost:53", false},
+	}
+
+	for _, tt := range tests {
+		got := isAuthorizedNotifier(tt.clientIP, tt.masterServer)
+		if got != tt.want {
+			t.Errorf("isAuthorizedNotifier(%q, %q) = %v, want %v", tt.clientIP, tt.masterServer, got, tt.want)
+		}
+	}
 }
