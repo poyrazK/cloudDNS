@@ -70,6 +70,9 @@ type mockServerRepo struct {
 
 	// mockGetIXFRChain overrides GetIXFRChain when set.
 	mockGetIXFRChain func(ctx context.Context, zoneID string, fromSerial uint32, toSerial uint32) ([]domain.IXFRChunk, error)
+
+	// mockListRecordsForZoneStreaming overrides ListRecordsForZoneStreaming when set.
+	mockListRecordsForZoneStreaming func(ctx context.Context, zoneID string, tenantID string) (ports.RecordIterator, error)
 }
 
 func (m *mockServerRepo) GetAPIKeyByHash(_ context.Context, keyHash string) (*domain.APIKey, error) {
@@ -229,6 +232,9 @@ func (m *mockServerRepo) ListRecordsForZone(ctx context.Context, zoneID string, 
 }
 
 func (m *mockServerRepo) ListRecordsForZoneStreaming(ctx context.Context, zoneID string, tenantID string) (ports.RecordIterator, error) {
+	if m.mockListRecordsForZoneStreaming != nil {
+		return m.mockListRecordsForZoneStreaming(ctx, zoneID, tenantID)
+	}
 	if m.failListRecordsStreaming {
 		return nil, errors.New("list records streaming failed")
 	}
@@ -1543,6 +1549,48 @@ func TestHandleIXFR_RecordsPerChunkExceedsLimit(t *testing.T) {
 
 	conn := &mockTCPConn{}
 	srv.handleIXFR(context.Background(), conn, req, buf.Buf[:buf.Position()], nil)
+
+	if len(conn.captured) != 1 {
+		t.Fatalf("Expected 1 response, got %d", len(conn.captured))
+	}
+
+	res := packet.NewDNSPacket()
+	pb := packet.NewBytePacketBuffer()
+	pb.Load(conn.captured[0])
+	_ = res.FromBuffer(pb)
+	if res.Header.ResCode != packet.RcodeServFail {
+		t.Errorf("Expected SERVFAIL (2), got %d", res.Header.ResCode)
+	}
+}
+
+func TestHandleAXFR_RecordCountExceedsLimit(t *testing.T) {
+	// Build records exceeding MaxAXFRRecords
+	tooManyRecords := make([]domain.Record, MaxAXFRRecords+1)
+	for i := range tooManyRecords {
+		tooManyRecords[i] = domain.Record{Name: "axfr-limit.test.", Type: domain.TypeA, Content: "1.1.1.1"}
+	}
+	repo := &mockServerRepo{
+		zones: []domain.Zone{{ID: "z1", Name: "axfr-limit.test."}},
+		records: []domain.Record{
+			{ZoneID: "z1", Name: "axfr-limit.test.", Type: domain.TypeSOA, Content: "ns1. ns2. 1 2 3 4 5"},
+		},
+	}
+	repo.mockListRecordsForZoneStreaming = func(ctx context.Context, zoneID string, tenantID string) (ports.RecordIterator, error) {
+		return &sliceRecordIterator{records: tooManyRecords, index: 0}, nil
+	}
+
+	srv := NewServer(":0", repo, nil)
+	srv.TsigKeys = map[string]TsigKey{}
+
+	req := packet.NewDNSPacket()
+	req.Header.ID = 5681
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "axfr-limit.test.", QType: packet.AXFR})
+
+	buf := packet.NewBytePacketBuffer()
+	_ = req.Write(buf)
+
+	conn := &mockTCPConn{}
+	srv.handleAXFR(context.Background(), conn, req, buf.Buf[:buf.Position()], nil)
 
 	if len(conn.captured) != 1 {
 		t.Fatalf("Expected 1 response, got %d", len(conn.captured))
