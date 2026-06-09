@@ -68,6 +68,12 @@ type mockServerRepo struct {
 	failCreateSOA        bool
 	failDeleteSOA        bool
 	failOnRecordName     string
+
+	// mockGetIXFRChain overrides GetIXFRChain when set.
+	mockGetIXFRChain func(ctx context.Context, zoneID string, fromSerial uint32, toSerial uint32) ([]domain.IXFRChunk, error)
+
+	// mockListRecordsForZoneStreaming overrides ListRecordsForZoneStreaming when set.
+	mockListRecordsForZoneStreaming func(ctx context.Context, zoneID string, tenantID string) (ports.RecordIterator, error)
 }
 
 func (m *mockServerRepo) GetAPIKeyByHash(_ context.Context, keyHash string) (*domain.APIKey, error) {
@@ -227,6 +233,9 @@ func (m *mockServerRepo) ListRecordsForZone(ctx context.Context, zoneID string, 
 }
 
 func (m *mockServerRepo) ListRecordsForZoneStreaming(ctx context.Context, zoneID string, tenantID string) (ports.RecordIterator, error) {
+	if m.mockListRecordsForZoneStreaming != nil {
+		return m.mockListRecordsForZoneStreaming(ctx, zoneID, tenantID)
+	}
 	if m.failListRecordsStreaming {
 		return nil, errors.New("list records streaming failed")
 	}
@@ -566,6 +575,9 @@ func (m *mockServerRepo) ListZoneChanges(ctx context.Context, zoneID string, fro
 }
 
 func (m *mockServerRepo) GetIXFRChain(ctx context.Context, zoneID string, fromSerial uint32, toSerial uint32) ([]domain.IXFRChunk, error) {
+	if m.mockGetIXFRChain != nil {
+		return m.mockGetIXFRChain(ctx, zoneID, fromSerial, toSerial)
+	}
 	changes, err := m.ListZoneChanges(ctx, zoneID, fromSerial)
 	if err != nil {
 		return nil, err
@@ -1455,6 +1467,146 @@ func TestHandleIXFR_TSIGVerifyFailed(t *testing.T) {
 	_ = res.FromBuffer(pb)
 	if res.Header.ResCode != packet.RcodeRefused {
 		t.Errorf("Expected NOTAUTH (5), got %d", res.Header.ResCode)
+	}
+}
+
+func TestHandleIXFR_ChunkCountExceedsLimit(t *testing.T) {
+	repo := &mockServerRepo{
+		zones: []domain.Zone{{ID: "z1", Name: "ixfr-limit.test."}},
+		records: []domain.Record{
+			{ZoneID: "z1", Name: "ixfr-limit.test.", Type: domain.TypeSOA, Content: "ns1. ns2. 1 2 3 4 5"},
+		},
+	}
+
+	// Build chunks exceeding MaxIXFRChunks
+	tooManyChunks := make([]domain.IXFRChunk, MaxIXFRChunks+1)
+	for i := range tooManyChunks {
+		tooManyChunks[i] = domain.IXFRChunk{Serial: uint32(i + 1)}
+	}
+	repo.mockGetIXFRChain = func(ctx context.Context, zoneID string, fromSerial uint32, toSerial uint32) ([]domain.IXFRChunk, error) {
+		return tooManyChunks, nil
+	}
+
+	srv := NewServer(":0", repo, nil)
+	srv.TsigKeys = map[string]TsigKey{}
+
+	req := packet.NewDNSPacket()
+	req.Header.ID = 5679
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "ixfr-limit.test.", QType: packet.IXFR})
+	req.Authorities = append(req.Authorities, packet.DNSRecord{
+		Name:   "ixfr-limit.test.",
+		Type:   packet.SOA,
+		Serial: uint32(len(tooManyChunks)),
+	})
+
+	buf := packet.NewBytePacketBuffer()
+	_ = req.Write(buf)
+
+	conn := &mockTCPConn{}
+	srv.handleIXFR(context.Background(), conn, req, buf.Buf[:buf.Position()], nil)
+
+	if len(conn.captured) != 1 {
+		t.Fatalf("Expected 1 response, got %d", len(conn.captured))
+	}
+
+	res := packet.NewDNSPacket()
+	pb := packet.NewBytePacketBuffer()
+	pb.Load(conn.captured[0])
+	_ = res.FromBuffer(pb)
+	if res.Header.ResCode != packet.RcodeServFail {
+		t.Errorf("Expected SERVFAIL (2), got %d", res.Header.ResCode)
+	}
+}
+
+func TestHandleIXFR_RecordsPerChunkExceedsLimit(t *testing.T) {
+	repo := &mockServerRepo{
+		zones: []domain.Zone{{ID: "z1", Name: "ixfr-limit.test."}},
+		records: []domain.Record{
+			{ZoneID: "z1", Name: "ixfr-limit.test.", Type: domain.TypeSOA, Content: "ns1. ns2. 1 2 3 4 5"},
+		},
+	}
+
+	// Build chunks where Added exceeds MaxRecordsPerChunk
+	tooManyRecords := make([]domain.Record, MaxRecordsPerChunk+1)
+	for i := range tooManyRecords {
+		tooManyRecords[i] = domain.Record{Name: "ixfr-limit.test.", Type: domain.TypeA, Content: "1.1.1.1"}
+	}
+	repo.mockGetIXFRChain = func(ctx context.Context, zoneID string, fromSerial uint32, toSerial uint32) ([]domain.IXFRChunk, error) {
+		return []domain.IXFRChunk{
+			{Serial: 1, Deleted: []domain.Record{}, Added: tooManyRecords},
+		}, nil
+	}
+
+	srv := NewServer(":0", repo, nil)
+	srv.TsigKeys = map[string]TsigKey{}
+
+	req := packet.NewDNSPacket()
+	req.Header.ID = 5680
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "ixfr-limit.test.", QType: packet.IXFR})
+	req.Authorities = append(req.Authorities, packet.DNSRecord{
+		Name:   "ixfr-limit.test.",
+		Type:   packet.SOA,
+		Serial: 2,
+	})
+
+	buf := packet.NewBytePacketBuffer()
+	_ = req.Write(buf)
+
+	conn := &mockTCPConn{}
+	srv.handleIXFR(context.Background(), conn, req, buf.Buf[:buf.Position()], nil)
+
+	if len(conn.captured) != 1 {
+		t.Fatalf("Expected 1 response, got %d", len(conn.captured))
+	}
+
+	res := packet.NewDNSPacket()
+	pb := packet.NewBytePacketBuffer()
+	pb.Load(conn.captured[0])
+	_ = res.FromBuffer(pb)
+	if res.Header.ResCode != packet.RcodeServFail {
+		t.Errorf("Expected SERVFAIL (2), got %d", res.Header.ResCode)
+	}
+}
+
+func TestHandleAXFR_RecordCountExceedsLimit(t *testing.T) {
+	// Build records exceeding MaxAXFRRecords
+	tooManyRecords := make([]domain.Record, MaxAXFRRecords+1)
+	for i := range tooManyRecords {
+		tooManyRecords[i] = domain.Record{Name: "axfr-limit.test.", Type: domain.TypeA, Content: "1.1.1.1"}
+	}
+	repo := &mockServerRepo{
+		zones: []domain.Zone{{ID: "z1", Name: "axfr-limit.test."}},
+		records: []domain.Record{
+			{ZoneID: "z1", Name: "axfr-limit.test.", Type: domain.TypeSOA, Content: "ns1. ns2. 1 2 3 4 5"},
+		},
+	}
+	repo.mockListRecordsForZoneStreaming = func(ctx context.Context, zoneID string, tenantID string) (ports.RecordIterator, error) {
+		return &sliceRecordIterator{records: tooManyRecords, index: 0}, nil
+	}
+
+	srv := NewServer(":0", repo, nil)
+	srv.TsigKeys = map[string]TsigKey{}
+
+	req := packet.NewDNSPacket()
+	req.Header.ID = 5681
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "axfr-limit.test.", QType: packet.AXFR})
+
+	buf := packet.NewBytePacketBuffer()
+	_ = req.Write(buf)
+
+	conn := &mockTCPConn{}
+	srv.handleAXFR(context.Background(), conn, req, buf.Buf[:buf.Position()], nil)
+
+	if len(conn.captured) != 1 {
+		t.Fatalf("Expected 1 response, got %d", len(conn.captured))
+	}
+
+	res := packet.NewDNSPacket()
+	pb := packet.NewBytePacketBuffer()
+	pb.Load(conn.captured[0])
+	_ = res.FromBuffer(pb)
+	if res.Header.ResCode != packet.RcodeServFail {
+		t.Errorf("Expected SERVFAIL (2), got %d", res.Header.ResCode)
 	}
 }
 

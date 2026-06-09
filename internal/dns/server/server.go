@@ -44,6 +44,13 @@ import (
 // ClassCHAOS is the DNS class for server identity and metadata.
 const ClassCHAOS = 3
 
+// IXFR limits to prevent memory exhaustion from unbounded chunk processing.
+const (
+	MaxIXFRChunks      = 1000  // max chunks per IXFR response
+	MaxRecordsPerChunk = 10000 // max records per chunk Deleted/Added arrays
+	MaxAXFRRecords     = 50000 // max records in AXFR fallback or NSEC generation
+)
+
 // cacheLockShardCount is the number of shards for per-key cache locks.
 // Using sharded locking avoids unbounded map growth while providing per-key granularity.
 const cacheLockShardCount = 256
@@ -967,14 +974,19 @@ func (s *Server) handleAXFR(ctx context.Context, conn net.Conn, request *packet.
 	s.sendAXFRRecord(conn, request.Header.ID, q, soa, 0)
 
 	// Stream all non-SOA records
-	index := 1
+	recordCount := 0
 	for iter.Next() {
+		recordCount++
+		if recordCount > MaxAXFRRecords {
+			s.Logger.Error("AXFR record count exceeds limit", "zone", zone.ID, "count", recordCount, "limit", MaxAXFRRecords)
+			s.sendTCPError(conn, request.Header.ID, 2)
+			return
+		}
 		rec := iter.Record()
 		if rec.Type == domain.TypeSOA {
 			continue
 		}
-		s.sendAXFRRecord(conn, request.Header.ID, q, rec, index)
-		index++
+		s.sendAXFRRecord(conn, request.Header.ID, q, rec, recordCount)
 	}
 	if err := iter.Err(); err != nil {
 		s.Logger.Error("AXFR failed during record streaming", "zone", zone.ID, "error", err)
@@ -983,7 +995,7 @@ func (s *Server) handleAXFR(ctx context.Context, conn net.Conn, request *packet.
 	}
 
 	// Stream SOA last
-	s.sendAXFRRecord(conn, request.Header.ID, q, soa, index)
+	s.sendAXFRRecord(conn, request.Header.ID, q, soa, recordCount)
 	s.Logger.Info("AXFR completed", "zone", zone.Name)
 }
 
@@ -1559,11 +1571,15 @@ func (s *Server) handleNxDomain(ctx context.Context, req *packet.DNSPacket, q pa
 		}
 		if dnssecOK {
 			if len(nsec3params) > 0 {
-				if nsec, err := s.generateNSEC3(ctx, zone, q.Name, ""); err == nil {
+				if nsec, err := s.generateNSEC3(ctx, zone, q.Name, ""); err != nil {
+					s.Logger.Error("NSEC3 generation failed, proceeding without DNSSEC proof", "zone", zone.Name, "query", q.Name, "error", err)
+				} else {
 					resp.Authorities = append(resp.Authorities, nsec)
 				}
 			} else {
-				if nsec, err := s.generateNSEC(ctx, zone, q.Name); err == nil {
+				if nsec, err := s.generateNSEC(ctx, zone, q.Name); err != nil {
+					s.Logger.Error("NSEC generation failed, proceeding without DNSSEC proof", "zone", zone.Name, "query", q.Name, "error", err)
+				} else {
 					resp.Authorities = append(resp.Authorities, nsec)
 				}
 			}
@@ -2011,6 +2027,20 @@ func (s *Server) handleIXFR(ctx context.Context, conn net.Conn, request *packet.
 	// Fetch changes since clientSerial using IXFR chain logic
 	chunks, err := s.Repo.GetIXFRChain(ctx, zone.ID, clientSerial, currentSerial)
 
+	// Enforce IXFR chunk limits to prevent memory exhaustion
+	if len(chunks) > MaxIXFRChunks {
+		s.Logger.Error("IXFR chunk count exceeds limit", "zone", zone.Name, "count", len(chunks), "limit", MaxIXFRChunks)
+		s.sendTCPError(conn, request.Header.ID, 2)
+		return
+	}
+	for i, chunk := range chunks {
+		if len(chunk.Deleted) > MaxRecordsPerChunk || len(chunk.Added) > MaxRecordsPerChunk {
+			s.Logger.Error("IXFR chunk record count exceeds limit", "zone", zone.Name, "chunk", i, "deleted", len(chunk.Deleted), "added", len(chunk.Added), "limit", MaxRecordsPerChunk)
+			s.sendTCPError(conn, request.Header.ID, 2)
+			return
+		}
+	}
+
 	// RFC 1995: Verify full IXFR chain continuity
 	// Note: clientSerial+1 wraps to 0 when clientSerial is max uint32.
 	// In that case, we can only validate if chunks starts at 0 (which is valid after wrap).
@@ -2067,7 +2097,14 @@ func (s *Server) handleIXFR(ctx context.Context, conn net.Conn, request *packet.
 		s.sendSingleRecordResponse(conn, request.Header.ID, q, pSOA)
 
 		// 3. Stream all records in the zone
+		recordCount := 0
 		for iter.Next() {
+			recordCount++
+			if recordCount > MaxAXFRRecords {
+				s.Logger.Error("AXFR fallback record count exceeds limit", "zone", zone.Name, "count", recordCount, "limit", MaxAXFRRecords)
+				s.sendTCPError(conn, request.Header.ID, 2)
+				return
+			}
 			rec := iter.Record()
 			if rec.Type == domain.TypeSOA {
 				continue
@@ -2748,7 +2785,13 @@ func (s *Server) generateNSEC(ctx context.Context, zone *domain.Zone, queryName 
 	nameToTypes := make(map[string][]domain.RecordType)
 	var uniqueNames []string
 	seen := make(map[string]bool)
+	recordCount := 0
 	for iter.Next() {
+		recordCount++
+		if recordCount > MaxAXFRRecords {
+			s.Logger.Error("NSEC generation record count exceeds limit", "zone", zone.Name, "count", recordCount, "limit", MaxAXFRRecords)
+			return packet.DNSRecord{}, fmt.Errorf("NSEC generation exceeded record limit")
+		}
 		r := iter.Record()
 		if !seen[r.Name] {
 			uniqueNames = append(uniqueNames, r.Name)
@@ -2847,7 +2890,13 @@ func (s *Server) generateNSEC3(ctx context.Context, zone *domain.Zone, queryName
 	nameToTypes := make(map[string][]domain.RecordType)
 	var ownerNames []string
 	seen := make(map[string]bool)
+	recordCount := 0
 	for iter.Next() {
+		recordCount++
+		if recordCount > MaxAXFRRecords {
+			s.Logger.Error("NSEC3 generation record count exceeds limit", "zone", zone.Name, "count", recordCount, "limit", MaxAXFRRecords)
+			return packet.DNSRecord{}, fmt.Errorf("NSEC3 generation exceeded record limit")
+		}
 		r := iter.Record()
 		if !seen[r.Name] {
 			ownerNames = append(ownerNames, r.Name)
