@@ -538,7 +538,13 @@ func (s *Server) Run(ctx context.Context) error {
 					// Copy buffer since the backing array is reused across ReadFrom calls.
 					data := make([]byte, n)
 					copy(data, buf[:n])
-					s.udpQueue <- udpTask{addr: addr, data: data, conn: c}
+					// Non-blocking send: if queue is full, drop the packet rather than
+					// blocking (which would prevent graceful shutdown from being checked).
+					select {
+					case s.udpQueue <- udpTask{addr: addr, data: data, conn: c}:
+					default:
+						s.Logger.Warn("UDP queue full, dropping packet", "addr", addr)
+					}
 				}
 			}
 		}(conn)
