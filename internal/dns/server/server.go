@@ -712,8 +712,16 @@ func (s *Server) udpWorker() {
 			return
 		case task := <-s.udpQueue:
 			metrics.ActiveWorkers.Inc()
-			s.handleUDPConnection(s.lifecycleCtx, task.conn, task.addr, task.data)
-			metrics.ActiveWorkers.Dec()
+			defer metrics.ActiveWorkers.Dec() // always runs — even on panic
+			// Catch panics to prevent worker crash and metric desync.
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						s.Logger.Error("UDP worker panicked", "panic", r)
+					}
+				}()
+				s.handleUDPConnection(s.lifecycleCtx, task.conn, task.addr, task.data)
+			}()
 		}
 	}
 }
