@@ -158,3 +158,28 @@ func TestRefreshZone_MasterError(t *testing.T) {
 	}
 	srv.refreshZone(context.Background(), &domain.Zone{Name: "err.test.", MasterServer: "1.1.1.1"})
 }
+
+func TestRefreshZone_HostnameMaster(t *testing.T) {
+	repo := &mockServerRepo{}
+	srv := NewServer(":0", repo, nil)
+
+	zoneName := "slave.test."
+
+	// Test that refreshZone handles hostname without port (defaults to :53)
+	srv.queryFn = func(server string, name string, qType packet.QueryType) (*packet.DNSPacket, error) {
+		// Verify that server is hostname:53 format
+		if !strings.Contains(server, ":53") {
+			t.Errorf("Expected :53 default port, got %s", server)
+		}
+		// Return a valid SOA response so refreshZone doesn't nil-deref
+		resp := packet.NewDNSPacket()
+		resp.Answers = []packet.DNSRecord{
+			{Name: zoneName, Type: packet.SOA, Serial: 100},
+		}
+		return resp, nil
+	}
+
+	zone := &domain.Zone{Name: zoneName, MasterServer: "localhost"}
+	srv.refreshZone(context.Background(), zone)
+	// refreshZone is void - the test verifies queryFn receives the correct server address
+}

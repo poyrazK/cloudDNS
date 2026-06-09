@@ -94,7 +94,7 @@ func (s *dnsService) CreateRecord(ctx context.Context, record *domain.Record) er
 
 	// Invalidate cache across all nodes
 	if s.cache != nil {
-		if err := s.cache.Invalidate(ctx, record.Name, record.Type); err != nil {
+		if err := s.cache.Invalidate(ctx, record.TenantID, record.Name, record.Type); err != nil {
 			s.logger.Warn("failed to invalidate cache after record creation", "name", record.Name, "type", record.Type, "error", err)
 		}
 	}
@@ -117,7 +117,7 @@ func (s *dnsService) UpdateRecord(ctx context.Context, record *domain.Record) er
 
 	// Invalidate cache across all nodes
 	if s.cache != nil {
-		if err := s.cache.Invalidate(ctx, record.Name, record.Type); err != nil {
+		if err := s.cache.Invalidate(ctx, record.TenantID, record.Name, record.Type); err != nil {
 			s.logger.Warn("failed to invalidate cache after record update", "name", record.Name, "type", record.Type, "error", err)
 		}
 	}
@@ -225,7 +225,7 @@ func (s *dnsService) DeleteRecord(ctx context.Context, recordID string, zoneID s
 	}
 
 	if record != nil && s.cache != nil {
-		if errInv := s.cache.Invalidate(ctx, record.Name, record.Type); errInv != nil {
+		if errInv := s.cache.Invalidate(ctx, record.TenantID, record.Name, record.Type); errInv != nil {
 			s.logger.Warn("failed to invalidate cache before record deletion", "name", record.Name, "type", record.Type, "error", errInv)
 		}
 	}

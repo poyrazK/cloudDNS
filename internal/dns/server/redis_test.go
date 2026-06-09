@@ -159,6 +159,98 @@ func TestRedisCache_Close(t *testing.T) {
 	}
 }
 
+func TestRedisCacheWithURL(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("Failed to run miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	cache := NewRedisCache("redis://"+mr.Addr(), "", 0, RedisPoolConfig{})
+	defer cache.Close()
+
+	ctx := context.Background()
+	if err := cache.Ping(ctx); err != nil {
+		t.Errorf("Ping failed: %v", err)
+	}
+
+	cache.Set(ctx, "key1", []byte("value1"), time.Hour)
+	val, found := cache.Get(ctx, "key1")
+	if !found {
+		t.Errorf("Expected key1 to be found")
+	}
+	if string(val) != "value1" {
+		t.Errorf("Expected value1, got %s", string(val))
+	}
+}
+
+func TestRedisCache_InvalidateZoneLevel(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("Failed to run miniredis: %v", err)
+	}
+	defer mr.Close()
+	cache := NewRedisCache(mr.Addr(), "", 0, RedisPoolConfig{})
+	ctx := context.Background()
+
+	// Zone-level invalidation key is tenantID:name (no type suffix)
+	// Set the zone-level key directly
+	cache.Set(ctx, "tenant1:example.com.:", []byte("zone-data"), time.Hour)
+	_, found := cache.Get(ctx, "tenant1:example.com.:")
+	if !found {
+		t.Fatalf("Expected to find zone-level key before invalidation")
+	}
+
+	// Zone-level invalidation (empty qType) - should delete the zone-level key
+	err = cache.Invalidate(ctx, "tenant1", "example.com.", "")
+	if err != nil {
+		t.Fatalf("Invalidate failed: %v", err)
+	}
+
+	// Zone-level key should be gone
+	_, found = cache.Get(ctx, "tenant1:example.com.:")
+	if found {
+		t.Error("Expected zone-level key to be deleted after invalidation")
+	}
+}
+
+func TestRedisCache_PushToDLQ(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("Failed to run miniredis: %v", err)
+	}
+	defer mr.Close()
+	cache := NewRedisCache(mr.Addr(), "", 0, RedisPoolConfig{})
+	ctx := context.Background()
+
+	cache.PushToDLQ(ctx, "test-message")
+
+	// Verify it's in the queue
+	len, err := cache.DLQLen(ctx)
+	if err != nil {
+		t.Fatalf("DLQLen failed: %v", err)
+	}
+	if len != 1 {
+		t.Errorf("Expected DLQLen=1, got %d", len)
+	}
+}
+
+func TestNewRedisCache_MalformedURL(t *testing.T) {
+	// "redis://%" is a valid URL but with a weird host "%". url.Parse succeeds
+	// and sets host to "%", so addr becomes "%". The test verifies the
+	// client is created without panicking.
+	cache := NewRedisCache("redis://%", "", 0, RedisPoolConfig{})
+	defer cache.Close()
+
+	// Verify the client was created
+	opts := cache.client.Options()
+	// Either url.Parse succeeded (addr=":%") or failed (addr="redis://%").
+	// Either way the client is created without panic.
+	if opts.Addr == "" {
+		t.Error("Expected non-empty addr")
+	}
+}
+
 func TestRedisCache_PoolConfig(t *testing.T) {
 	mr, err := miniredis.Run()
 	if err != nil {
@@ -167,9 +259,9 @@ func TestRedisCache_PoolConfig(t *testing.T) {
 	defer mr.Close()
 
 	cfg := RedisPoolConfig{
-		PoolSize:       50,
-		MinIdleConns:   5,
-		PoolTimeout:    30 * time.Second,
+		PoolSize:        50,
+		MinIdleConns:    5,
+		PoolTimeout:     30 * time.Second,
 		ConnMaxLifetime: 10 * time.Minute,
 	}
 	cache := NewRedisCache(mr.Addr(), "", 0, cfg)

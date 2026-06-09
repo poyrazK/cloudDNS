@@ -94,7 +94,7 @@ func TestCache_ConcurrencyHammer(t *testing.T) {
 				case <-ctx.Done():
 					return
 				default:
-					_ = srv.Redis.Invalidate(ctx, name, qtype)
+					_ = srv.Redis.Invalidate(ctx, "test", name, qtype)
 					atomic.AddInt64(&invalidationCount, 1)
 					time.Sleep(5 * time.Millisecond)
 				}

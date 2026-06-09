@@ -73,6 +73,28 @@ func TestCacheCleanup(t *testing.T) {
 	}
 }
 
+func TestCacheCleanup_ExpiresEntries(t *testing.T) {
+	done := make(chan struct{})
+	t.Cleanup(func() { close(done) })
+	cache := NewDNSCache(done, nil)
+
+	cache.Set("key1", []byte{1}, 1*time.Millisecond)
+	cache.Set("key2", []byte{2}, 1*time.Hour)
+
+	time.Sleep(10 * time.Millisecond)
+	cache.Cleanup()
+
+	_, foundKey1 := cache.Get("key1")
+	if foundKey1 {
+		t.Error("expired key1 should be removed after Cleanup")
+	}
+
+	_, foundKey2 := cache.Get("key2")
+	if !foundKey2 {
+		t.Error("valid key2 should remain after Cleanup")
+	}
+}
+
 func TestCacheFlush(t *testing.T) {
 	done := make(chan struct{})
 	t.Cleanup(func() { close(done) })

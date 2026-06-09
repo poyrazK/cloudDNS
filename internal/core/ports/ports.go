@@ -85,7 +85,7 @@ type DNSService interface {
 
 // CacheInvalidator defines the interface for triggering cross-node cache invalidation.
 type CacheInvalidator interface {
-	Invalidate(ctx context.Context, name string, qType domain.RecordType) error
+	Invalidate(ctx context.Context, tenantID string, name string, qType domain.RecordType) error
 	Ping(ctx context.Context) error
 }
 
