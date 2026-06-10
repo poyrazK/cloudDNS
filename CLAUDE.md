@@ -10,7 +10,7 @@ cloudDNS is a high-performance, authoritative and recursive DNS server written i
 
 cloudDNS follows a strict **Hexagonal (Ports & Adapters)** architecture:
 
-```
+```text
 cmd/                    # Entry points
 ├── clouddns/           # Main DNS server
 ├── apikey/             # API key management CLI

@@ -130,11 +130,14 @@ func (s *Server) generateNSEC3(ctx context.Context, zone *domain.Zone, queryName
 		}
 		nameToTypes[r.Name] = append(nameToTypes[r.Name], r.Type)
 	}
-	_ = iter.Err()
+	if err := iter.Err(); err != nil {
+		return packet.DNSRecord{}, err
+	}
 
+	saltBytes := []byte(salt)
 	hashes := make([]hashEntry, 0, len(ownerNames))
 	for _, name := range ownerNames {
-		h := packet.HashName(name, alg, iterations, []byte(salt))
+		h := packet.HashName(name, alg, iterations, saltBytes)
 		hashes = append(hashes, hashEntry{name: name, hash: h})
 	}
 
@@ -148,10 +151,10 @@ func (s *Server) generateNSEC3(ctx context.Context, zone *domain.Zone, queryName
 
 	// If wildcardName is provided, generate NSEC3 for wildcard proof
 	if wildcardName != "" {
-		return s.generateNSEC3ForWildcardProof(ctx, zone, wildcardName, queryName, alg, iterations, salt, hashes, nameToTypes)
+		return s.generateNSEC3ForWildcardProof(ctx, zone, wildcardName, queryName, alg, iterations, flags, saltBytes, hashes, nameToTypes)
 	}
 
-	qHash := packet.HashName(queryName, alg, iterations, []byte(salt))
+	qHash := packet.HashName(queryName, alg, iterations, saltBytes)
 	var ownerEntry, nextEntry hashEntry
 	found := false
 	for i := 0; i < len(hashes); i++ {
@@ -195,7 +198,7 @@ func (s *Server) generateNSEC3(ctx context.Context, zone *domain.Zone, queryName
 		HashAlg:    alg,
 		Flags:      uint16(flags),
 		Iterations: iterations,
-		Salt:       []byte(salt),
+		Salt:       saltBytes,
 		NextHash:   nextEntry.hash,
 		TypeBitMap: bitmap,
 	}
@@ -205,9 +208,9 @@ func (s *Server) generateNSEC3(ctx context.Context, zone *domain.Zone, queryName
 
 // generateNSEC3ForWildcardProof generates an NSEC3 record proving a wildcard match.
 // Per RFC 5155 Section 7.2.14, the NSEC3 proves that the wildcard RRset exists.
-func (s *Server) generateNSEC3ForWildcardProof(_ context.Context, zone *domain.Zone, wildcardName, _ string, alg uint8, iterations uint16, salt string, hashes []hashEntry, nameToTypes map[string][]domain.RecordType) (packet.DNSRecord, error) {
+func (s *Server) generateNSEC3ForWildcardProof(_ context.Context, zone *domain.Zone, wildcardName, _ string, alg uint8, iterations uint16, flags uint8, salt []byte, hashes []hashEntry, nameToTypes map[string][]domain.RecordType) (packet.DNSRecord, error) {
 	// Hash the wildcard name
-	wildcardHash := packet.HashName(wildcardName, alg, iterations, []byte(salt))
+	wildcardHash := packet.HashName(wildcardName, alg, iterations, salt)
 
 	// Find the wildcard hash in the chain and get next hash
 	var nextEntry hashEntry
@@ -241,9 +244,9 @@ func (s *Server) generateNSEC3ForWildcardProof(_ context.Context, zone *domain.Z
 		Class:      1,
 		TTL:        300,
 		HashAlg:    alg,
-		Flags:      0,
+		Flags:      uint16(flags),
 		Iterations: iterations,
-		Salt:       []byte(salt),
+		Salt:       salt,
 		NextHash:   nextEntry.hash,
 		TypeBitMap: bitmap,
 	}

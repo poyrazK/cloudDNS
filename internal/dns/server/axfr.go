@@ -220,8 +220,13 @@ func (s *Server) handleIXFR(ctx context.Context, conn net.Conn, request *packet.
 
 	// Lookup zone (needed regardless of TSIG for IXFR)
 	zone, err := s.Repo.GetZone(ctx, q.Name)
-	if err != nil || zone == nil {
-		s.Logger.Warn("IXFR requested for non-existent zone", "name", q.Name, "error", err)
+	if err != nil {
+		s.Logger.Error("IXFR failed to look up zone", "zone", q.Name, "error", err)
+		s.sendTCPError(conn, request.Header.ID, 2) // SERVFAIL
+		return
+	}
+	if zone == nil {
+		s.Logger.Warn("IXFR requested for non-existent zone", "name", q.Name)
 		s.sendTCPError(conn, request.Header.ID, 3) // NXDOMAIN
 		return
 	}

@@ -70,6 +70,9 @@ func (s *Server) padResponse(response *packet.DNSPacket, blockSize int) {
 
 // automateDNSSEC runs periodic DNSSEC key lifecycle management for all zones.
 func (s *Server) automateDNSSEC() {
+	if s.DNSSEC == nil {
+		return
+	}
 	ctx := s.lifecycleCtx
 	// Get all zones
 	zones, errList := s.Repo.ListZones(ctx, "")
@@ -99,13 +102,13 @@ func (s *Server) updateDNSSECMetrics(ctx context.Context) {
 	}
 	metrics.DNSSECKeysTotal.Reset()
 	metrics.DNSSECKeysAgeSeconds.Reset()
-	signedZones := 0
+	signedZoneNames := make(map[string]struct{})
 	for _, st := range stats {
 		metrics.DNSSECKeysTotal.WithLabelValues(st.ZoneName, st.KeyType, fmt.Sprintf("%d", st.Algorithm)).Set(1)
 		metrics.DNSSECKeysAgeSeconds.WithLabelValues(st.ZoneName, st.KeyType).Set(st.AgeSeconds)
-		signedZones++
+		signedZoneNames[st.ZoneName] = struct{}{}
 	}
-	metrics.DNSSECZonesSigned.Set(float64(signedZones))
+	metrics.DNSSECZonesSigned.Set(float64(len(signedZoneNames)))
 }
 
 // signResponse signs a DNS response with the zone's DNSSEC keys.
@@ -262,23 +265,25 @@ func (s *Server) validateDNSSEC(ctx context.Context, zoneName string, response *
 		if s.DNSSECMode == "strict" {
 			return fmt.Errorf("dnssec: failed to build trust chain: %w", chainErr)
 		}
-		// Non-strict: fall through to RRset result below
-	} else if validateErr := s.DNSSECValidator.ValidateChain(chain, now); validateErr != nil {
+		// Non-strict: cannot establish trust chain, AD must be false
+		response.Header.AuthedData = false
+		return nil
+	}
+
+	validateErr := s.DNSSECValidator.ValidateChain(chain, now)
+	if validateErr != nil {
 		if s.DNSSECMode == "strict" {
 			return fmt.Errorf("dnssec: trust chain validation failed: %w", validateErr)
 		}
 		// Chain invalid in non-strict mode — AD bit must be false, not allValid
 		response.Header.AuthedData = false
 		return nil
-	} else {
-		// Chain valid — but AD requires both chain AND per-RRset validation to succeed
-		if s.DNSSECMode == "strict" && !allValid {
-			return fmt.Errorf("dnssec: chain valid but per-RRset validation failed")
-		}
-		response.Header.AuthedData = allValid
-		return nil
 	}
 
+	// Chain valid — but AD requires both chain AND per-RRset validation to succeed
+	if s.DNSSECMode == "strict" && !allValid {
+		return fmt.Errorf("dnssec: chain valid but per-RRset validation failed")
+	}
 	response.Header.AuthedData = allValid
 	return nil
 }
