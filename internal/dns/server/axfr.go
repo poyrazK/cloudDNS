@@ -105,6 +105,11 @@ func (s *Server) handleAXFR(ctx context.Context, conn net.Conn, request *packet.
 	// Stream all non-SOA records
 	index := 1
 	for iter.Next() {
+		if index > MaxAXFRRecords {
+			s.Logger.Error("AXFR record count exceeds limit", "zone", zone.ID, "count", index, "limit", MaxAXFRRecords)
+			s.sendTCPError(conn, request.Header.ID, 2)
+			return
+		}
 		rec := iter.Record()
 		if rec.Type == domain.TypeSOA {
 			continue
@@ -148,7 +153,7 @@ func (s *Server) sendAXFRRecord(conn net.Conn, id uint16, q packet.DNSQuestion, 
 	resData := resBuffer.Buf[:resBuffer.Position()]
 
 	resLen := uint16(len(resData)) // #nosec G115
-	fullResp := append([]byte{byte(resLen >> 8), byte(resLen & 0xFF)}, resData...)
+	fullResp := append([]byte{byte(resLen >> 8), byte(resLen& 0xFF)}, resData...)
 	if _, errW := conn.Write(fullResp); errW != nil {
 		s.Logger.Error("AXFR connection broken", "error", errW)
 		packet.PutBuffer(resBuffer)
@@ -169,7 +174,7 @@ func (s *Server) sendTCPError(conn net.Conn, id uint16, rcode uint8) {
 	_ = response.Write(resBuffer)
 	resData := resBuffer.Buf[:resBuffer.Position()]
 	resLen := uint16(len(resData)) // #nosec G115
-	fullResp := append([]byte{byte(resLen >> 8), byte(resLen & 0xFF)}, resData...)
+	fullResp := append([]byte{byte(resLen >> 8), byte(resLen& 0xFF)}, resData...)
 	_, _ = conn.Write(fullResp)
 	packet.PutBuffer(resBuffer)
 }
@@ -267,6 +272,22 @@ func (s *Server) handleIXFR(ctx context.Context, conn net.Conn, request *packet.
 	// Fetch changes since clientSerial using IXFR chain logic
 	chunks, err := s.Repo.GetIXFRChain(ctx, zone.ID, clientSerial, currentSerial)
 
+	// Check chunk count limit to prevent memory exhaustion
+	if len(chunks) > MaxIXFRChunks {
+		s.Logger.Error("IXFR chunk count exceeds limit", "zone", zone.Name, "count", len(chunks), "limit", MaxIXFRChunks)
+		s.sendTCPError(conn, request.Header.ID, 2)
+		return
+	}
+
+	// Check records per chunk limit before any further processing
+	for _, chunk := range chunks {
+		if len(chunk.Deleted) > MaxRecordsPerChunk || len(chunk.Added) > MaxRecordsPerChunk {
+			s.Logger.Error("IXFR records per chunk exceeds limit", "zone", zone.Name, "deleted", len(chunk.Deleted), "added", len(chunk.Added), "limit", MaxRecordsPerChunk)
+			s.sendTCPError(conn, request.Header.ID, 2)
+			return
+		}
+	}
+
 	// RFC 1995: Verify full IXFR chain continuity
 	// Note: clientSerial+1 wraps to 0 when clientSerial is max uint32.
 	// In that case, we can only validate if chunks starts at 0 (which is valid after wrap).
@@ -323,7 +344,14 @@ func (s *Server) handleIXFR(ctx context.Context, conn net.Conn, request *packet.
 		s.sendSingleRecordResponse(conn, request.Header.ID, q, pSOA)
 
 		// 3. Stream all records in the zone
+		recordCount := 0
 		for iter.Next() {
+			recordCount++
+			if recordCount > MaxAXFRRecords {
+				s.Logger.Error("IXFR/AXFR fallback record count exceeds limit", "zone", zone.Name, "count", recordCount, "limit", MaxAXFRRecords)
+				s.sendTCPError(conn, request.Header.ID, 2)
+				return
+			}
 			rec := iter.Record()
 			if rec.Type == domain.TypeSOA {
 				continue
@@ -354,6 +382,13 @@ func (s *Server) handleIXFR(ctx context.Context, conn net.Conn, request *packet.
 
 	// Send each chunk
 	for _, chunk := range chunks {
+		// Check records per chunk limit
+		if len(chunk.Deleted) > MaxRecordsPerChunk || len(chunk.Added) > MaxRecordsPerChunk {
+			s.Logger.Error("IXFR records per chunk exceeds limit", "zone", zone.Name, "deleted", len(chunk.Deleted), "added", len(chunk.Added), "limit", MaxRecordsPerChunk)
+			s.sendTCPError(conn, request.Header.ID, 2)
+			return
+		}
+
 		// RFC 1995: IXFR sequence is [SOA(new), (SOA(old), deleted..., SOA(new), added...)*, SOA(new)]
 		// Note: The outer handleIXFR sends the first and last SOA(new).
 

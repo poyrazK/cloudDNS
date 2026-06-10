@@ -37,6 +37,13 @@ import (
 // ClassCHAOS is the DNS class for server identity and metadata.
 const ClassCHAOS = 3
 
+// IXFR limits to prevent memory exhaustion from unbounded chunk processing.
+const (
+	MaxIXFRChunks      = 1000  // max chunks per IXFR response
+	MaxRecordsPerChunk = 10000 // max records per chunk Deleted/Added arrays
+	MaxAXFRRecords     = 50000 // max records in AXFR fallback or NSEC generation
+)
+
 // Server is the core DNS server that handles incoming queries,
 // zone transfers (AXFR/IXFR), updates (RFC 2136), and NOTIFY (RFC 1996).
 type Server struct {
