@@ -353,3 +353,191 @@ func (s *Server) performAXFR(ctx context.Context, zone *domain.Zone, masterAddr 
 
 	return s.Repo.BatchCreateRecords(ctx, newRecords)
 }
+
+// StartCatalogPoller starts a background goroutine that periodically polls
+// catalog zones for changes and syncs zones to local storage.
+func (s *Server) StartCatalogPoller(ctx context.Context, catalogZones []string, masterAddr string, pollInterval time.Duration) {
+	if len(catalogZones) == 0 {
+		s.Logger.Info("no catalog zones configured for polling")
+		return
+	}
+
+	s.Logger.Info("starting catalog zone poller", "zones", catalogZones, "master", masterAddr, "interval", pollInterval)
+
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	// Poll immediately on startup
+	for _, catalogZoneName := range catalogZones {
+		if err := s.pollCatalogZone(ctx, catalogZoneName, masterAddr); err != nil {
+			s.Logger.Error("failed to poll catalog zone", "zone", catalogZoneName, "error", err)
+		}
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			s.Logger.Info("catalog poller shutting down")
+			return
+		case <-ticker.C:
+			for _, catalogZoneName := range catalogZones {
+				if err := s.pollCatalogZone(ctx, catalogZoneName, masterAddr); err != nil {
+					s.Logger.Error("failed to poll catalog zone", "zone", catalogZoneName, "error", err)
+				}
+			}
+		}
+	}
+}
+
+// pollCatalogZone polls a single catalog zone and syncs any new or changed zones.
+func (s *Server) pollCatalogZone(ctx context.Context, catalogZoneName string, masterAddr string) error {
+	s.Logger.Debug("polling catalog zone", "zone", catalogZoneName, "master", masterAddr)
+
+	// Query CZTR to check if master supports catalog zone transfers
+	cztrPacket, err := s.queryFn(masterAddr, catalogZoneName, packet.CZTR)
+	if err != nil {
+		s.Logger.Debug("master does not support CZTR, skipping catalog poll", "zone", catalogZoneName)
+		return nil
+	}
+
+	if len(cztrPacket.Answers) == 0 {
+		s.Logger.Debug("master returned empty CZTR, slave mode not supported", "zone", catalogZoneName)
+		return nil
+	}
+
+	// TODO: Query SOA to get current serial and detect changes
+	// TODO: Query PTR records for zone inventory
+	// For now, perform AXFR to get full catalog zone contents
+
+	entries, err := s.fetchCatalogEntries(ctx, catalogZoneName, masterAddr)
+	if err != nil {
+		return fmt.Errorf("failed to fetch catalog entries: %w", err)
+	}
+
+	s.Logger.Info("received catalog zone entries", "zone", catalogZoneName, "count", len(entries))
+
+	// Sync each zone from catalog
+	for _, entry := range entries {
+		if err := s.syncZoneFromCatalog(ctx, &entry, masterAddr); err != nil {
+			s.Logger.Error("failed to sync zone from catalog", "zone", entry.ZoneName, "error", err)
+		}
+	}
+
+	return nil
+}
+
+// fetchCatalogEntries performs AXFR on the catalog zone and extracts zone entries.
+func (s *Server) fetchCatalogEntries(ctx context.Context, catalogZoneName string, masterAddr string) ([]domain.ZoneCatalogEntry, error) {
+	if _, _, err := net.SplitHostPort(masterAddr); err != nil {
+		masterAddr = net.JoinHostPort(masterAddr, "53")
+	}
+
+	s.Logger.Debug("performing AXFR for catalog zone", "zone", catalogZoneName, "master", masterAddr)
+
+	conn, err := net.DialTimeout("tcp", masterAddr, 10*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to master: %w", err)
+	}
+	defer func() {
+		if errClose := conn.Close(); errClose != nil {
+			s.Logger.Warn("failed to close AXFR connection", "error", errClose)
+		}
+	}()
+
+	// Construct AXFR query
+	req := packet.NewDNSPacket()
+	req.Header.ID = generateTransactionID()
+	req.Header.RecursionDesired = false
+	req.Questions = append(req.Questions, packet.DNSQuestion{
+		Name:   catalogZoneName,
+		QType:  packet.AXFR,
+		QClass: 1,
+	})
+
+	buffer := packet.NewBytePacketBuffer()
+	if err := req.Write(buffer); err != nil {
+		return nil, err
+	}
+
+	// Write length-prefixed query
+	data := buffer.Buf[:buffer.Position()]
+	prefix := []byte{byte((len(data) >> 8) & 0xFF), byte(len(data) & 0xFF)}
+	if _, err := conn.Write(append(prefix, data...)); err != nil {
+		return nil, err
+	}
+
+	var entries []domain.ZoneCatalogEntry
+	soaCount := 0
+
+	for {
+		// Read 2-byte length
+		lenBuf := make([]byte, 2)
+		if _, err := io.ReadFull(conn, lenBuf); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, err
+		}
+		pLen := int(lenBuf[0])<<8 | int(lenBuf[1])
+
+		// Read packet
+		pData := make([]byte, pLen)
+		if _, err := io.ReadFull(conn, pData); err != nil {
+			return nil, err
+		}
+
+		resBuffer := packet.NewBytePacketBuffer()
+		resBuffer.Load(pData)
+
+		resp := packet.NewDNSPacket()
+		if err := resp.FromBuffer(resBuffer); err != nil {
+			return nil, err
+		}
+
+		if resp.Header.ResCode != packet.RcodeNoError {
+			return nil, fmt.Errorf("master returned error: %d", resp.Header.ResCode)
+		}
+
+		for _, ans := range resp.Answers {
+			if ans.Type == packet.SOA {
+				soaCount++
+			}
+
+			// Extract zone entries from PTR records
+			// Per RFC 9432, zones are stored as PTR records in the catalog zone
+			if ans.Type == packet.PTR {
+				// Content format: "zone_name:zone_id[:group_id]"
+				parts := strings.SplitN(ans.Host, ":", 3)
+				if len(parts) >= 2 {
+					entry := domain.ZoneCatalogEntry{
+						ZoneName: parts[0],
+						ZoneID:   parts[1],
+					}
+					if len(parts) == 3 {
+						entry.GroupID = parts[2]
+					}
+					entries = append(entries, entry)
+					s.Logger.Debug("found catalog entry", "zone", entry.ZoneName, "id", entry.ZoneID)
+				}
+			}
+		}
+
+		// AXFR ends when the second SOA is received
+		if soaCount >= 2 {
+			break
+		}
+	}
+
+	return entries, nil
+}
+
+// syncZoneFromCatalog provisions a single zone from a catalog entry.
+func (s *Server) syncZoneFromCatalog(ctx context.Context, entry *domain.ZoneCatalogEntry, masterAddr string) error {
+	// TODO: Implement full zone provisioning from catalog
+	// 1. Query zone's SOA from master to get serial
+	// 2. Perform IXFR/AXFR to get zone data
+	// 3. Create zone and records in repository
+
+	s.Logger.Info("would provision zone from catalog", "zone", entry.ZoneName, "id", entry.ZoneID, "group", entry.GroupID, "master", masterAddr)
+	return nil
+}
