@@ -902,6 +902,13 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 	s.truncateIfNeeded(response, resBuffer, maxSize)
 	resData := resBuffer.Buf[:resBuffer.Position()]
 
+	// Issue #235: If wildcard resolution occurred, rebuild cache key with zone's tenantID
+	// to ensure proper tenant isolation (original cacheKey may have been built before
+	// we knew which zone would serve the wildcard match)
+	if source == "wildcard" && zone != nil && zone.TenantID != "" {
+		cacheKey = zone.TenantID + ":" + lowerName + ":" + strconv.Itoa(int(q.QType))
+	}
+
 	// Cache result
 	s.cacheResult(ctx, cacheKey, resData, response)
 
