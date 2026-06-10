@@ -214,7 +214,7 @@ func (s *Server) performIXFR(ctx context.Context, zone *domain.Zone, masterAddr 
 			return fmt.Errorf("AXFR fallback failed to clear zone: %w", err)
 		}
 		if err := s.Repo.BatchCreateRecords(ctx, newRecords); err != nil {
-			return fmt.Errorf("AXFR fallback failed to import records: %w", err)
+			return err // BatchCreateRecords already wraps errors, don't double-wrap
 		}
 		return nil
 	}
