@@ -1531,6 +1531,53 @@ func TestValidateNSEC3RecordFormat_NextHashTooLong(t *testing.T) {
 	}
 }
 
+// TestValidateNSEC3RecordFormat_IterationsTooHigh tests that NSEC3 records with iterations > 150 are rejected.
+func TestValidateNSEC3RecordFormat_IterationsTooHigh(t *testing.T) {
+	nsec3 := DNSRecord{
+		Type:       NSEC3,
+		HashAlg:    1,
+		Iterations: 200, // > 150, should be rejected
+		Salt:       []byte{0xAB, 0xCD},
+		NextHash:   make([]byte, 20),
+	}
+	err := ValidateNSEC3RecordFormat(nsec3)
+	if err == nil {
+		t.Error("Expected error for iterations > 150")
+	}
+	// Verify the error message contains iteration count for debugging
+	if err != nil && !strings.Contains(err.Error(), "nsec3 iterations too high") {
+		t.Errorf("Expected error message to mention 'nsec3 iterations too high', got: %v", err)
+	}
+}
+
+// TestValidateNSEC3RecordFormat_BoundaryValues tests boundary values around the iterations cap.
+func TestValidateNSEC3RecordFormat_BoundaryValues(t *testing.T) {
+	tests := []struct {
+		name       string
+		iterations uint16
+		wantErr    bool
+	}{
+		{"150 is valid", 150, false},
+		{"151 is invalid", 151, true},
+		{"200 is invalid", 200, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			nsec3 := DNSRecord{
+				Type:       NSEC3,
+				HashAlg:    1,
+				Iterations: tt.iterations,
+				Salt:       []byte{0xAB, 0xCD},
+				NextHash:   make([]byte, 20),
+			}
+			err := ValidateNSEC3RecordFormat(nsec3)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateNSEC3RecordFormat(iterations=%d) error = %v, wantErr %v", tt.iterations, err, tt.wantErr)
+			}
+		})
+	}
+}
+
 // TestBase32Decode tests NSEC3-specific base32 decoding.
 func TestBase32Decode(t *testing.T) {
 	// Known test vectors from NSEC3 hash examples

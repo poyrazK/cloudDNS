@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"crypto/sha512"
 	"errors"
+	"fmt"
 	"math/big"
 	"strings"
 
@@ -673,6 +674,14 @@ func ValidateNSEC3RecordFormat(nsec3 DNSRecord) error {
 	// RFC 5155 Section 3.2: hash algorithm must be 1 (SHA-1)
 	if nsec3.HashAlg != 1 {
 		return ErrNSEC3HashAlgoUnsupported
+	}
+
+	// RFC 5155 Section 10.3: Iterations should be limited to prevent DoS (CPU exhaustion).
+	// High iterations (e.g., 5000+) on deeply nested names causes expensive SHA-1 computation.
+	// Common legitimate values are < 100; we cap at 150 to allow margin.
+	const MaxNSEC3Iterations = 150
+	if nsec3.Iterations > MaxNSEC3Iterations {
+		return fmt.Errorf("dnssec: nsec3 iterations too high (%d)", nsec3.Iterations)
 	}
 
 	// Salt length must be <= 255 per RFC 5155
