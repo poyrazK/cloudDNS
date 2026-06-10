@@ -325,3 +325,99 @@ func (s *dnsService) HealthCheck(ctx context.Context) map[string]error {
 	}
 	return res
 }
+
+// CreateCatalogZone creates a new catalog zone (RFC 9432).
+func (s *dnsService) CreateCatalogZone(ctx context.Context, tenantID string, zoneName string) (*domain.CatalogZone, error) {
+	catz := &domain.CatalogZone{
+		ID:        uuid.New().String(),
+		TenantID:  tenantID,
+		ZoneName:  zoneName,
+		Version:   "1",
+		Serial:    1,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	if err := s.repo.CreateCatalogZone(ctx, catz); err != nil {
+		return nil, fmt.Errorf("failed to create catalog zone: %w", err)
+	}
+	return catz, nil
+}
+
+// GetCatalogZone retrieves a catalog zone by ID.
+func (s *dnsService) GetCatalogZone(ctx context.Context, catalogID string) (*domain.CatalogZone, error) {
+	return s.repo.GetCatalogZone(ctx, catalogID)
+}
+
+// ListCatalogZones lists all catalog zones for a tenant.
+func (s *dnsService) ListCatalogZones(ctx context.Context, tenantID string) ([]domain.CatalogZone, error) {
+	return s.repo.ListCatalogZones(ctx, tenantID)
+}
+
+// DeleteCatalogZone deletes a catalog zone.
+func (s *dnsService) DeleteCatalogZone(ctx context.Context, catalogID string, tenantID string) error {
+	return s.repo.DeleteCatalogZone(ctx, catalogID, tenantID)
+}
+
+// AddZoneToCatalog adds a zone to a catalog zone's inventory (RFC 9432).
+func (s *dnsService) AddZoneToCatalog(ctx context.Context, catalogID string, zoneName string, zoneID string, groupID string) error {
+	entry := &domain.ZoneCatalogEntry{
+		ZoneName: zoneName,
+		ZoneID:   zoneID,
+		GroupID:  groupID,
+	}
+	if err := s.repo.AddZoneToCatalog(ctx, catalogID, entry); err != nil {
+		return fmt.Errorf("failed to add zone to catalog: %w", err)
+	}
+
+	// Increment catalog serial to signal change
+	catz, err := s.repo.GetCatalogZone(ctx, catalogID)
+	if err != nil || catz == nil {
+		return err
+	}
+	newSerial := catz.Serial + 1
+	if err := s.repo.UpdateCatalogZoneVersion(ctx, catalogID, catz.Version, newSerial); err != nil {
+		return fmt.Errorf("failed to update catalog version: %w", err)
+	}
+
+	return nil
+}
+
+// RemoveZoneFromCatalog removes a zone from a catalog zone's inventory (RFC 9432).
+func (s *dnsService) RemoveZoneFromCatalog(ctx context.Context, catalogID string, zoneName string) error {
+	if err := s.repo.RemoveZoneFromCatalog(ctx, catalogID, zoneName); err != nil {
+		return fmt.Errorf("failed to remove zone from catalog: %w", err)
+	}
+
+	// Increment catalog serial to signal change
+	catz, err := s.repo.GetCatalogZone(ctx, catalogID)
+	if err != nil || catz == nil {
+		return err
+	}
+	newSerial := catz.Serial + 1
+	if err := s.repo.UpdateCatalogZoneVersion(ctx, catalogID, catz.Version, newSerial); err != nil {
+		return fmt.Errorf("failed to update catalog version: %w", err)
+	}
+
+	return nil
+}
+
+// ListZoneCatalogEntries lists all zone entries in a catalog zone.
+func (s *dnsService) ListZoneCatalogEntries(ctx context.Context, catalogID string) ([]domain.ZoneCatalogEntry, error) {
+	return s.repo.ListZoneCatalogEntries(ctx, catalogID)
+}
+
+// PollCatalogZone polls a remote catalog zone and returns the zone entries.
+// This is used by slave servers to discover zones from a master.
+func (s *dnsService) PollCatalogZone(ctx context.Context, masterAddr string, catalogZoneName string) ([]domain.ZoneCatalogEntry, error) {
+	// TODO: Implement AXFR to fetch catalog zone from master
+	// For now, return empty - this will be implemented in the client polling
+	return nil, nil
+}
+
+// SyncZonesFromCatalog syncs zones from a catalog to local storage.
+// Used by slave servers to provision zones from catalog.
+func (s *dnsService) SyncZonesFromCatalog(ctx context.Context, catalogID string, masterAddr string) error {
+	// TODO: Implement catalog zone AXFR and zone provisioning
+	// For now, return nil - this will be implemented in the client polling
+	return nil
+}

@@ -109,6 +109,15 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.Handle("OPTIONS /zones/{zone_id}/records/{id}", cors(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})))
+
+	// Catalog Zones (RFC 9432) - Admin only
+	mux.Handle("POST /catalog-zones", cors(auth(rateLimitWrite(admin(http.HandlerFunc(h.CreateCatalogZone))))))
+	mux.Handle("GET /catalog-zones", cors(auth(rateLimitRead(admin(http.HandlerFunc(h.ListCatalogZones))))))
+	mux.Handle("GET /catalog-zones/{id}", cors(auth(rateLimitRead(admin(http.HandlerFunc(h.GetCatalogZone))))))
+	mux.Handle("DELETE /catalog-zones/{id}", cors(auth(rateLimitDeleteZone(admin(http.HandlerFunc(h.DeleteCatalogZone))))))
+	mux.Handle("GET /catalog-zones/{id}/entries", cors(auth(rateLimitRead(admin(http.HandlerFunc(h.ListCatalogEntries))))))
+	mux.Handle("POST /catalog-zones/{id}/entries", cors(auth(rateLimitWrite(admin(http.HandlerFunc(h.AddCatalogEntry))))))
+	mux.Handle("DELETE /catalog-zones/{id}/entries/{zone_name}", cors(auth(rateLimitDeleteZone(admin(http.HandlerFunc(h.RemoveCatalogEntry))))))
 }
 
 // Metrics handles Prometheus metrics scraping requests.
@@ -377,6 +386,163 @@ func (h *Handler) DeleteRecord(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.svc.DeleteRecord(r.Context(), id, zoneID, tenantID); err != nil {
 		h.writeJSONError(w, http.StatusInternalServerError, "An internal error occurred", err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// CreateCatalogZone handles POST /catalog-zones requests.
+func (h *Handler) CreateCatalogZone(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := r.Context().Value(CtxTenantID).(string)
+	if !ok || tenantID == "" {
+		h.logger.Warn("CreateCatalogZone: missing or invalid tenant ID in context")
+		h.writeJSONError(w, http.StatusUnauthorized, "Unauthorized: missing tenant context", nil)
+		return
+	}
+
+	var req struct {
+		ZoneName string `json:"zone_name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeJSONError(w, http.StatusBadRequest, "Invalid request body", err)
+		return
+	}
+	if req.ZoneName == "" {
+		h.writeJSONError(w, http.StatusBadRequest, "zone_name is required", nil)
+		return
+	}
+
+	catz, err := h.svc.CreateCatalogZone(r.Context(), tenantID, req.ZoneName)
+	if err != nil {
+		h.writeJSONError(w, http.StatusInternalServerError, "Failed to create catalog zone", err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	if err := json.NewEncoder(w).Encode(catz); err != nil {
+		h.logger.Error("failed to encode catalog zone response", "error", err)
+	}
+}
+
+// ListCatalogZones handles GET /catalog-zones requests.
+func (h *Handler) ListCatalogZones(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := r.Context().Value(CtxTenantID).(string)
+	if !ok || tenantID == "" {
+		h.logger.Warn("ListCatalogZones: missing or invalid tenant ID in context")
+		h.writeJSONError(w, http.StatusUnauthorized, "Unauthorized: missing tenant context", nil)
+		return
+	}
+
+	catalogZones, err := h.svc.ListCatalogZones(r.Context(), tenantID)
+	if err != nil {
+		h.writeJSONError(w, http.StatusInternalServerError, "Failed to list catalog zones", err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(catalogZones); err != nil {
+		h.logger.Error("failed to encode catalog zones response", "error", err)
+	}
+}
+
+// GetCatalogZone handles GET /catalog-zones/{id} requests.
+func (h *Handler) GetCatalogZone(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	tenantID, ok := r.Context().Value(CtxTenantID).(string)
+	if !ok || tenantID == "" {
+		h.logger.Warn("GetCatalogZone: missing or invalid tenant ID in context")
+		h.writeJSONError(w, http.StatusUnauthorized, "Unauthorized: missing tenant context", nil)
+		return
+	}
+
+	catz, err := h.svc.GetCatalogZone(r.Context(), id)
+	if err != nil {
+		h.writeJSONError(w, http.StatusInternalServerError, "Failed to get catalog zone", err)
+		return
+	}
+	if catz == nil {
+		h.writeJSONError(w, http.StatusNotFound, "Catalog zone not found", nil)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(catz); err != nil {
+		h.logger.Error("failed to encode catalog zone response", "error", err)
+	}
+}
+
+// DeleteCatalogZone handles DELETE /catalog-zones/{id} requests.
+func (h *Handler) DeleteCatalogZone(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	tenantID, ok := r.Context().Value(CtxTenantID).(string)
+	if !ok || tenantID == "" {
+		h.logger.Warn("DeleteCatalogZone: missing or invalid tenant ID in context")
+		h.writeJSONError(w, http.StatusUnauthorized, "Unauthorized: missing tenant context", nil)
+		return
+	}
+
+	if err := h.svc.DeleteCatalogZone(r.Context(), id, tenantID); err != nil {
+		h.writeJSONError(w, http.StatusInternalServerError, "Failed to delete catalog zone", err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ListCatalogEntries handles GET /catalog-zones/{id}/entries requests.
+func (h *Handler) ListCatalogEntries(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	entries, err := h.svc.ListZoneCatalogEntries(r.Context(), id)
+	if err != nil {
+		h.writeJSONError(w, http.StatusInternalServerError, "Failed to list catalog entries", err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(entries); err != nil {
+		h.logger.Error("failed to encode catalog entries response", "error", err)
+	}
+}
+
+// AddCatalogEntry handles POST /catalog-zones/{id}/entries requests.
+func (h *Handler) AddCatalogEntry(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	var req struct {
+		ZoneName string `json:"zone_name"`
+		ZoneID   string `json:"zone_id"`
+		GroupID  string `json:"group_id,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeJSONError(w, http.StatusBadRequest, "Invalid request body", err)
+		return
+	}
+	if req.ZoneName == "" || req.ZoneID == "" {
+		h.writeJSONError(w, http.StatusBadRequest, "zone_name and zone_id are required", nil)
+		return
+	}
+
+	if err := h.svc.AddZoneToCatalog(r.Context(), id, req.ZoneName, req.ZoneID, req.GroupID); err != nil {
+		h.writeJSONError(w, http.StatusInternalServerError, "Failed to add zone to catalog", err)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+}
+
+// RemoveCatalogEntry handles DELETE /catalog-zones/{id}/entries/{zone_name} requests.
+func (h *Handler) RemoveCatalogEntry(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	zoneName := r.PathValue("zone_name")
+
+	if err := h.svc.RemoveZoneFromCatalog(r.Context(), id, zoneName); err != nil {
+		h.writeJSONError(w, http.StatusInternalServerError, "Failed to remove zone from catalog", err)
 		return
 	}
 
