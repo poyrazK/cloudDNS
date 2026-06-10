@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	crand "crypto/rand"
+	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -22,8 +23,9 @@ func (s *Server) handleNotify(ctx context.Context, request *packet.DNSPacket, cl
 		s.Logger.Warn("received NOTIFY without questions", "from", clientIP)
 		return nil
 	}
+	h := sha256.Sum224([]byte(request.Questions[0].Name))
 	s.Logger.Info("received NOTIFY", "zone", request.Questions[0].Name, "from", clientIP)
-	metrics.NotifiesTotal.WithLabelValues(request.Questions[0].Name, "accepted").Inc()
+	metrics.NotifiesTotal.WithLabelValues(fmt.Sprintf("%x", h[:8]), "accepted").Inc()
 
 	response := packet.NewDNSPacket()
 	response.Header.ID = request.Header.ID
