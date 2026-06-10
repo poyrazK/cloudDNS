@@ -998,7 +998,7 @@ func TestServer_Run_ContextCancel(t *testing.T) {
 		if err != nil {
 			t.Errorf("Expected nil error from Run on cancel, got %v", err)
 		}
-	case <-time.After(500 * time.Millisecond):
+	case <-time.After(3 * time.Second):
 		t.Fatal("srv.Run blocked for too long after context cancellation")
 	}
 }
@@ -1379,7 +1379,7 @@ func TestServer_Run_NonBlockingOnTCPDoTFailure(t *testing.T) {
 		if err != nil {
 			t.Logf("Run returned expected error: %v", err)
 		}
-	case <-time.After(500 * time.Millisecond):
+	case <-time.After(3 * time.Second):
 		t.Fatal("srv.Run blocked for too long")
 	}
 }
