@@ -98,6 +98,9 @@ type Server struct {
 	done         chan struct{}
 	wg           sync.WaitGroup
 
+	// catalogState tracks the last-seen serial for each catalog zone to avoid unnecessary re-syncs
+	catalogState *catalogPollerState
+
 	// inflightCache prevents thundering herd: tracks keys currently being fetched from L2.
 	// Key -> *inflightEntry (done channel closed when fetch completes).
 	inflightCache sync.Map
@@ -107,6 +110,12 @@ type Server struct {
 
 	// querySingleflight ensures only one goroutine performs DB query per cache key.
 	querySingleflight singleflight.Group
+}
+
+// catalogPollerState tracks catalog zone polling state for efficient change detection.
+type catalogPollerState struct {
+	mu             sync.RWMutex
+	lastSeenSerial map[string]uint32 // catalogZoneName -> serial
 }
 
 // NewServer creates a new DNS server instance.
@@ -138,6 +147,7 @@ func NewServer(addr string, repo ports.DNSRepository, logger *slog.Logger) *Serv
 		NodeID:           nodeID,
 		RecursionEnabled: recursion,
 		CookieSecret:     make([]byte, 32),
+		catalogState:     &catalogPollerState{lastSeenSerial: make(map[string]uint32)},
 	}
 	s.lifecycleCtx, s.cancel = context.WithCancel(context.Background())
 	s.done = make(chan struct{})

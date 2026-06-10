@@ -496,6 +496,12 @@ func (h *Handler) DeleteCatalogZone(w http.ResponseWriter, r *http.Request) {
 // ListCatalogEntries handles GET /catalog-zones/{id}/entries requests.
 func (h *Handler) ListCatalogEntries(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	tenantID, ok := r.Context().Value(CtxTenantID).(string)
+	if !ok || tenantID == "" {
+		h.logger.Warn("ListCatalogEntries: missing or invalid tenant ID in context")
+		h.writeJSONError(w, http.StatusUnauthorized, "Unauthorized: missing tenant context", nil)
+		return
+	}
 
 	entries, err := h.svc.ListZoneCatalogEntries(r.Context(), id)
 	if err != nil {
