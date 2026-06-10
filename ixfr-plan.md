@@ -42,7 +42,7 @@ New methods needed in `PostgresRepository`:
     *   Returns an ordered list of "chunks" (Delete List + Add List) wrapped in SOA records.
 
 ### 4.3 DNS Server (Master Side)
-Update `handleIXFR` in `server.go`:
+Update `handleIXFR` in `axfr.go` (extracted from `server.go`):
 1.  Check if `clientSerial` is known in the history.
 2.  If known, fetch the chain of changes.
 3.  Construct the IXFR response packet:

@@ -45,7 +45,13 @@ internal/
 - Supports all record types: A, AAAA, MX, TXT, CNAME, NS, SOA, PTR, SRV, CAA, DS, DNSKEY, RRSIG, NSEC, NSEC3, IXFR, AXFR, OPT, TSIG, HTTPS (RFC 9460)
 
 ### `internal/dns/server/` - DNS Protocol Implementation
-- **server.go** (~2100 lines): Core `Server` struct handling all transport protocols
+- **server.go** (~1381 lines): Core `Server` struct handling all transport protocols
+- **types.go**: Package-level types (cacheLockShard, TsigKey, inflightEntry, etc.)
+- **helpers.go**: Package-level functions (fnv32, lockKey, extractClientIP, parentZoneName, etc.)
+- **dnssec.go**: DNSSEC signing, validation, and trust chain building
+- **axfr.go**: AXFR/IXFR zone transfer handling
+- **update.go**: Dynamic update (RFC 2136) and NOTIFY (RFC 1996) handling
+- **nsec.go**: NSEC/NSEC3 record generation for DNSSEC proofs
 - **cache.go**: L1 sharded in-memory cache with per-key locking; L2 Redis cache with Pub/Sub invalidation
 - **recursive.go**: Iterative recursive resolution using root hints
 - **ratelimit.go**: Token bucket rate limiting (500k req/s, burst 200k per client IP)
