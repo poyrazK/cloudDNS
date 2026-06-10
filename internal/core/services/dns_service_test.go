@@ -291,6 +291,21 @@ func (m *mockRepo) UpdateRecord(_ context.Context, record *domain.Record) error 
 	return m.err
 }
 
+func (m *mockRepo) CreateCatalogZone(_ context.Context, _ *domain.CatalogZone) error              { return nil }
+func (m *mockRepo) GetCatalogZone(_ context.Context, _ string) (*domain.CatalogZone, error)       { return nil, nil }
+func (m *mockRepo) ListCatalogZones(_ context.Context, _ string) ([]domain.CatalogZone, error)    { return nil, nil }
+func (m *mockRepo) UpdateCatalogZoneVersion(_ context.Context, _, _ string, _ uint32) error       { return nil }
+func (m *mockRepo) DeleteCatalogZone(_ context.Context, _, _ string) error                        { return nil }
+func (m *mockRepo) ListZoneCatalogEntries(_ context.Context, _ string) ([]domain.ZoneCatalogEntry, error) {
+	return nil, nil
+}
+func (m *mockRepo) AddZoneToCatalog(_ context.Context, _ string, _ *domain.ZoneCatalogEntry) error { return nil }
+func (m *mockRepo) RemoveZoneFromCatalog(_ context.Context, _, _ string) error                    { return nil }
+func (m *mockRepo) CreateZoneFromCatalog(_ context.Context, _ *domain.Zone, _ []domain.Record) error {
+	return nil
+}
+func (m *mockRepo) DeleteZoneByCatalogName(_ context.Context, _, _ string) error { return nil }
+
 func TestDNSService_ExtraMethods(t *testing.T) {
 	repo := &mockRepo{}
 	svc := NewDNSService(repo, nil)
