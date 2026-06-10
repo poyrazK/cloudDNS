@@ -416,11 +416,10 @@ func (s *Server) Run(ctx context.Context) error {
 		}
 		s.wg.Wait()  // Wait for all goroutines to finish before Run() returns
 		// Shutdown HTTP servers and Redis (can take time, so separate from wg wait)
-		//nolint:contextcheck // intentional: ctx is already cancelled at this point, need fresh background
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), s.shutdownTimeout())
 		defer shutdownCancel()
 		if s.dohServer != nil {
-			if err := s.dohServer.Shutdown(shutdownCtx); err != nil {
+			if err := s.dohServer.Shutdown(shutdownCtx); err != nil { //nolint:contextcheck
 				s.Logger.Warn("failed to shut down DoH server", "error", err)
 			}
 		}
