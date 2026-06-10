@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 CREATE TABLE IF NOT EXISTS dns_zones (
     id UUID PRIMARY KEY,
     tenant_id TEXT NOT NULL,
@@ -129,6 +130,9 @@ CREATE TABLE IF NOT EXISTS api_keys (
     role TEXT NOT NULL DEFAULT 'admin',
     active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+=======
+created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+>>>>>>> 30a7dd1 (feat: add database schema and domain types for Catalog Zones (RFC 9432))
     expires_at TIMESTAMPTZ,
     CONSTRAINT role_check CHECK (role IN ('admin', 'writer', 'reader'))
 );
@@ -141,3 +145,24 @@ ALTER TABLE dns_records ALTER COLUMN name TYPE citext;
 
 -- Migrate dns_zones.name to citext for case-insensitive zone lookups
 ALTER TABLE dns_zones ALTER COLUMN name TYPE citext;
+
+-- Catalog Zones (RFC 9432)
+CREATE TABLE IF NOT EXISTS catalog_zones (
+    id UUID PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    zone_name TEXT NOT NULL UNIQUE,
+    version TEXT NOT NULL DEFAULT '1',
+    serial BIGINT NOT NULL DEFAULT 1,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Index for catalog zone lookup by tenant
+CREATE INDEX IF NOT EXISTS idx_catalog_zones_tenant_id ON catalog_zones(tenant_id);
+
+-- Add catalog relationship to dns_zones
+ALTER TABLE dns_zones ADD COLUMN IF NOT EXISTS catalog_id UUID REFERENCES catalog_zones(id);
+ALTER TABLE dns_zones ADD COLUMN IF NOT EXISTS catalog_zone_name TEXT;
+
+-- Index for dns_zones catalog_zone_name lookups (used by GetZoneByCatalogName)
+CREATE INDEX IF NOT EXISTS idx_dns_zones_catalog_zone_name ON dns_zones(catalog_zone_name) WHERE catalog_zone_name IS NOT NULL;
