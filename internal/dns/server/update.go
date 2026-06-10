@@ -41,7 +41,9 @@ func (s *Server) handleNotify(ctx context.Context, request *packet.DNSPacket, cl
 		if !isAuthorizedNotifier(clientIP, zone.MasterServer) {
 			s.Logger.Warn("NOTIFY rejected: unauthorized source", "from", clientIP, "master", zone.MasterServer)
 		} else if !s.DisableAsync {
+			s.wg.Add(1)
 			go func(zoneName string) {
+				defer s.wg.Done()
 				select {
 				case <-s.lifecycleCtx.Done():
 					return

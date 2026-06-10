@@ -409,16 +409,18 @@ func (s *Server) Run(ctx context.Context) error {
 				s.Logger.Warn("failed to close DoT listener", "error", err)
 			}
 		}
-		shutdownCtx, shutdownCancel := context.WithTimeout(ctx, s.shutdownTimeout())
+		if s.doqListener != nil {
+			if err := s.doqListener.Close(); err != nil {
+				s.Logger.Warn("failed to close DoQ listener", "error", err)
+			}
+		}
+		s.wg.Wait()  // Wait for all goroutines to finish before Run() returns
+		// Shutdown HTTP servers and Redis (can take time, so separate from wg wait)
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), s.shutdownTimeout())
 		defer shutdownCancel()
 		if s.dohServer != nil {
 			if err := s.dohServer.Shutdown(shutdownCtx); err != nil {
 				s.Logger.Warn("failed to shut down DoH server", "error", err)
-			}
-		}
-		if s.doqListener != nil {
-			if err := s.doqListener.Close(); err != nil {
-				s.Logger.Warn("failed to close DoQ listener", "error", err)
 			}
 		}
 		if s.Redis != nil {
@@ -628,7 +630,17 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 
 	<-ctx.Done()
-	return nil // async shutdown handles cleanup in background
+	// Close listeners to unblock workers before wg.Wait() in defer
+	if s.tcpListener != nil {
+		_ = s.tcpListener.Close()
+	}
+	if s.dotListener != nil {
+		_ = s.dotListener.Close()
+	}
+	if s.doqListener != nil {
+		_ = s.doqListener.Close()
+	}
+	return nil
 }
 
 // handleDoH handles DNS-over-HTTPS requests (RFC 8484).
