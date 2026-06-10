@@ -1,6 +1,7 @@
 package config
 
 import (
+	"net"
 	"time"
 )
 
@@ -39,6 +40,16 @@ type ServerConfig struct {
 
 	// BGPNextHop is the next hop address for BGP announcements. Default: "127.0.0.1".
 	BGPNextHop string
+
+	// DNS64Enabled enables DNS64 synthesis (RFC 6147). Default: false.
+	DNS64Enabled bool
+
+	// DNS64Prefix is the IPv6 prefix used for DNS64 synthesis.
+	// Default: 64:ff9b::/96 (Well-Known Prefix per RFC 6147).
+	DNS64Prefix net.IP
+
+	// DNS64PrefixStr is the string form of the DNS64 prefix for env var parsing.
+	DNS64PrefixStr string
 }
 
 // DefaultServerConfig returns a ServerConfig with all values set to defaults.
@@ -53,5 +64,8 @@ func DefaultServerConfig() *ServerConfig {
 		BGPRouterID:             "127.0.0.1",
 		BGPListenPort:            179,
 		BGPNextHop:               "127.0.0.1",
+		DNS64Enabled:             false,
+		DNS64Prefix:              net.ParseIP("64:ff9b::"),
+		DNS64PrefixStr:           "64:ff9b::",
 	}
 }

@@ -226,6 +226,9 @@ type DNSHeader struct {
 	Z               bool
 	RecursionAvailable bool
 
+	// DNS64Synthesized is set when the response contains synthesized AAAA records (RFC 6147).
+	DNS64Synthesized bool
+
 	// RFC 2136 (Dynamic Update) field renames:
 	// Questions -> ZOCOUNT (Number of zones)
 	// Answers -> PRCOUNT (Number of prerequisites)
