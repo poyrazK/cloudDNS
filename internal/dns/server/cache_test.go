@@ -10,7 +10,7 @@ import (
 func TestCacheSetGet(t *testing.T) {
 	done := make(chan struct{})
 	t.Cleanup(func() { close(done) })
-	cache := NewDNSCache(done, nil)
+	cache := NewDNSCache(done)
 	key := "test.com:1"
 	data := []byte{1, 2, 3, 4}
 
@@ -28,7 +28,7 @@ func TestCacheSetGet(t *testing.T) {
 func TestCacheExpiration(t *testing.T) {
 	done := make(chan struct{})
 	t.Cleanup(func() { close(done) })
-	cache := NewDNSCache(done, nil)
+	cache := NewDNSCache(done)
 	key := "expire.com:1"
 	data := []byte{0}
 
@@ -47,7 +47,7 @@ func TestCacheExpiration(t *testing.T) {
 func TestCacheConcurrency(_ *testing.T) {
 	done := make(chan struct{})
 	// No cleanup needed - test runs briefly
-	cache := NewDNSCache(done, nil)
+	cache := NewDNSCache(done)
 
 	// Simple smoke test for concurrent access
 	for i := 0; i < 100; i++ {
@@ -61,7 +61,7 @@ func TestCacheConcurrency(_ *testing.T) {
 func TestCacheCleanup(t *testing.T) {
 	done := make(chan struct{})
 	t.Cleanup(func() { close(done) })
-	cache := NewDNSCache(done, nil)
+	cache := NewDNSCache(done)
 	cache.Set("keep", []byte{1}, 1*time.Hour)
 	cache.Set("drop", []byte{2}, -1*time.Hour) // Already expired
 
@@ -76,7 +76,7 @@ func TestCacheCleanup(t *testing.T) {
 func TestCacheFlush(t *testing.T) {
 	done := make(chan struct{})
 	t.Cleanup(func() { close(done) })
-	cache := NewDNSCache(done, nil)
+	cache := NewDNSCache(done)
 	cache.Set("a", []byte{1}, 1*time.Hour)
 	cache.Flush()
 
@@ -89,7 +89,7 @@ func TestCacheFlush(t *testing.T) {
 func TestCacheInvalidate(t *testing.T) {
 	done := make(chan struct{})
 	t.Cleanup(func() { close(done) })
-	cache := NewDNSCache(done, nil)
+	cache := NewDNSCache(done)
 	cache.Set("key1", []byte{1}, 1*time.Hour)
 	cache.Invalidate("key1")
 	
@@ -102,7 +102,7 @@ func TestCacheInvalidate(t *testing.T) {
 func TestCacheGetInto(t *testing.T) {
 	done := make(chan struct{})
 	t.Cleanup(func() { close(done) })
-	cache := NewDNSCache(done, nil)
+	cache := NewDNSCache(done)
 	key := "getinto.com:1"
 
 	// Set 4-byte data
@@ -135,7 +135,7 @@ func TestCacheGetInto(t *testing.T) {
 func TestCacheGetIntoShortData(t *testing.T) {
 	done := make(chan struct{})
 	t.Cleanup(func() { close(done) })
-	cache := NewDNSCache(done, nil)
+	cache := NewDNSCache(done)
 	key := "short.com:1"
 
 	// Set 1-byte data (too short for txID injection)
@@ -157,7 +157,7 @@ func TestCacheGetIntoShortData(t *testing.T) {
 func TestCacheGetReturnsInternalSlice(t *testing.T) {
 	done := make(chan struct{})
 	t.Cleanup(func() { close(done) })
-	cache := NewDNSCache(done, nil)
+	cache := NewDNSCache(done)
 	key := "copy-test.com:1"
 	originalData := []byte{1, 2, 3, 4}
 	cache.Set(key, originalData, 1*time.Hour)
@@ -190,7 +190,7 @@ func TestCacheGetReturnsInternalSlice(t *testing.T) {
 func TestCacheSetNoCopy(t *testing.T) {
 	done := make(chan struct{})
 	t.Cleanup(func() { close(done) })
-	cache := NewDNSCache(done, nil)
+	cache := NewDNSCache(done)
 	key := "setnocopy.com:1"
 
 	// Set via SetNoCopy (no defensive copy)
@@ -224,7 +224,7 @@ func TestCacheSetNoCopy(t *testing.T) {
 func TestCacheSetNoCopyExpiration(t *testing.T) {
 	done := make(chan struct{})
 	t.Cleanup(func() { close(done) })
-	cache := NewDNSCache(done, nil)
+	cache := NewDNSCache(done)
 	key := "expire-nocopy.com:1"
 
 	// Set with very short TTL
@@ -249,7 +249,7 @@ func TestCacheSetNoCopyExpiration(t *testing.T) {
 func TestCachePing(t *testing.T) {
 	done := make(chan struct{})
 	t.Cleanup(func() { close(done) })
-	cache := NewDNSCache(done, nil)
+	cache := NewDNSCache(done)
 	
 	// 1. Success case
 	if err := cache.Ping(context.Background()); err != nil {

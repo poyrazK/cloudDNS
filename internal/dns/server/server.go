@@ -172,8 +172,8 @@ func NewServer(addr string, repo ports.DNSRepository, logger *slog.Logger) *Serv
 	s.queryFn = s.sendQuery
 
 	// Initialize caches with done channel for graceful shutdown
-	s.Cache = NewDNSCache(s.done, &s.wg)
-	s.dnskeyCache = NewDNSCache(s.done, &s.wg)
+	s.Cache = NewDNSCache(s.done)
+	s.dnskeyCache = NewDNSCache(s.done)
 	s.DNSSEC = services.NewDNSSECService(repo)
 
 	// Periodic cleanup of rate limiter buckets
@@ -357,6 +357,9 @@ func (s *Server) dlqRetryWorker(ctx context.Context) {
 		case <-ctx.Done():
 			s.Logger.Info("stopping DLQ retry worker")
 			return
+		case <-s.done:
+			s.Logger.Info("stopping DLQ retry worker (shutdown)")
+			return
 		case <-ticker.C:
 			// Continue to process DLQ after backoff
 		}
@@ -435,16 +438,17 @@ func (s *Server) Run(ctx context.Context) error {
 				s.Logger.Warn("failed to close DoT listener", "error", err)
 			}
 		}
-		shutdownCtx, shutdownCancel := context.WithTimeout(ctx, s.shutdownTimeout())
+		if s.doqListener != nil {
+			if err := s.doqListener.Close(); err != nil {
+				s.Logger.Warn("failed to close DoQ listener", "error", err)
+			}
+		}
+		s.wg.Wait()  // Wait for all goroutines to finish
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), s.shutdownTimeout())
 		defer shutdownCancel()
 		if s.dohServer != nil {
 			if err := s.dohServer.Shutdown(shutdownCtx); err != nil {
 				s.Logger.Warn("failed to shut down DoH server", "error", err)
-			}
-		}
-		if s.doqListener != nil {
-			if err := s.doqListener.Close(); err != nil {
-				s.Logger.Warn("failed to close DoQ listener", "error", err)
 			}
 		}
 		if s.Redis != nil {
@@ -654,7 +658,17 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 
 	<-ctx.Done()
-	return nil // async shutdown handles cleanup in background
+	// Close listeners to unblock workers, then let defer handle wg.Wait() + remaining cleanup
+	if s.tcpListener != nil {
+		_ = s.tcpListener.Close()
+	}
+	if s.dotListener != nil {
+		_ = s.dotListener.Close()
+	}
+	if s.doqListener != nil {
+		_ = s.doqListener.Close()
+	}
+	return nil
 }
 
 // handleDoH handles DNS-over-HTTPS requests (RFC 8484).
@@ -1568,7 +1582,9 @@ func (s *Server) handleNotify(ctx context.Context, request *packet.DNSPacket, cl
 		if !isAuthorizedNotifier(clientIP, zone.MasterServer) {
 			s.Logger.Warn("NOTIFY rejected: unauthorized source", "from", clientIP, "master", zone.MasterServer)
 		} else if !s.DisableAsync {
+			s.wg.Add(1)
 			go func(zoneName string) {
+				defer s.wg.Done()
 				select {
 				case <-ctx.Done():
 					return

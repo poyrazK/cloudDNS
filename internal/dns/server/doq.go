@@ -18,6 +18,8 @@ func (s *Server) handleDoQListener(ctx context.Context, listener *quic.Listener)
 			select {
 			case <-s.done:
 				return
+			case <-ctx.Done():
+				return
 			default:
 				continue
 			}
