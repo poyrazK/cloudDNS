@@ -33,6 +33,7 @@ Built-in orchestration for global Anycast networks using BGP.
 *   **HTTPS Records (RFC 9460)**: Service binding hints for HTTP-aware clients with Encrypted Client Hello (ECH) support.
 *   **Dynamic Updates (RFC 2136)**: Standardized dynamic record management.
 *   **IXFR (Incremental Zone Transfer)**: RFC 1995 compliant synchronization using transactional delta logging, with intelligent AXFR fallback.
+*   **DNS64 (RFC 6147)**: Synthesizes AAAA records from A records for IPv6-only clients communicating with IPv4-only servers.
 
 ## 6. Management & Security
 *   **Hexagonal Architecture**: Strict separation between core logic and infrastructure adapters.

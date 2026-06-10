@@ -66,6 +66,12 @@ type Server struct {
 	RecursionEnabled bool
 	CookieSecret     []byte
 
+	// DNS64Enabled enables DNS64 synthesis (RFC 6147).
+	// When enabled and an AAAA query returns NODATA, the server synthesizes
+	// AAAA records from existing A records using the configured DNS64Prefix.
+	DNS64Enabled bool
+	DNS64Prefix  net.IP
+
 	// Testing/Chaos flags
 	SimulateDBLatency  time.Duration
 	NotifyPortOverride int
@@ -869,6 +875,11 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 	// Handle NXDOMAIN / NoData / authoritative
 	if len(response.Answers) == 0 {
 		s.handleNxDomain(ctx, request, q, zone, dnssecOK, clientOPT, clientIP, response)
+
+		// DNS64 synthesis (RFC 6147) - only for authoritative NODATA
+		if s.DNS64Enabled && q.QType == packet.AAAA && zone != nil {
+			s.synthesizeDNS64(ctx, q, clientIP, response)
+		}
 	} else if zone != nil {
 		s.populateAuthorityAndAdditional(ctx, response, zone, clientIP)
 	}
@@ -1376,7 +1387,11 @@ func (s *Server) cacheResult(ctx context.Context, cacheKey string, resData []byt
 		return
 	}
 	var ttl uint32 = 300
-	if len(resp.Answers) > 0 {
+	// DNS64 synthesized responses should not be cached (or use very short TTL)
+	// per RFC 6147 Section 5. Use 1 second TTL as a compromise.
+	if resp.Header.DNS64Synthesized {
+		ttl = 1
+	} else if len(resp.Answers) > 0 {
 		ttl = resp.Answers[0].TTL
 	} else if len(resp.Authorities) > 0 {
 		ttl = resp.Authorities[0].TTL
@@ -1398,3 +1413,33 @@ func (s *Server) cacheResult(ctx context.Context, cacheKey string, resData []byt
 	}
 }
 
+
+// synthesizeDNS64 performs DNS64 synthesis (RFC 6147).
+// Called when a query for AAAA returns NODATA but we have an authoritative zone.
+func (s *Server) synthesizeDNS64(ctx context.Context, q packet.DNSQuestion, clientIP string, resp *packet.DNSPacket) {
+	aRecords, err := s.Repo.GetRecords(ctx, q.Name, domain.TypeA, clientIP)
+	if err != nil || len(aRecords) == 0 {
+		return
+	}
+	var aPacketRecords []packet.DNSRecord
+	minTTL := uint32(300)
+	for _, rec := range aRecords {
+		if pRec, err := repository.ConvertDomainToPacketRecord(rec); err == nil {
+			aPacketRecords = append(aPacketRecords, pRec)
+			if rec.TTL < int(minTTL) {
+				minTTL = uint32(rec.TTL)
+			}
+		}
+	}
+	if len(aPacketRecords) == 0 {
+		return
+	}
+	synthesizer := NewDNS64Synthesizer(s.DNS64Prefix)
+	aaaaRecords := synthesizer.SynthesizeAAAA(aPacketRecords, q.Name, minTTL)
+	if len(aaaaRecords) > 0 {
+		resp.Answers = append(resp.Answers, aaaaRecords...)
+		resp.Header.ResCode = 0       // NoError instead of NXDOMAIN
+		resp.Header.AuthoritativeAnswer = true
+		resp.Header.DNS64Synthesized = true
+	}
+}
