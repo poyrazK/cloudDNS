@@ -1838,7 +1838,7 @@ func (s *Server) handleIXFR(ctx context.Context, conn net.Conn, request *packet.
 		s.Logger.Warn("IXFR chain query failed, falling back to AXFR", "zone", zone.Name, "error", err)
 	} else if !historyValid {
 		s.Logger.Info("IXFR history gap detected, falling back to AXFR",
-			"zone", zone.Name, "client_serial", clientSerial)
+			"zone", zone.Name)
 
 		// RFC 1995: If IXFR is not possible, fall back to AXFR sequence using streaming
 		iter, errIter := s.Repo.ListRecordsForZoneStreaming(ctx, zone.ID, zone.TenantID)
