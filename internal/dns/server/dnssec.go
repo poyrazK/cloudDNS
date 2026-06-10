@@ -17,6 +17,9 @@ import (
 
 // generateServerCookie generates a server cookie as defined in RFC 9013.
 func (s *Server) generateServerCookie(clientCookie []byte, clientIP string) []byte {
+	if len(s.CookieSecret) == 0 {
+		return nil
+	}
 	h := hmac.New(sha256.New, s.CookieSecret)
 	h.Write(clientCookie)
 	h.Write([]byte(clientIP))

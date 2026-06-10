@@ -43,14 +43,14 @@ func (s *Server) handleNotify(ctx context.Context, request *packet.DNSPacket, cl
 		} else if !s.DisableAsync {
 			go func(zoneName string) {
 				select {
-				case <-ctx.Done():
+				case <-s.lifecycleCtx.Done():
 					return
 				case <-s.done:
 					return
 				default:
 				}
-				if z, err := s.Repo.GetZone(ctx, zoneName); err == nil && z != nil {
-					s.refreshZone(ctx, z)
+				if z, err := s.Repo.GetZone(s.lifecycleCtx, zoneName); err == nil && z != nil {
+					s.refreshZone(s.lifecycleCtx, z)
 				}
 			}(request.Questions[0].Name)
 		}
@@ -139,7 +139,12 @@ func (s *Server) handleUpdate(ctx context.Context, request *packet.DNSPacket, ra
 	// Issue #256: tenant authorization check for TSIG-authenticated updates
 	if request.TSIGStart != -1 && len(request.Resources) > 0 {
 		tsig := request.Resources[len(request.Resources)-1]
-		key := s.TsigKeys[tsig.Name]
+		key, ok := s.TsigKeys[tsig.Name]
+		if !ok {
+			s.Logger.Warn("update rejected: unknown TSIG key", "key", tsig.Name, "zone", zone.Name)
+			response.Header.ResCode = packet.RcodeNotAuth
+			return s.sendUpdateResponse(response, sendFn)
+		}
 		if key.TenantID != "" && key.TenantID != dbZone.TenantID {
 			s.Logger.Warn("update rejected: tenant mismatch", "key", tsig.Name, "zone", zone.Name, "zone_tenant", dbZone.TenantID, "key_tenant", key.TenantID)
 			response.Header.ResCode = packet.RcodeNotAuth

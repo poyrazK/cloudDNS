@@ -271,7 +271,7 @@ func (s *Server) generateTypeBitMap(types []domain.RecordType) []byte {
 
 		byteIdx := qt / 8
 		bitIdx := 7 - (qt % 8)
-		bits[byteIdx] |= (1 << bitIdx) // #nosec G602
+		bits[byteIdx] |= (1 << bitIdx)
 		if int(byteIdx) > maxType {
 			maxType = int(byteIdx)
 		}
