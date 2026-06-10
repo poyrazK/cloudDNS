@@ -34,11 +34,12 @@ type BGPBackend interface {
 // It tracks its goroutines for graceful shutdown and attempts peer reconnection
 // on disconnect.
 type GoBGPAdapter struct {
-	bgpServer  BGPBackend
-	logger     *slog.Logger
-	routerID   string
-	listenPort int32
-	nextHop    string
+	bgpServer    BGPBackend
+	logger       *slog.Logger
+	routerID     string
+	listenPort   int32
+	nextHop      string
+	peerPassword string
 
 	localASN uint32
 	peerASN  uint32
@@ -69,7 +70,7 @@ func NewGoBGPAdapter(logger *slog.Logger) *GoBGPAdapter {
 }
 
 // SetConfig updates the BGP configuration.
-func (a *GoBGPAdapter) SetConfig(routerID string, listenPort int32, nextHop string) {
+func (a *GoBGPAdapter) SetConfig(routerID string, listenPort int32, nextHop string, peerPassword string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if routerID != "" {
@@ -80,6 +81,9 @@ func (a *GoBGPAdapter) SetConfig(routerID string, listenPort int32, nextHop stri
 	}
 	if nextHop != "" {
 		a.nextHop = nextHop
+	}
+	if peerPassword != "" {
+		a.peerPassword = peerPassword
 	}
 }
 
@@ -138,6 +142,10 @@ func (a *GoBGPAdapter) addPeer(ctx context.Context, peerASN uint32, peerIP strin
 			PeerAsn:         peerASN,
 		},
 	}
+	// Apply MD5 password authentication if configured
+	if a.peerPassword != "" {
+		peer.Conf.AuthPassword = a.peerPassword
+	}
 	return a.bgpServer.AddPeer(ctx, &pb.AddPeerRequest{Peer: peer})
 }
 
@@ -183,12 +191,12 @@ func (a *GoBGPAdapter) Announce(_ context.Context, vip string) error {
 		Paths: []*apiutil.Path{path},
 	}
 
+	// Atomically update BGP and track VIP to ensure consistency
+	a.announcedMu.Lock()
 	if _, err := a.bgpServer.AddPath(req); err != nil {
+		a.announcedMu.Unlock()
 		return fmt.Errorf("failed to add path for vip %s: %w", vip, err)
 	}
-
-	// Track announced VIP for later withdrawal on Stop()
-	a.announcedMu.Lock()
 	a.announcedVIPs[vip] = true
 	a.announcedMu.Unlock()
 
@@ -236,12 +244,12 @@ func (a *GoBGPAdapter) Withdraw(_ context.Context, vip string) error {
 		},
 	}
 
+	// Atomically delete from BGP and remove from tracking
+	a.announcedMu.Lock()
 	if err := a.bgpServer.DeletePath(req); err != nil {
+		a.announcedMu.Unlock()
 		return fmt.Errorf("failed to delete path for vip %s: %w", vip, err)
 	}
-
-	// Remove from tracked VIPs
-	a.announcedMu.Lock()
 	delete(a.announcedVIPs, vip)
 	a.announcedMu.Unlock()
 
@@ -326,8 +334,17 @@ func (a *GoBGPAdapter) monitorPeer(ctx context.Context) {
 				} else {
 					a.logger.Warn("peer unhealthy, attempting reconnect", "peer", peerIP, "error", err)
 					// Restart BGP server and peer
-					a.mu.Lock()
+					// Note: must release mu before calling Stop() to avoid lock inversion deadlock.
+					// Stop() calls wg.Wait() which may block, and another goroutine calling Stop()
+					// would try to acquire mu, causing a deadlock.
+					a.mu.Unlock()
 					a.bgpServer.Stop()
+					a.mu.Lock()
+					// Check if Stop() was called while we released the lock (stopCh closed = shutdown requested)
+					if a.stopCh == nil {
+						a.mu.Unlock()
+						return
+					}
 					a.bgpServer = server.NewBgpServer()
 
 					global := &pb.Global{
