@@ -70,6 +70,9 @@ func (m *AnycastManager) Start(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			m.logger.Info("shutting down anycast manager, withdrawing route")
+			if m.debounceTimer != nil {
+				m.debounceTimer.Stop()
+			}
 			if err := m.routing.Withdraw(ctx, m.vip); err != nil {
 				m.logger.Error("failed to withdraw BGP on shutdown", "error", err, "vip", m.vip)
 			}
