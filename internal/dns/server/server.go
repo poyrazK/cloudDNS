@@ -1376,7 +1376,7 @@ func (s *Server) cacheResult(ctx context.Context, cacheKey string, resData []byt
 	}
 	var ttl uint32 = 300
 	// DNS64 synthesized responses should not be cached (or use very short TTL)
-	// per RFC 6147 Section 5. Use1 second TTL as a compromise.
+	// per RFC 6147 Section 5. Use 1 second TTL as a compromise.
 	if resp.Header.DNS64Synthesized {
 		ttl = 1
 	} else if len(resp.Answers) > 0 {

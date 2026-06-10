@@ -30,8 +30,14 @@ func (s *DNS64Synthesizer) embedIPv4(ipv4 net.IP) net.IP {
 	if ipv4 == nil {
 		return nil
 	}
+	// Validate prefix is a proper IPv6 address (not IPv4) with sufficient bits (/96 or shorter)
+	prefix := s.prefix
+	if prefix.To4() != nil || prefix.To16() == nil {
+		// Invalid prefix, use default
+		prefix = DefaultDNS64Prefix
+	}
 	ipv6 := make(net.IP, 16)
-	copy(ipv6, s.prefix)
+	copy(ipv6, prefix)
 	ipv6[12] = ipv4[0]
 	ipv6[13] = ipv4[1]
 	ipv6[14] = ipv4[2]
