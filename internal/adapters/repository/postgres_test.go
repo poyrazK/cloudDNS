@@ -544,7 +544,7 @@ func TestPostgresRepository_CatalogZones(t *testing.T) {
 	}
 
 	// 4. Test GetCatalogZone — non-existent returns nil
-	gotMissing, errMissing := repo.GetCatalogZone(ctx, "non-existent-id", "t1")
+	gotMissing, errMissing := repo.GetCatalogZone(ctx, "00000000-0000-0000-0000-000000000000", "t1")
 	if errMissing != nil {
 		t.Fatalf("GetCatalogZone for non-existent returned error: %v", errMissing)
 	}
