@@ -1874,13 +1874,15 @@ func (r *PostgresRepository) GetZoneByCatalogName(ctx context.Context, catalogZo
 	`
 	row := r.db.QueryRowContext(ctx, query, catalogZoneName, tenantID)
 	var z domain.Zone
-	err := row.Scan(&z.ID, &z.TenantID, &z.Name, &z.Role, &z.MasterServer, &z.CatalogZoneName, &z.CreatedAt, &z.UpdatedAt)
+	var catalogZoneNamePtr *string
+	err := row.Scan(&z.ID, &z.TenantID, &z.Name, &z.Role, &z.MasterServer, &catalogZoneNamePtr, &z.CreatedAt, &z.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
+	z.CatalogZoneName = catalogZoneNamePtr
 	return &z, nil
 }
 
