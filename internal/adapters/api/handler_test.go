@@ -10,10 +10,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
 	"github.com/poyrazK/cloudDNS/internal/core/ports"
 	"github.com/poyrazK/cloudDNS/internal/testutil"
+	"github.com/stretchr/testify/mock"
 )
 
 const (
@@ -25,9 +27,11 @@ const (
 )
 
 type mockDNSService struct {
-	zones   []domain.Zone
-	records []domain.Record
-	err     error
+	zones          []domain.Zone
+	records        []domain.Record
+	catalogs       []domain.CatalogZone
+	catalogEntries []domain.ZoneCatalogEntry
+	err            error
 }
 
 func (m *mockDNSService) CreateZone(_ context.Context, zone *domain.Zone) error {
@@ -114,14 +118,39 @@ func (m *mockDNSService) HealthCheck(_ context.Context) map[string]error {
 	return res
 }
 
-func (m *mockDNSService) CreateCatalogZone(_ context.Context, _, _ string) (*domain.CatalogZone, error) { return nil, nil }
-func (m *mockDNSService) GetCatalogZone(_ context.Context, _, _ string) (*domain.CatalogZone, error) { return nil, nil }
-func (m *mockDNSService) ListCatalogZones(_ context.Context, _ string) ([]domain.CatalogZone, error) { return nil, nil }
-func (m *mockDNSService) DeleteCatalogZone(_ context.Context, _, _ string) error                     { return nil }
-func (m *mockDNSService) AddZoneToCatalog(_ context.Context, _ string, _ string, _ string, _ string, _ string) error { return nil }
-func (m *mockDNSService) RemoveZoneFromCatalog(_ context.Context, _, _, _ string) error             { return nil }
-func (m *mockDNSService) ListZoneCatalogEntries(_ context.Context, _, _ string) ([]domain.ZoneCatalogEntry, error) {
+func (m *mockDNSService) CreateCatalogZone(_ context.Context, _, _ string) (*domain.CatalogZone, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	catz := &domain.CatalogZone{ID: "catz-new", TenantID: "t1", ZoneName: "catalog.example.com.", Version: "1", Serial: 1}
+	m.catalogs = append(m.catalogs, *catz)
+	return catz, nil
+}
+func (m *mockDNSService) GetCatalogZone(_ context.Context, id string, _ string) (*domain.CatalogZone, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	for _, c := range m.catalogs {
+		if c.ID == id {
+			return &c, nil
+		}
+	}
 	return nil, nil
+}
+func (m *mockDNSService) ListCatalogZones(_ context.Context, _ string) ([]domain.CatalogZone, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.catalogs, nil
+}
+func (m *mockDNSService) DeleteCatalogZone(_ context.Context, _, _ string) error { return m.err }
+func (m *mockDNSService) AddZoneToCatalog(_ context.Context, _, _, _, _, _ string) error { return m.err }
+func (m *mockDNSService) RemoveZoneFromCatalog(_ context.Context, _, _, _ string) error { return m.err }
+func (m *mockDNSService) ListZoneCatalogEntries(_ context.Context, _, _ string) ([]domain.ZoneCatalogEntry, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.catalogEntries, nil
 }
 func (m *mockDNSService) PollCatalogZone(_ context.Context, _, _ string) ([]domain.ZoneCatalogEntry, error) { return nil, nil }
 func (m *mockDNSService) SyncZonesFromCatalog(_ context.Context, _, _ string) error { return nil }
@@ -706,5 +735,403 @@ func TestCreateRecord_BodySizeLimit(t *testing.T) {
 	// Should fail due to body size limit
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("Expected status 400, got %d. Body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestCreateCatalogZone_Success(t *testing.T) {
+	svc := &mockDNSService{}
+	repo := &testutil.MockRepo{}
+	handler := New(svc, repo, slog.Default())
+
+	body := bytes.NewBuffer([]byte(`{"zone_name": "catalog.example.com."}`))
+	req := httptest.NewRequest("POST", "/catalog-zones", body)
+	req = withTenant(req, testTenantID)
+	w := httptest.NewRecorder()
+
+	handler.CreateCatalogZone(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("Expected status 201, got %d. Body: %s", w.Code, w.Body.String())
+	}
+	var catz domain.CatalogZone
+	if err := json.Unmarshal(w.Body.Bytes(), &catz); err != nil {
+		t.Errorf("failed to unmarshal response: %v", err)
+	}
+	if catz.ID == "" {
+		t.Errorf("expected catalog zone ID to be set")
+	}
+}
+
+func TestCreateCatalogZone_MissingZoneName(t *testing.T) {
+	svc := &mockDNSService{}
+	repo := &testutil.MockRepo{}
+	handler := New(svc, repo, slog.Default())
+
+	body := bytes.NewBuffer([]byte(`{}`))
+	req := httptest.NewRequest("POST", "/catalog-zones", body)
+	req = withTenant(req, testTenantID)
+	w := httptest.NewRecorder()
+
+	handler.CreateCatalogZone(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected status 400, got %d. Body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestCreateCatalogZone_Unauthorized(t *testing.T) {
+	svc := &mockDNSService{}
+	repo := &testutil.MockRepo{}
+	handler := New(svc, repo, slog.Default())
+
+	body := bytes.NewBuffer([]byte(`{"zone_name": "catalog.example.com."}`))
+	req := httptest.NewRequest("POST", "/catalog-zones", body)
+	// No tenant context
+	w := httptest.NewRecorder()
+
+	handler.CreateCatalogZone(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("Expected status 401, got %d. Body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestCreateCatalogZone_InternalError(t *testing.T) {
+	svc := &mockDNSService{err: errors.New("db error")}
+	repo := &testutil.MockRepo{}
+	handler := New(svc, repo, slog.Default())
+
+	body := bytes.NewBuffer([]byte(`{"zone_name": "catalog.example.com."}`))
+	req := httptest.NewRequest("POST", "/catalog-zones", body)
+	req = withTenant(req, testTenantID)
+	w := httptest.NewRecorder()
+
+	handler.CreateCatalogZone(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("Expected status 500, got %d. Body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestListCatalogZones_Success(t *testing.T) {
+	svc := &mockDNSService{
+		catalogs: []domain.CatalogZone{
+			{ID: "catz-1", TenantID: "t1", ZoneName: "catalog1.example.com.", Version: "1", Serial: 1},
+			{ID: "catz-2", TenantID: "t1", ZoneName: "catalog2.example.com.", Version: "1", Serial: 1},
+		},
+	}
+	repo := &testutil.MockRepo{}
+	handler := New(svc, repo, slog.Default())
+
+	req := httptest.NewRequest("GET", "/catalog-zones", nil)
+	req = withTenant(req, testTenantID)
+	w := httptest.NewRecorder()
+
+	handler.ListCatalogZones(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d. Body: %s", w.Code, w.Body.String())
+	}
+	var catalogs []domain.CatalogZone
+	if err := json.Unmarshal(w.Body.Bytes(), &catalogs); err != nil {
+		t.Errorf("failed to unmarshal response: %v", err)
+	}
+	if len(catalogs) != 2 {
+		t.Errorf("expected 2 catalogs, got %d", len(catalogs))
+	}
+}
+
+func TestListCatalogZones_Empty(t *testing.T) {
+	svc := &mockDNSService{catalogs: []domain.CatalogZone{}}
+	repo := &testutil.MockRepo{}
+	handler := New(svc, repo, slog.Default())
+
+	req := httptest.NewRequest("GET", "/catalog-zones", nil)
+	req = withTenant(req, testTenantID)
+	w := httptest.NewRecorder()
+
+	handler.ListCatalogZones(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d. Body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestListCatalogZones_Unauthorized(t *testing.T) {
+	svc := &mockDNSService{}
+	repo := &testutil.MockRepo{}
+	handler := New(svc, repo, slog.Default())
+
+	req := httptest.NewRequest("GET", "/catalog-zones", nil)
+	// No tenant context
+	w := httptest.NewRecorder()
+
+	handler.ListCatalogZones(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("Expected status 401, got %d. Body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestGetCatalogZone_Success(t *testing.T) {
+	svc :=&mockDNSService{
+		catalogs: []domain.CatalogZone{
+			{ID: "catz-123", TenantID: "t1", ZoneName: "catalog.example.com.", Version: "1", Serial: 1},
+		},
+	}
+	repo := &testutil.MockRepo{}
+	repo.On("GetAPIKeyByHash", mock.Anything, mock.Anything).Return(&domain.APIKey{
+		ID:        "key-1",
+		TenantID:  "t1",
+		Role:      domain.RoleAdmin,
+		Active:    true,
+		ExpiresAt: nil,
+		CreatedAt: time.Now(),
+	}, nil).Maybe()
+	handler := New(svc, repo, slog.Default())
+
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux)
+
+	req := httptest.NewRequest("GET", "/catalog-zones/catz-123", nil)
+	req.Header.Set("Authorization", "Bearer test-key")
+	w := httptest.NewRecorder()
+
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d. Body: %s", w.Code, w.Body.String())
+	}
+	var catz domain.CatalogZone
+	if err := json.Unmarshal(w.Body.Bytes(), &catz); err != nil {
+		t.Errorf("failed to unmarshal response: %v", err)
+	}
+	if catz.ID != "catz-123" {
+		t.Errorf("expected catalog zone ID 'catz-123', got %s", catz.ID)
+	}
+}
+
+func TestGetCatalogZone_NotFound(t *testing.T) {
+	svc := &mockDNSService{catalogs: []domain.CatalogZone{}}
+	repo := &testutil.MockRepo{}
+	handler := New(svc, repo, slog.Default())
+
+	req := httptest.NewRequest("GET", "/catalog-zones/non-existent", nil)
+	req = withTenant(req, testTenantID)
+	w := httptest.NewRecorder()
+
+	handler.GetCatalogZone(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("Expected status 404, got %d. Body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestGetCatalogZone_Unauthorized(t *testing.T) {
+	svc := &mockDNSService{}
+	repo := &testutil.MockRepo{}
+	handler := New(svc, repo, slog.Default())
+
+	req := httptest.NewRequest("GET", "/catalog-zones/catz-123", nil)
+	// No tenant context
+	w := httptest.NewRecorder()
+
+	handler.GetCatalogZone(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("Expected status 401, got %d. Body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestDeleteCatalogZone_Success(t *testing.T) {
+	svc := &mockDNSService{}
+	repo := &testutil.MockRepo{}
+	handler := New(svc, repo, slog.Default())
+
+	req := httptest.NewRequest("DELETE", "/catalog-zones/catz-123", nil)
+	req = withTenant(req, testTenantID)
+	w := httptest.NewRecorder()
+
+	handler.DeleteCatalogZone(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Errorf("Expected status 204, got %d. Body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestDeleteCatalogZone_Unauthorized(t *testing.T) {
+	svc := &mockDNSService{}
+	repo := &testutil.MockRepo{}
+	handler := New(svc, repo, slog.Default())
+
+	req := httptest.NewRequest("DELETE", "/catalog-zones/catz-123", nil)
+	// No tenant context
+	w := httptest.NewRecorder()
+
+	handler.DeleteCatalogZone(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("Expected status 401, got %d. Body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestAddCatalogEntry_Success(t *testing.T) {
+	svc := &mockDNSService{}
+	repo := &testutil.MockRepo{}
+	handler := New(svc, repo, slog.Default())
+
+	body := bytes.NewBuffer([]byte(`{"zone_name": "zone1.example.com.", "zone_id": "uuid-1", "group_id": "group1"}`))
+	req := httptest.NewRequest("POST", "/catalog-zones/catz-123/entries", body)
+	req = withTenant(req, testTenantID)
+	w := httptest.NewRecorder()
+
+	handler.AddCatalogEntry(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("Expected status 201, got %d. Body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestAddCatalogEntry_MissingFields(t *testing.T) {
+	svc := &mockDNSService{}
+	repo := &testutil.MockRepo{}
+	handler := New(svc, repo, slog.Default())
+
+	// Missing zone_id
+	body := bytes.NewBuffer([]byte(`{"zone_name": "zone1.example.com."}`))
+	req := httptest.NewRequest("POST", "/catalog-zones/catz-123/entries", body)
+	req = withTenant(req, testTenantID)
+	w := httptest.NewRecorder()
+
+	handler.AddCatalogEntry(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected status 400, got %d. Body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestAddCatalogEntry_Unauthorized(t *testing.T) {
+	svc := &mockDNSService{}
+	repo := &testutil.MockRepo{}
+	handler := New(svc, repo, slog.Default())
+
+	body := bytes.NewBuffer([]byte(`{"zone_name": "zone1.example.com.", "zone_id": "uuid-1"}`))
+	req := httptest.NewRequest("POST", "/catalog-zones/catz-123/entries", body)
+	// No tenant context
+	w := httptest.NewRecorder()
+
+	handler.AddCatalogEntry(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("Expected status 401, got %d. Body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestRemoveCatalogEntry_Success(t *testing.T) {
+	svc := &mockDNSService{}
+	repo := &testutil.MockRepo{}
+	handler := New(svc, repo, slog.Default())
+
+	req := httptest.NewRequest("DELETE", "/catalog-zones/catz-123/entries/zone1.example.com.", nil)
+	req = withTenant(req, testTenantID)
+	w := httptest.NewRecorder()
+
+	handler.RemoveCatalogEntry(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Errorf("Expected status 204, got %d. Body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestRemoveCatalogEntry_Unauthorized(t *testing.T) {
+	svc := &mockDNSService{}
+	repo := &testutil.MockRepo{}
+	handler := New(svc, repo, slog.Default())
+
+	req := httptest.NewRequest("DELETE", "/catalog-zones/catz-123/entries/zone1.example.com.", nil)
+	// No tenant context
+	w := httptest.NewRecorder()
+
+	handler.RemoveCatalogEntry(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("Expected status 401, got %d. Body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestListCatalogEntries_Success(t *testing.T) {
+	svc := &mockDNSService{
+		catalogEntries: []domain.ZoneCatalogEntry{
+			{ZoneName: "zone1.example.com.", ZoneID: "uuid-1", GroupID: "g1"},
+			{ZoneName: "zone2.example.com.", ZoneID: "uuid-2"},
+		},
+	}
+	repo := &testutil.MockRepo{}
+	handler := New(svc, repo, slog.Default())
+
+	req := httptest.NewRequest("GET", "/catalog-zones/catz-123/entries", nil)
+	req = withTenant(req, testTenantID)
+	w := httptest.NewRecorder()
+
+	handler.ListCatalogEntries(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d. Body: %s", w.Code, w.Body.String())
+	}
+	var entries []domain.ZoneCatalogEntry
+	if err := json.Unmarshal(w.Body.Bytes(), &entries); err != nil {
+		t.Errorf("failed to unmarshal response: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Errorf("expected 2 entries, got %d", len(entries))
+	}
+}
+
+func TestListCatalogEntries_Unauthorized(t *testing.T) {
+	svc := &mockDNSService{}
+	repo := &testutil.MockRepo{}
+	handler := New(svc, repo, slog.Default())
+
+	req := httptest.NewRequest("GET", "/catalog-zones/catz-123/entries", nil)
+	// No tenant context
+	w := httptest.NewRecorder()
+
+	handler.ListCatalogEntries(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("Expected status 401, got %d. Body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestCatalogHandler_InternalError(t *testing.T) {
+	svc := &mockDNSService{err: errors.New("db error")}
+	repo := &testutil.MockRepo{}
+	handler := New(svc, repo, slog.Default())
+
+	tests := []struct {
+		name string
+		fn   http.HandlerFunc
+		path string
+		body string
+	}{
+		{"ListCatalogZones", handler.ListCatalogZones, "/catalog-zones", ""},
+		{"GetCatalogZone", handler.GetCatalogZone, "/catalog-zones/catz-123", ""},
+		{"ListCatalogEntries", handler.ListCatalogEntries, "/catalog-zones/catz-123/entries", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var body io.Reader
+			if tt.body != "" {
+				body = bytes.NewBuffer([]byte(tt.body))
+			}
+			req := httptest.NewRequest("GET", tt.path, body)
+			req = withTenant(req, testTenantID)
+			w := httptest.NewRecorder()
+			tt.fn(w, req)
+			if w.Code != http.StatusInternalServerError {
+				t.Errorf("%s: expected 500, got %d", tt.name, w.Code)
+			}
+		})
 	}
 }

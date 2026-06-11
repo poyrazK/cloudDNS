@@ -648,6 +648,372 @@ func TestPostgresRepository_Extra_Unit(t *testing.T) {
 	})
 }
 
+func TestPostgresRepository_Catalog_Unit(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("CreateCatalogZone", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatalf("failed to open sqlmock: %s", err)
+		}
+		defer db.Close()
+		repo := NewPostgresRepository(db)
+
+		catz := &domain.CatalogZone{
+			ID: "catz-1", TenantID: "t1", ZoneName: "catalog.example.com.",
+			Version: "1", Serial: 1, CreatedAt: time.Now(), UpdatedAt: time.Now(),
+		}
+		mock.ExpectExec(`INSERT INTO catalog_zones`).
+			WithArgs(catz.ID, catz.TenantID, catz.ZoneName, catz.Version, catz.Serial, sqlmock.AnyArg(), sqlmock.AnyArg()).
+			WillReturnResult(sqlmock.NewResult(1, 1))
+
+		err = repo.CreateCatalogZone(ctx, catz)
+		if err != nil {
+			t.Errorf("CreateCatalogZone failed: %v", err)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("unfulfilled expectations: %s", err)
+		}
+	})
+
+	t.Run("GetCatalogZone_Found", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatalf("failed to open sqlmock: %s", err)
+		}
+		defer db.Close()
+		repo := NewPostgresRepository(db)
+
+		rows := sqlmock.NewRows([]string{"id", "tenant_id", "zone_name", "version", "serial", "created_at", "updated_at"}).
+			AddRow("catz-1", "t1", "catalog.example.com.", "1", uint64(1), time.Now(), time.Now())
+		mock.ExpectQuery(`SELECT .* FROM catalog_zones WHERE id = \$1 AND tenant_id = \$2`).
+			WithArgs("catz-1", "t1").
+			WillReturnRows(rows)
+
+		got, err := repo.GetCatalogZone(ctx, "catz-1", "t1")
+		if err != nil {
+			t.Errorf("GetCatalogZone failed: %v", err)
+		}
+		if got == nil || got.ID != "catz-1" {
+			t.Errorf("expected catalog zone with id catz-1, got %+v", got)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("unfulfilled expectations: %s", err)
+		}
+	})
+
+	t.Run("GetCatalogZone_NotFound", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatalf("failed to open sqlmock: %s", err)
+		}
+		defer db.Close()
+		repo := NewPostgresRepository(db)
+
+		mock.ExpectQuery(`SELECT .* FROM catalog_zones WHERE id = \$1 AND tenant_id = \$2`).
+			WithArgs("nonexistent", "t1").
+			WillReturnError(sql.ErrNoRows)
+
+		got, err := repo.GetCatalogZone(ctx, "nonexistent", "t1")
+		if err != nil {
+			t.Errorf("GetCatalogZone should not error on no rows: %v", err)
+		}
+		if got != nil {
+			t.Errorf("expected nil for non-existent catalog zone, got %+v", got)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("unfulfilled expectations: %s", err)
+		}
+	})
+
+	t.Run("ListCatalogZones", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatalf("failed to open sqlmock: %s", err)
+		}
+		defer db.Close()
+		repo := NewPostgresRepository(db)
+
+		rows := sqlmock.NewRows([]string{"id", "tenant_id", "zone_name", "version", "serial", "created_at", "updated_at"}).
+			AddRow("catz-1", "t1", "catalog1.example.com.", "1", uint64(1), time.Now(), time.Now()).
+			AddRow("catz-2", "t1", "catalog2.example.com.", "1", uint64(1), time.Now(), time.Now())
+		mock.ExpectQuery(`SELECT .* FROM catalog_zones WHERE tenant_id = \$1 ORDER BY created_at DESC`).
+			WithArgs("t1").
+			WillReturnRows(rows)
+
+		catalogs, err := repo.ListCatalogZones(ctx, "t1")
+		if err != nil {
+			t.Errorf("ListCatalogZones failed: %v", err)
+		}
+		if len(catalogs) != 2 {
+			t.Errorf("expected 2 catalogs, got %d", len(catalogs))
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("unfulfilled expectations: %s", err)
+		}
+	})
+
+	t.Run("UpdateCatalogZoneVersion", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatalf("failed to open sqlmock: %s", err)
+		}
+		defer db.Close()
+		repo := NewPostgresRepository(db)
+
+		mock.ExpectExec(`UPDATE catalog_zones SET version = \$1, serial = \$2, updated_at = CURRENT_TIMESTAMP WHERE id = \$3`).
+			WithArgs("2", uint32(2), "catz-1").
+			WillReturnResult(sqlmock.NewResult(0, 1))
+
+		err = repo.UpdateCatalogZoneVersion(ctx, "catz-1", "2", 2)
+		if err != nil {
+			t.Errorf("UpdateCatalogZoneVersion failed: %v", err)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("unfulfilled expectations: %s", err)
+		}
+	})
+
+	t.Run("DeleteCatalogZone", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatalf("failed to open sqlmock: %s", err)
+		}
+		defer db.Close()
+		repo := NewPostgresRepository(db)
+
+		mock.ExpectExec(`DELETE FROM catalog_zones WHERE id = \$1 AND tenant_id = \$2`).
+			WithArgs("catz-1", "t1").
+			WillReturnResult(sqlmock.NewResult(0, 1))
+
+		err = repo.DeleteCatalogZone(ctx, "catz-1", "t1")
+		if err != nil {
+			t.Errorf("DeleteCatalogZone failed: %v", err)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("unfulfilled expectations: %s", err)
+		}
+	})
+
+	t.Run("ListZoneCatalogEntries", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatalf("failed to open sqlmock: %s", err)
+		}
+		defer db.Close()
+		repo := NewPostgresRepository(db)
+
+		// First query: GetCatalogZone
+		catzRows := sqlmock.NewRows([]string{"id", "tenant_id", "zone_name", "version", "serial", "created_at", "updated_at"}).
+			AddRow("catz-1", "t1", "catalog.example.com.", "1", uint64(1), time.Now(), time.Now())
+		mock.ExpectQuery(`SELECT .* FROM catalog_zones WHERE id = \$1 AND tenant_id = \$2`).
+			WithArgs("catz-1", "t1").
+			WillReturnRows(catzRows)
+
+		// Second query: zone lookup
+		zoneRows := sqlmock.NewRows([]string{"id"}).AddRow("zone-1")
+		mock.ExpectQuery(`SELECT id FROM dns_zones WHERE name = \$1 AND tenant_id = \(SELECT tenant_id FROM catalog_zones WHERE id = \$2\)`).
+			WithArgs("catalog.example.com.", "catz-1").
+			WillReturnRows(zoneRows)
+
+		// Third query: PTR records
+		ptrRows := sqlmock.NewRows([]string{"name", "content"}).
+			AddRow("com.example.", "foo.example.com.:zone-uuid-1:group1").
+			AddRow("com.example.", "bar.example.com.:zone-uuid-2")
+		mock.ExpectQuery(`SELECT name, content FROM dns_records WHERE zone_id = \$1 AND type = 'PTR'`).
+			WithArgs("zone-1").
+			WillReturnRows(ptrRows)
+
+		entries, err := repo.ListZoneCatalogEntries(ctx, "catz-1", "t1")
+		if err != nil {
+			t.Errorf("ListZoneCatalogEntries failed: %v", err)
+		}
+		if len(entries) != 2 {
+			t.Errorf("expected 2 entries, got %d", len(entries))
+		}
+		if entries[0].ZoneName != "foo.example.com." || entries[0].ZoneID != "zone-uuid-1" || entries[0].GroupID != "group1" {
+			t.Errorf("unexpected first entry: %+v", entries[0])
+		}
+		if entries[1].GroupID != "" {
+			t.Errorf("expected empty group_id for second entry, got %s", entries[1].GroupID)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("unfulfilled expectations: %s", err)
+		}
+	})
+
+	t.Run("AddZoneToCatalog", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatalf("failed to open sqlmock: %s", err)
+		}
+		defer db.Close()
+		repo := NewPostgresRepository(db)
+
+		// GetCatalogZone
+		catzRows := sqlmock.NewRows([]string{"id", "tenant_id", "zone_name", "version", "serial", "created_at", "updated_at"}).
+			AddRow("catz-1", "t1", "catalog.example.com.", "1", uint64(1), time.Now(), time.Now())
+		mock.ExpectQuery(`SELECT .* FROM catalog_zones WHERE id = \$1 AND tenant_id = \$2`).
+			WithArgs("catz-1", "t1").
+			WillReturnRows(catzRows)
+
+		// Zone lookup
+		zoneRows := sqlmock.NewRows([]string{"id"}).AddRow("zone-1")
+		mock.ExpectQuery(`SELECT id FROM dns_zones WHERE name = \$1`).
+			WithArgs("catalog.example.com.").
+			WillReturnRows(zoneRows)
+
+		// Insert PTR record with ON CONFLICT DO NOTHING
+		// Only 4 args are passed: id, zone_id, name, content; 'PTR', 3600, created_at, updated_at are in query
+		mock.ExpectExec(`INSERT INTO dns_records`).
+			WithArgs(sqlmock.AnyArg(), "zone-1", sqlmock.AnyArg(), sqlmock.AnyArg()).
+			WillReturnResult(sqlmock.NewResult(1, 1))
+
+		entry := &domain.ZoneCatalogEntry{ZoneName: "foo.example.com.", ZoneID: "zone-uuid-1", GroupID: "group1"}
+		err = repo.AddZoneToCatalog(ctx, "catz-1", "t1", entry)
+		if err != nil {
+			t.Errorf("AddZoneToCatalog failed: %v", err)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("unfulfilled expectations: %s", err)
+		}
+	})
+
+	t.Run("RemoveZoneFromCatalog_LexicographicRange", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatalf("failed to open sqlmock: %s", err)
+		}
+		defer db.Close()
+		repo := NewPostgresRepository(db)
+
+		// GetCatalogZone
+		catzRows := sqlmock.NewRows([]string{"id", "tenant_id", "zone_name", "version", "serial", "created_at", "updated_at"}).
+			AddRow("catz-1", "t1", "catalog.example.com.", "1", uint64(1), time.Now(), time.Now())
+		mock.ExpectQuery(`SELECT .* FROM catalog_zones WHERE id = \$1 AND tenant_id = \$2`).
+			WithArgs("catz-1", "t1").
+			WillReturnRows(catzRows)
+
+		// Zone lookup
+		zoneRows := sqlmock.NewRows([]string{"id"}).AddRow("zone-1")
+		mock.ExpectQuery(`SELECT id FROM dns_zones WHERE name = \$1`).
+			WithArgs("catalog.example.com.").
+			WillReturnRows(zoneRows)
+
+		// Delete with lexicographic range
+		// prefix = "foo.example.com.:"  nextPrefix = "foo.example.com.:\xff"
+		mock.ExpectExec(`DELETE FROM dns_records WHERE zone_id = \$1 AND type = 'PTR' AND content >= \$2 AND content < \$3`).
+			WithArgs("zone-1", "foo.example.com.:", "foo.example.com.:\xff").
+			WillReturnResult(sqlmock.NewResult(1, 1))
+
+		err = repo.RemoveZoneFromCatalog(ctx, "catz-1", "t1", "foo.example.com.")
+		if err != nil {
+			t.Errorf("RemoveZoneFromCatalog failed: %v", err)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("unfulfilled expectations: %s", err)
+		}
+	})
+
+	t.Run("GetZoneByCatalogName", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatalf("failed to open sqlmock: %s", err)
+		}
+		defer db.Close()
+		repo := NewPostgresRepository(db)
+
+		rows := sqlmock.NewRows([]string{"id", "tenant_id", "name", "role", "master_server", "catalog_zone_name", "created_at", "updated_at"}).
+			AddRow("zone-1", "t1", "real.example.com.", "slave", "10.0.0.1:53", "my-catalog-zone", time.Now(), time.Now())
+		mock.ExpectQuery(`SELECT .* FROM dns_zones WHERE catalog_zone_name = \$1 AND tenant_id = \$2`).
+			WithArgs("my-catalog-zone", "t1").
+			WillReturnRows(rows)
+
+		got, err := repo.GetZoneByCatalogName(ctx, "my-catalog-zone", "t1")
+		if err != nil {
+			t.Errorf("GetZoneByCatalogName failed: %v", err)
+		}
+		if got == nil || got.ID != "zone-1" {
+			t.Errorf("expected zone with id zone-1, got %+v", got)
+		}
+		if got != nil && got.CatalogZoneName == nil {
+			t.Error("expected catalog_zone_name to be set")
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("unfulfilled expectations: %s", err)
+		}
+	})
+
+	t.Run("GetZoneByCatalogName_NotFound", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatalf("failed to open sqlmock: %s", err)
+		}
+		defer db.Close()
+		repo := NewPostgresRepository(db)
+
+		mock.ExpectQuery(`SELECT .* FROM dns_zones WHERE catalog_zone_name = \$1 AND tenant_id = \$2`).
+			WithArgs("nonexistent", "t1").
+			WillReturnError(sql.ErrNoRows)
+
+		got, err := repo.GetZoneByCatalogName(ctx, "nonexistent", "t1")
+		if err != nil {
+			t.Errorf("GetZoneByCatalogName should not error on no rows: %v", err)
+		}
+		if got != nil {
+			t.Errorf("expected nil for non-existent, got %+v", got)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("unfulfilled expectations: %s", err)
+		}
+	})
+
+	t.Run("CreateZoneFromCatalog", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatalf("failed to open sqlmock: %s", err)
+		}
+		defer db.Close()
+		repo := NewPostgresRepository(db)
+
+		// CreateZone succeeds (Exec matched), but BatchCreateRecords fails on UNNEST with []string.
+		// UNNEST with []string is rejected at driver level before any Query is issued.
+		// This mirrors the existing BatchCreateRecords test pattern — validated via integration tests.
+		mock.ExpectExec(`INSERT INTO dns_zones`).
+			WillReturnResult(sqlmock.NewResult(1, 1))
+
+		zone := &domain.Zone{ID: "z1", TenantID: "t1", Name: "catalog.example.com.", Role: "slave"}
+		recs := []domain.Record{{ID: "r1", ZoneID: "z1", Name: "catalog.example.com.", Type: "SOA", Content: "ns1. admin. 1 3600 600 1209600 300", TTL: 300}}
+		// BatchCreateRecords fails on UNNEST, error propagates — this is expected.
+		_ = repo.CreateZoneFromCatalog(ctx, zone, recs)
+		// Verify CreateZone was called (Exec expectation met)
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("unfulfilled expectations: %s", err)
+		}
+	})
+
+	t.Run("DeleteZoneByCatalogName", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatalf("failed to open sqlmock: %s", err)
+		}
+		defer db.Close()
+		repo := NewPostgresRepository(db)
+
+		mock.ExpectExec(`DELETE FROM dns_zones WHERE catalog_zone_name = \$1 AND tenant_id = \$2`).
+			WithArgs("catalog-zone-name", "t1").
+			WillReturnResult(sqlmock.NewResult(0, 1))
+
+		err = repo.DeleteZoneByCatalogName(ctx, "catalog-zone-name", "t1")
+		if err != nil {
+			t.Errorf("DeleteZoneByCatalogName failed: %v", err)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("unfulfilled expectations: %s", err)
+		}
+	})
+}
+
 func TestPostgresRecordIterator_Unit(t *testing.T) {
 	ctx := context.Background()
 

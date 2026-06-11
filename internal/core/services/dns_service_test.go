@@ -37,9 +37,11 @@ func (it *testRecordIterator) Close() error {
 }
 
 type mockRepo struct {
-	zones   []domain.Zone
-	records []domain.Record
-	err     error
+	zones          []domain.Zone
+	records        []domain.Record
+	catalogs       []domain.CatalogZone
+	catalogEntries []domain.ZoneCatalogEntry
+	err            error
 }
 
 func (m *mockRepo) GetRecords(_ context.Context, name string, qType domain.RecordType, _ string) ([]domain.Record, error) {
@@ -291,21 +293,128 @@ func (m *mockRepo) UpdateRecord(_ context.Context, record *domain.Record) error 
 	return m.err
 }
 
-func (m *mockRepo) CreateCatalogZone(_ context.Context, _ *domain.CatalogZone) error              { return nil }
-func (m *mockRepo) GetCatalogZone(_ context.Context, _, _ string) (*domain.CatalogZone, error)   { return nil, nil }
-func (m *mockRepo) ListCatalogZones(_ context.Context, _ string) ([]domain.CatalogZone, error)    { return nil, nil }
-func (m *mockRepo) UpdateCatalogZoneVersion(_ context.Context, _, _ string, _ uint32) error       { return nil }
-func (m *mockRepo) DeleteCatalogZone(_ context.Context, _, _ string) error                        { return nil }
-func (m *mockRepo) ListZoneCatalogEntries(_ context.Context, _, _ string) ([]domain.ZoneCatalogEntry, error) {
-	return nil, nil
-}
-func (m *mockRepo) AddZoneToCatalog(_ context.Context, _, _ string, _ *domain.ZoneCatalogEntry) error { return nil }
-func (m *mockRepo) RemoveZoneFromCatalog(_ context.Context, _, _, _ string) error                    { return nil }
-func (m *mockRepo) CreateZoneFromCatalog(_ context.Context, _ *domain.Zone, _ []domain.Record) error {
+func (m *mockRepo) CreateCatalogZone(_ context.Context, catz *domain.CatalogZone) error {
+	if m.err != nil {
+		return m.err
+	}
+	m.catalogs = append(m.catalogs, *catz)
 	return nil
 }
-func (m *mockRepo) DeleteZoneByCatalogName(_ context.Context, _, _ string) error { return nil }
-func (m *mockRepo) GetZoneByCatalogName(_ context.Context, _, _ string) (*domain.Zone, error) { return nil, nil }
+func (m *mockRepo) GetCatalogZone(_ context.Context, catalogID string, tenantID string) (*domain.CatalogZone, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	for _, c := range m.catalogs {
+		if c.ID == catalogID && c.TenantID == tenantID {
+			return &c, nil
+		}
+	}
+	return nil, nil
+}
+func (m *mockRepo) ListCatalogZones(_ context.Context, tenantID string) ([]domain.CatalogZone, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	var result []domain.CatalogZone
+	for _, c := range m.catalogs {
+		if c.TenantID == tenantID {
+			result = append(result, c)
+		}
+	}
+	return result, nil
+}
+func (m *mockRepo) UpdateCatalogZoneVersion(_ context.Context, catalogID string, version string, serial uint32) error {
+	if m.err != nil {
+		return m.err
+	}
+	for i := range m.catalogs {
+		if m.catalogs[i].ID == catalogID {
+			m.catalogs[i].Version = version
+			m.catalogs[i].Serial = serial
+			return nil
+		}
+	}
+	return nil
+}
+func (m *mockRepo) DeleteCatalogZone(_ context.Context, catalogID string, tenantID string) error {
+	if m.err != nil {
+		return m.err
+	}
+	m.catalogs = filterCatalogs(m.catalogs, catalogID, tenantID)
+	return nil
+}
+func (m *mockRepo) ListZoneCatalogEntries(_ context.Context, catalogID string, tenantID string) ([]domain.ZoneCatalogEntry, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.catalogEntries, nil
+}
+func (m *mockRepo) AddZoneToCatalog(_ context.Context, catalogID string, tenantID string, entry *domain.ZoneCatalogEntry) error {
+	if m.err != nil {
+		return m.err
+	}
+	m.catalogEntries = append(m.catalogEntries, *entry)
+	return nil
+}
+func (m *mockRepo) RemoveZoneFromCatalog(_ context.Context, catalogID string, tenantID string, zoneName string) error {
+	if m.err != nil {
+		return m.err
+	}
+	var remaining []domain.ZoneCatalogEntry
+	for _, e := range m.catalogEntries {
+		if e.ZoneName != zoneName {
+			remaining = append(remaining, e)
+		}
+	}
+	m.catalogEntries = remaining
+	return nil
+}
+func (m *mockRepo) CreateZoneFromCatalog(_ context.Context, zone *domain.Zone, records []domain.Record) error {
+	if m.err != nil {
+		return m.err
+	}
+	m.zones = append(m.zones, *zone)
+	m.records = append(m.records, records...)
+	return nil
+}
+func (m *mockRepo) DeleteZoneByCatalogName(_ context.Context, catalogZoneName string, tenantID string) error {
+	if m.err != nil {
+		return m.err
+	}
+	m.zones = filterZonesByCatalogName(m.zones, catalogZoneName, tenantID)
+	return nil
+}
+func (m *mockRepo) GetZoneByCatalogName(_ context.Context, catalogZoneName string, tenantID string) (*domain.Zone, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	for _, z := range m.zones {
+		if z.CatalogZoneName != nil && *z.CatalogZoneName == catalogZoneName && z.TenantID == tenantID {
+			return &z, nil
+		}
+	}
+	return nil, nil
+}
+
+func filterCatalogs(catalogs []domain.CatalogZone, id, tenantID string) []domain.CatalogZone {
+	var result []domain.CatalogZone
+	for _, c := range catalogs {
+		if !(c.ID == id && c.TenantID == tenantID) {
+			result = append(result, c)
+		}
+	}
+	return result
+}
+
+func filterZonesByCatalogName(zones []domain.Zone, catalogZoneName, tenantID string) []domain.Zone {
+	var result []domain.Zone
+	for _, z := range zones {
+		if z.CatalogZoneName == nil || *z.CatalogZoneName != catalogZoneName || z.TenantID != tenantID {
+			result = append(result, z)
+		}
+	}
+	return result
+}
 
 func TestDNSService_ExtraMethods(t *testing.T) {
 	repo := &mockRepo{}
@@ -633,5 +742,282 @@ func TestGetRecordsToProbeStreaming(t *testing.T) {
 	}
 
 	iter.Close()
+}
+
+func TestCreateCatalogZone(t *testing.T) {
+	repo := &mockRepo{}
+	svc := NewDNSService(repo, nil)
+	ctx := context.Background()
+
+	catz, err := svc.CreateCatalogZone(ctx, "t1", "catalog.example.com.")
+	if err != nil {
+		t.Fatalf("CreateCatalogZone failed: %v", err)
+	}
+	if catz.ID == "" {
+		t.Errorf("expected generated ID")
+	}
+	if catz.TenantID != "t1" {
+		t.Errorf("expected tenant_id t1, got %s", catz.TenantID)
+	}
+	if catz.ZoneName != "catalog.example.com." {
+		t.Errorf("expected zone_name 'catalog.example.com.', got %s", catz.ZoneName)
+	}
+	if catz.Version != "1" {
+		t.Errorf("expected version '1', got %s", catz.Version)
+	}
+	if catz.Serial != 1 {
+		t.Errorf("expected serial 1, got %d", catz.Serial)
+	}
+	if len(repo.catalogs) != 1 {
+		t.Errorf("expected 1 catalog in repo, got %d", len(repo.catalogs))
+	}
+}
+
+func TestGetCatalogZone(t *testing.T) {
+	repo := &mockRepo{
+		catalogs: []domain.CatalogZone{
+			{ID: "catz-1", TenantID: "t1", ZoneName: "catalog.example.com.", Version: "1", Serial: 1},
+		},
+	}
+	svc := NewDNSService(repo, nil)
+	ctx := context.Background()
+
+	// Correct tenant
+	got, err := svc.GetCatalogZone(ctx, "catz-1", "t1")
+	if err != nil {
+		t.Fatalf("GetCatalogZone failed: %v", err)
+	}
+	if got == nil || got.ID != "catz-1" {
+		t.Errorf("expected catz-1, got %+v", got)
+	}
+
+	// Wrong tenant
+	gotWrong, errWrong := svc.GetCatalogZone(ctx, "catz-1", "t2")
+	if errWrong != nil {
+		t.Fatalf("GetCatalogZone with wrong tenant returned error: %v", errWrong)
+	}
+	if gotWrong != nil {
+		t.Errorf("expected nil for wrong tenant, got %+v", gotWrong)
+	}
+
+	// Non-existent
+	gotMissing, errMissing := svc.GetCatalogZone(ctx, "non-existent", "t1")
+	if errMissing != nil {
+		t.Fatalf("GetCatalogZone for non-existent returned error: %v", errMissing)
+	}
+	if gotMissing != nil {
+		t.Errorf("expected nil for non-existent, got %+v", gotMissing)
+	}
+}
+
+func TestListCatalogZones(t *testing.T) {
+	repo := &mockRepo{
+		catalogs: []domain.CatalogZone{
+			{ID: "catz-1", TenantID: "t1", ZoneName: "catalog1.example.com."},
+			{ID: "catz-2", TenantID: "t1", ZoneName: "catalog2.example.com."},
+			{ID: "catz-3", TenantID: "t2", ZoneName: "catalog3.example.com."},
+		},
+	}
+	svc := NewDNSService(repo, nil)
+	ctx := context.Background()
+
+	t1Catalogs, err := svc.ListCatalogZones(ctx, "t1")
+	if err != nil {
+		t.Fatalf("ListCatalogZones(t1) failed: %v", err)
+	}
+	if len(t1Catalogs) != 2 {
+		t.Errorf("expected 2 catalogs for t1, got %d", len(t1Catalogs))
+	}
+
+	t2Catalogs, err := svc.ListCatalogZones(ctx, "t2")
+	if err != nil {
+		t.Fatalf("ListCatalogZones(t2) failed: %v", err)
+	}
+	if len(t2Catalogs) != 1 {
+		t.Errorf("expected 1 catalog for t2, got %d", len(t2Catalogs))
+	}
+
+	emptyCatalogs, err := svc.ListCatalogZones(ctx, "nonexistent")
+	if err != nil {
+		t.Fatalf("ListCatalogZones for nonexistent tenant failed: %v", err)
+	}
+	if len(emptyCatalogs) != 0 {
+		t.Errorf("expected 0 catalogs for nonexistent tenant, got %d", len(emptyCatalogs))
+	}
+}
+
+func TestDeleteCatalogZone(t *testing.T) {
+	repo := &mockRepo{
+		catalogs: []domain.CatalogZone{
+			{ID: "catz-1", TenantID: "t1", ZoneName: "catalog.example.com."},
+		},
+	}
+	svc := NewDNSService(repo, nil)
+	ctx := context.Background()
+
+	err := svc.DeleteCatalogZone(ctx, "catz-1", "t1")
+	if err != nil {
+		t.Fatalf("DeleteCatalogZone failed: %v", err)
+	}
+	if len(repo.catalogs) != 0 {
+		t.Errorf("expected 0 catalogs after delete, got %d", len(repo.catalogs))
+	}
+}
+
+func TestAddZoneToCatalog(t *testing.T) {
+	repo := &mockRepo{
+		catalogs: []domain.CatalogZone{
+			{ID: "catz-1", TenantID: "t1", ZoneName: "catalog.example.com.", Serial: 1, Version: "1"},
+		},
+	}
+	svc := NewDNSService(repo, nil)
+	ctx := context.Background()
+
+	err := svc.AddZoneToCatalog(ctx, "catz-1", "t1", "zone1.example.com.", "zone-uuid-1", "group1")
+	if err != nil {
+		t.Fatalf("AddZoneToCatalog failed: %v", err)
+	}
+
+	// Verify entry was added
+	if len(repo.catalogEntries) != 1 {
+		t.Errorf("expected 1 catalog entry, got %d", len(repo.catalogEntries))
+	}
+	if repo.catalogEntries[0].ZoneName != "zone1.example.com." {
+		t.Errorf("expected zone_name 'zone1.example.com.', got %s", repo.catalogEntries[0].ZoneName)
+	}
+
+	// Verify serial was incremented
+	if repo.catalogs[0].Serial != 2 {
+		t.Errorf("expected serial 2 after add, got %d", repo.catalogs[0].Serial)
+	}
+}
+
+func TestRemoveZoneFromCatalog(t *testing.T) {
+	repo := &mockRepo{
+		catalogs: []domain.CatalogZone{
+			{ID: "catz-1", TenantID: "t1", ZoneName: "catalog.example.com.", Serial: 1, Version: "1"},
+		},
+		catalogEntries: []domain.ZoneCatalogEntry{
+			{ZoneName: "foo.example.com.", ZoneID: "uuid-foo"},
+			{ZoneName: "bar.example.com.", ZoneID: "uuid-bar"},
+		},
+	}
+	svc := NewDNSService(repo, nil)
+	ctx := context.Background()
+
+	err := svc.RemoveZoneFromCatalog(ctx, "catz-1", "t1", "foo.example.com.")
+	if err != nil {
+		t.Fatalf("RemoveZoneFromCatalog failed: %v", err)
+	}
+
+	// Verify foo was removed, bar remains
+	if len(repo.catalogEntries) != 1 {
+		t.Errorf("expected 1 remaining entry, got %d", len(repo.catalogEntries))
+	}
+	if repo.catalogEntries[0].ZoneName != "bar.example.com." {
+		t.Errorf("expected remaining entry 'bar.example.com.', got %s", repo.catalogEntries[0].ZoneName)
+	}
+
+	// Verify serial was incremented
+	if repo.catalogs[0].Serial != 2 {
+		t.Errorf("expected serial 2 after remove, got %d", repo.catalogs[0].Serial)
+	}
+}
+
+func TestListZoneCatalogEntries(t *testing.T) {
+	repo := &mockRepo{
+		catalogEntries: []domain.ZoneCatalogEntry{
+			{ZoneName: "foo.example.com.", ZoneID: "uuid-1", GroupID: "g1"},
+			{ZoneName: "bar.example.com.", ZoneID: "uuid-2"},
+		},
+	}
+	svc := NewDNSService(repo, nil)
+	ctx := context.Background()
+
+	entries, err := svc.ListZoneCatalogEntries(ctx, "catz-1", "t1")
+	if err != nil {
+		t.Fatalf("ListZoneCatalogEntries failed: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Errorf("expected 2 entries, got %d", len(entries))
+	}
+}
+
+func TestCatalogZone_TenantIsolation(t *testing.T) {
+	repo := &mockRepo{
+		catalogs: []domain.CatalogZone{
+			{ID: "catz-1", TenantID: "t1", ZoneName: "catalog.example.com."},
+		},
+	}
+	svc := NewDNSService(repo, nil)
+	ctx := context.Background()
+
+	// t2 should not see t1's catalog
+	got, err := svc.GetCatalogZone(ctx, "catz-1", "t2")
+	if err != nil {
+		t.Fatalf("GetCatalogZone returned error: %v", err)
+	}
+	if got != nil {
+		t.Errorf("expected nil for cross-tenant access, got %+v", got)
+	}
+}
+
+func TestCatalogZone_SerialIncrement(t *testing.T) {
+	repo := &mockRepo{
+		catalogs: []domain.CatalogZone{
+			{ID: "catz-1", TenantID: "t1", ZoneName: "catalog.example.com.", Serial: 1, Version: "1"},
+		},
+	}
+	svc := NewDNSService(repo, nil)
+	ctx := context.Background()
+
+	// AddZoneToCatalog increments serial
+	err := svc.AddZoneToCatalog(ctx, "catz-1", "t1", "zone1.example.com.", "zone-uuid-1", "")
+	if err != nil {
+		t.Fatalf("AddZoneToCatalog failed: %v", err)
+	}
+	if repo.catalogs[0].Serial != 2 {
+		t.Errorf("expected serial 2 after add, got %d", repo.catalogs[0].Serial)
+	}
+	if repo.catalogs[0].Version != "1" {
+		t.Errorf("version should not change on add, got %s", repo.catalogs[0].Version)
+	}
+
+	// RemoveZoneFromCatalog increments serial
+	err = svc.RemoveZoneFromCatalog(ctx, "catz-1", "t1", "zone1.example.com.")
+	if err != nil {
+		t.Fatalf("RemoveZoneFromCatalog failed: %v", err)
+	}
+	if repo.catalogs[0].Serial != 3 {
+		t.Errorf("expected serial 3 after remove, got %d", repo.catalogs[0].Serial)
+	}
+}
+
+func TestCatalogZoneService_ErrorPaths(t *testing.T) {
+	repo := &mockRepo{err: errors.New("db error")}
+	svc := NewDNSService(repo, nil)
+	ctx := context.Background()
+
+	if _, err := svc.CreateCatalogZone(ctx, "t1", "catalog.example.com."); err == nil {
+		t.Error("expected error in CreateCatalogZone")
+	}
+	if _, err := svc.GetCatalogZone(ctx, "catz-1", "t1"); err == nil {
+		t.Error("expected error in GetCatalogZone")
+	}
+	if _, err := svc.ListCatalogZones(ctx, "t1"); err == nil {
+		t.Error("expected error in ListCatalogZones")
+	}
+	if err := svc.DeleteCatalogZone(ctx, "catz-1", "t1"); err == nil {
+		t.Error("expected error in DeleteCatalogZone")
+	}
+	if err := svc.AddZoneToCatalog(ctx, "catz-1", "t1", "zone.example.com.", "uuid", ""); err == nil {
+		t.Error("expected error in AddZoneToCatalog")
+	}
+	if err := svc.RemoveZoneFromCatalog(ctx, "catz-1", "t1", "zone.example.com."); err == nil {
+		t.Error("expected error in RemoveZoneFromCatalog")
+	}
+	if _, err := svc.ListZoneCatalogEntries(ctx, "catz-1", "t1"); err == nil {
+		t.Error("expected error in ListZoneCatalogEntries")
+	}
 }
 
