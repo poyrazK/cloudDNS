@@ -6,6 +6,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
+	"crypto/hmac"
 	"crypto/rsa"
 	"crypto/sha256"
 	"errors"
@@ -546,8 +547,8 @@ func VerifyDNSKEYMatchesDS(dnskey DNSRecord, ds DNSRecord) (bool, error) {
 		return false, ErrAlgorithmMismatch
 	}
 
-	// Compare digests
-	if string(computedDS.Digest) != string(ds.Digest) {
+	// Compare digests using constant-time comparison to prevent timing attacks
+	if !hmac.Equal(computedDS.Digest, ds.Digest) {
 		return false, errors.New("dnssec: DS digest mismatch")
 	}
 

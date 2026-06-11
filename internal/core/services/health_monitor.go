@@ -2,7 +2,6 @@ package services
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"net"
@@ -24,9 +23,8 @@ type HealthMonitor struct {
 
 // HealthMonitorOptions configures optional health monitor behavior.
 type HealthMonitorOptions struct {
-	InsecureSkipVerify   bool
-	HTTPTimeout          time.Duration
-	TCPTimeout           time.Duration
+	HTTPTimeout time.Duration
+	TCPTimeout  time.Duration
 }
 
 // NewHealthMonitor creates a new HealthMonitor with a default HTTP client.
@@ -42,11 +40,6 @@ func NewHealthMonitor(repo ports.DNSRepository, logger *slog.Logger, opts *Healt
 		}
 	}
 	client := &http.Client{Timeout: httpTimeout}
-	if opts != nil && opts.InsecureSkipVerify {
-		client.Transport = &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		}
-	}
 	return &HealthMonitor{
 		repo:      repo,
 		logger:    logger,
