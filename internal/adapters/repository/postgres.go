@@ -1665,7 +1665,6 @@ func (r *PostgresRepository) GetCatalogZone(ctx context.Context, catalogID strin
 	return &catz, nil
 }
 
-// ListCatalogZones lists all catalog zones for a tenant.
 // GetCatalogZoneByName retrieves a catalog zone by its zone name.
 func (r *PostgresRepository) GetCatalogZoneByName(ctx context.Context, zoneName string, tenantID string) (*domain.CatalogZone, error) {
 	query := `
@@ -1684,6 +1683,7 @@ func (r *PostgresRepository) GetCatalogZoneByName(ctx context.Context, zoneName 
 	return &catz, nil
 }
 
+// ListCatalogZones lists all catalog zones for a tenant.
 func (r *PostgresRepository) ListCatalogZones(ctx context.Context, tenantID string) ([]domain.CatalogZone, error) {
 	query := `
 		SELECT id, tenant_id, zone_name, version, serial, created_at, updated_at
@@ -1693,7 +1693,7 @@ func (r *PostgresRepository) ListCatalogZones(ctx context.Context, tenantID stri
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var catalogZones []domain.CatalogZone
 	for rows.Next() {
@@ -1736,7 +1736,7 @@ func (r *PostgresRepository) ListZoneCatalogEntries(ctx context.Context, catalog
 	zoneQuery := `SELECT id FROM dns_zones WHERE name = $1 AND tenant_id = $2`
 	var zoneID string
 	err = r.db.QueryRowContext(ctx, zoneQuery, catz.ZoneName, catz.TenantID).Scan(&zoneID)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
@@ -1752,7 +1752,7 @@ func (r *PostgresRepository) ListZoneCatalogEntries(ctx context.Context, catalog
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var entries []domain.ZoneCatalogEntry
 	for rows.Next() {
@@ -1810,12 +1810,7 @@ func (r *PostgresRepository) AddZoneToCatalog(ctx context.Context, catalogID str
 		VALUES ($1, $2, $3, 'PTR', $4, 3600, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 		ON CONFLICT (zone_id, LOWER(name), type, content) DO NOTHING
 	`
-	result, err := r.db.ExecContext(ctx, query, recordID, zoneID, reversedName, ptrContent)
-	if err == nil {
-		if rows, _ := result.RowsAffected(); rows == 0 {
-			// Duplicate entry — ON CONFLICT DO NOTHING fired
-		}
-	}
+	_, err = r.db.ExecContext(ctx, query, recordID, zoneID, reversedName, ptrContent)
 	return err
 }
 

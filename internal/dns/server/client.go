@@ -465,7 +465,7 @@ func (s *Server) pollCatalogZone(ctx context.Context, catalogZoneName string, ma
 
 // fetchAXFRPackets performs a complete AXFR transfer and returns all response packets.
 // This is the shared AXFR implementation used by both catalog and zone fetching.
-func (s *Server) fetchAXFRPackets(ctx context.Context, zoneName string, masterAddr string) ([]packet.DNSPacket, error) {
+func (s *Server) fetchAXFRPackets(_ context.Context, zoneName string, masterAddr string) ([]packet.DNSPacket, error) {
 	if _, _, err := net.SplitHostPort(masterAddr); err != nil {
 		masterAddr = net.JoinHostPort(masterAddr, "53")
 	}
