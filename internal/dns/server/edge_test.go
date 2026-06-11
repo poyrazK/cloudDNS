@@ -71,10 +71,24 @@ func TestHandleIXFR_NoAuthority(t *testing.T) {
 
 type mockConn struct {
 	net.Conn
+	localAddr  net.Addr
+	remoteAddr net.Addr
 }
 
-func (m *mockConn) Write(b []byte) (int, error) { return len(b), nil }
-func (m *mockConn) Close() error                { return nil }
+func (m *mockConn) Write(b []byte) (int, error)     { return len(b), nil }
+func (m *mockConn) Close() error                    { return nil }
+func (m *mockConn) RemoteAddr() net.Addr            {
+	if m.remoteAddr != nil {
+		return m.remoteAddr
+	}
+	return &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}
+}
+func (m *mockConn) LocalAddr() net.Addr             {
+	if m.localAddr != nil {
+		return m.localAddr
+	}
+	return &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 54321}
+}
 
 // TestHandlePacket_NoQuestions verifies that a DNS packet with no questions
 // returns a FORMERR response as per RFC standards.
