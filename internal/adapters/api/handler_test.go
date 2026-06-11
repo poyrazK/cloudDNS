@@ -564,6 +564,42 @@ func TestUpdateRecordMissingTenant(t *testing.T) {
 	}
 }
 
+func TestUpdateRecordInvalidContentType(t *testing.T) {
+	svc := &mockDNSService{}
+	repo := &testutil.MockRepo{}
+	handler := New(svc, repo, slog.Default())
+
+	rec := domain.Record{Name: "www.test.com.", Type: domain.TypeA, Content: "5.6.7.8", TTL: 300}
+	body, _ := json.Marshal(rec)
+	req := httptest.NewRequest("PUT", "/zones/z1/records/r1", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "text/plain")
+	req = withTenant(req, testTenantID)
+	w := httptest.NewRecorder()
+
+	handler.UpdateRecord(w, req)
+
+	if w.Code != http.StatusUnsupportedMediaType {
+		t.Errorf("Expected status 415, got %d", w.Code)
+	}
+}
+
+func TestUpdateRecordInvalidBody(t *testing.T) {
+	svc := &mockDNSService{}
+	repo := &testutil.MockRepo{}
+	handler := New(svc, repo, slog.Default())
+
+	req := httptest.NewRequest("PUT", "/zones/z1/records/r1", bytes.NewBuffer([]byte("invalid json")))
+	req.Header.Set("Content-Type", "application/json")
+	req = withTenant(req, testTenantID)
+	w := httptest.NewRecorder()
+
+	handler.UpdateRecord(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected status 400, got %d", w.Code)
+	}
+}
+
 func TestDeleteZoneSuccess(t *testing.T) {
 	svc := &mockDNSService{}
 	repo := &testutil.MockRepo{}
