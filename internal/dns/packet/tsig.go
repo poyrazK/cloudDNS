@@ -3,7 +3,7 @@ package packet
 
 import (
 	"crypto/hmac"
-	"crypto/md5" // #nosec G501
+	"crypto/sha256" // #nosec G505
 	"errors"
 	"time"
 )
@@ -37,7 +37,7 @@ func (p *DNSPacket) VerifyTSIG(rawBuffer []byte, tsigStart int, secret []byte) e
 	}
 
 	// 3. Compute HMAC
-	h := hmac.New(md5.New, secret)
+	h := hmac.New(sha256.New, secret)
 	
 	// Create a copy of the buffer before TSIG and adjust ARCOUNT
 	// Header is 12 bytes, ARCOUNT is at offset 10 (2 bytes)
@@ -83,14 +83,14 @@ func (p *DNSPacket) SignTSIG(buffer *BytePacketBuffer, keyName string, secret []
 		Type:          TSIG,
 		Class:         255, // ANY
 		TTL:           0,
-		AlgorithmName: "hmac-md5.sig-alg.reg.int.",
+		AlgorithmName: "hmac-sha256.sig-alg.reg.int.",
 		TimeSigned:    (func() uint64 { u := time.Now().Unix(); if u < 0 { return 0 }; return uint64(u) })(),
 		Fudge:         300,
 		OriginalID:    p.Header.ID,
 	}
 
 	// 2. Compute MAC
-	h := hmac.New(md5.New, secret)
+	h := hmac.New(sha256.New, secret)
 	
 	// Write current buffer content (packet without TSIG)
 	h.Write(buffer.Buf[:buffer.Position()])

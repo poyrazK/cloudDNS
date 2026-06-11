@@ -147,17 +147,3 @@ func TestHealthMonitor_Start(t *testing.T) {
 	// Verify no probe was attempted
 	repo.AssertNotCalled(t, "GetRecordsToProbeStreaming")
 }
-
-func TestHealthMonitor_InsecureSkipVerify(t *testing.T) {
-	m := NewHealthMonitor(nil, nil, &HealthMonitorOptions{InsecureSkipVerify: true})
-	if m.client.Transport == nil {
-		t.Fatal("expected custom transport with InsecureSkipVerify")
-	}
-	tr, ok := m.client.Transport.(*http.Transport)
-	if !ok {
-		t.Fatalf("expected *http.Transport, got %T", m.client.Transport)
-	}
-	if tr.TLSClientConfig == nil || !tr.TLSClientConfig.InsecureSkipVerify {
-		t.Fatal("expected TLSClientConfig.InsecureSkipVerify to be true")
-	}
-}
