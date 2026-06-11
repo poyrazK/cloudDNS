@@ -306,10 +306,11 @@ func run(ctx context.Context) error {
 			}
 		}
 
-		// Configure RouterID and NextHop if provided
+		// Configure RouterID, NextHop, and peer password if provided
 		routerID := os.Getenv("BGP_ROUTER_ID")
 		nextHop := os.Getenv("BGP_NEXT_HOP")
-		routingAdapter.SetConfig(routerID, bgpListenPort, nextHop)
+		peerPassword := os.Getenv("BGP_PEER_PASSWORD")
+		routingAdapter.SetConfig(routerID, bgpListenPort, nextHop, peerPassword)
 
 		anycastDebounce := 5 * time.Second
 		if v := os.Getenv("ANYCAST_DEBOUNCE_SECS"); v != "" {
