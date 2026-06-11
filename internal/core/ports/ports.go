@@ -67,19 +67,20 @@ type DNSRepository interface {
 
 	// Catalog Zones (RFC 9432)
 	CreateCatalogZone(ctx context.Context, catz *domain.CatalogZone) error
-	GetCatalogZone(ctx context.Context, catalogID string) (*domain.CatalogZone, error)
+	GetCatalogZone(ctx context.Context, catalogID string, tenantID string) (*domain.CatalogZone, error)
 	ListCatalogZones(ctx context.Context, tenantID string) ([]domain.CatalogZone, error)
 	UpdateCatalogZoneVersion(ctx context.Context, catalogID string, version string, serial uint32) error
 	DeleteCatalogZone(ctx context.Context, catalogID string, tenantID string) error
 
 	// Zone Catalog Entries (RFC 9432)
-	ListZoneCatalogEntries(ctx context.Context, catalogID string) ([]domain.ZoneCatalogEntry, error)
-	AddZoneToCatalog(ctx context.Context, catalogID string, entry *domain.ZoneCatalogEntry) error
-	RemoveZoneFromCatalog(ctx context.Context, catalogID string, zoneName string) error
+	ListZoneCatalogEntries(ctx context.Context, catalogID string, tenantID string) ([]domain.ZoneCatalogEntry, error)
+	AddZoneToCatalog(ctx context.Context, catalogID string, tenantID string, entry *domain.ZoneCatalogEntry) error
+	RemoveZoneFromCatalog(ctx context.Context, catalogID string, tenantID string, zoneName string) error
 
 	// Zone provisioning from catalog (slave-side)
 	CreateZoneFromCatalog(ctx context.Context, zone *domain.Zone, records []domain.Record) error
 	DeleteZoneByCatalogName(ctx context.Context, catalogZoneName string, tenantID string) error
+	GetZoneByCatalogName(ctx context.Context, catalogZoneName string, tenantID string) (*domain.Zone, error)
 }
 
 // DNSService defines the interface for core DNS business logic.
@@ -100,12 +101,12 @@ type DNSService interface {
 
 	// Catalog Zones (RFC 9432)
 	CreateCatalogZone(ctx context.Context, tenantID string, zoneName string) (*domain.CatalogZone, error)
-	GetCatalogZone(ctx context.Context, catalogID string) (*domain.CatalogZone, error)
+	GetCatalogZone(ctx context.Context, catalogID string, tenantID string) (*domain.CatalogZone, error)
 	ListCatalogZones(ctx context.Context, tenantID string) ([]domain.CatalogZone, error)
 	DeleteCatalogZone(ctx context.Context, catalogID string, tenantID string) error
-	AddZoneToCatalog(ctx context.Context, catalogID string, zoneName string, zoneID string, groupID string) error
-	RemoveZoneFromCatalog(ctx context.Context, catalogID string, zoneName string) error
-	ListZoneCatalogEntries(ctx context.Context, catalogID string) ([]domain.ZoneCatalogEntry, error)
+	AddZoneToCatalog(ctx context.Context, catalogID string, tenantID string, zoneName string, zoneID string, groupID string) error
+	RemoveZoneFromCatalog(ctx context.Context, catalogID string, tenantID string, zoneName string) error
+	ListZoneCatalogEntries(ctx context.Context, catalogID string, tenantID string) ([]domain.ZoneCatalogEntry, error)
 	PollCatalogZone(ctx context.Context, masterAddr string, catalogZoneName string) ([]domain.ZoneCatalogEntry, error)
 	SyncZonesFromCatalog(ctx context.Context, catalogID string, masterAddr string) error
 }

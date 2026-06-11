@@ -344,8 +344,8 @@ func (s *dnsService) CreateCatalogZone(ctx context.Context, tenantID string, zon
 }
 
 // GetCatalogZone retrieves a catalog zone by ID.
-func (s *dnsService) GetCatalogZone(ctx context.Context, catalogID string) (*domain.CatalogZone, error) {
-	return s.repo.GetCatalogZone(ctx, catalogID)
+func (s *dnsService) GetCatalogZone(ctx context.Context, catalogID string, tenantID string) (*domain.CatalogZone, error) {
+	return s.repo.GetCatalogZone(ctx, catalogID, tenantID)
 }
 
 // ListCatalogZones lists all catalog zones for a tenant.
@@ -359,18 +359,18 @@ func (s *dnsService) DeleteCatalogZone(ctx context.Context, catalogID string, te
 }
 
 // AddZoneToCatalog adds a zone to a catalog zone's inventory (RFC 9432).
-func (s *dnsService) AddZoneToCatalog(ctx context.Context, catalogID string, zoneName string, zoneID string, groupID string) error {
+func (s *dnsService) AddZoneToCatalog(ctx context.Context, catalogID string, tenantID string, zoneName string, zoneID string, groupID string) error {
 	entry := &domain.ZoneCatalogEntry{
 		ZoneName: zoneName,
 		ZoneID:   zoneID,
 		GroupID:  groupID,
 	}
-	if err := s.repo.AddZoneToCatalog(ctx, catalogID, entry); err != nil {
+	if err := s.repo.AddZoneToCatalog(ctx, catalogID, tenantID, entry); err != nil {
 		return fmt.Errorf("failed to add zone to catalog: %w", err)
 	}
 
 	// Increment catalog serial to signal change
-	catz, err := s.repo.GetCatalogZone(ctx, catalogID)
+	catz, err := s.repo.GetCatalogZone(ctx, catalogID, tenantID)
 	if err != nil || catz == nil {
 		return err
 	}
@@ -383,13 +383,13 @@ func (s *dnsService) AddZoneToCatalog(ctx context.Context, catalogID string, zon
 }
 
 // RemoveZoneFromCatalog removes a zone from a catalog zone's inventory (RFC 9432).
-func (s *dnsService) RemoveZoneFromCatalog(ctx context.Context, catalogID string, zoneName string) error {
-	if err := s.repo.RemoveZoneFromCatalog(ctx, catalogID, zoneName); err != nil {
+func (s *dnsService) RemoveZoneFromCatalog(ctx context.Context, catalogID string, tenantID string, zoneName string) error {
+	if err := s.repo.RemoveZoneFromCatalog(ctx, catalogID, tenantID, zoneName); err != nil {
 		return fmt.Errorf("failed to remove zone from catalog: %w", err)
 	}
 
 	// Increment catalog serial to signal change
-	catz, err := s.repo.GetCatalogZone(ctx, catalogID)
+	catz, err := s.repo.GetCatalogZone(ctx, catalogID, tenantID)
 	if err != nil || catz == nil {
 		return err
 	}
@@ -402,8 +402,8 @@ func (s *dnsService) RemoveZoneFromCatalog(ctx context.Context, catalogID string
 }
 
 // ListZoneCatalogEntries lists all zone entries in a catalog zone.
-func (s *dnsService) ListZoneCatalogEntries(ctx context.Context, catalogID string) ([]domain.ZoneCatalogEntry, error) {
-	return s.repo.ListZoneCatalogEntries(ctx, catalogID)
+func (s *dnsService) ListZoneCatalogEntries(ctx context.Context, catalogID string, tenantID string) ([]domain.ZoneCatalogEntry, error) {
+	return s.repo.ListZoneCatalogEntries(ctx, catalogID, tenantID)
 }
 
 // PollCatalogZone polls a remote catalog zone and returns the zone entries.

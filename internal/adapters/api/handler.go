@@ -458,7 +458,7 @@ func (h *Handler) GetCatalogZone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	catz, err := h.svc.GetCatalogZone(r.Context(), id)
+	catz, err := h.svc.GetCatalogZone(r.Context(), id, tenantID)
 	if err != nil {
 		h.writeJSONError(w, http.StatusInternalServerError, "Failed to get catalog zone", err)
 		return
@@ -503,7 +503,7 @@ func (h *Handler) ListCatalogEntries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	entries, err := h.svc.ListZoneCatalogEntries(r.Context(), id)
+	entries, err := h.svc.ListZoneCatalogEntries(r.Context(), id, tenantID)
 	if err != nil {
 		h.writeJSONError(w, http.StatusInternalServerError, "Failed to list catalog entries", err)
 		return
@@ -519,6 +519,12 @@ func (h *Handler) ListCatalogEntries(w http.ResponseWriter, r *http.Request) {
 // AddCatalogEntry handles POST /catalog-zones/{id}/entries requests.
 func (h *Handler) AddCatalogEntry(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	tenantID, ok := r.Context().Value(CtxTenantID).(string)
+	if !ok || tenantID == "" {
+		h.logger.Warn("AddCatalogEntry: missing or invalid tenant ID in context")
+		h.writeJSONError(w, http.StatusUnauthorized, "Unauthorized: missing tenant context", nil)
+		return
+	}
 
 	var req struct {
 		ZoneName string `json:"zone_name"`
@@ -534,7 +540,7 @@ func (h *Handler) AddCatalogEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.svc.AddZoneToCatalog(r.Context(), id, req.ZoneName, req.ZoneID, req.GroupID); err != nil {
+	if err := h.svc.AddZoneToCatalog(r.Context(), id, tenantID, req.ZoneName, req.ZoneID, req.GroupID); err != nil {
 		h.writeJSONError(w, http.StatusInternalServerError, "Failed to add zone to catalog", err)
 		return
 	}
@@ -546,8 +552,14 @@ func (h *Handler) AddCatalogEntry(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) RemoveCatalogEntry(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	zoneName := r.PathValue("zone_name")
+	tenantID, ok := r.Context().Value(CtxTenantID).(string)
+	if !ok || tenantID == "" {
+		h.logger.Warn("RemoveCatalogEntry: missing or invalid tenant ID in context")
+		h.writeJSONError(w, http.StatusUnauthorized, "Unauthorized: missing tenant context", nil)
+		return
+	}
 
-	if err := h.svc.RemoveZoneFromCatalog(r.Context(), id, zoneName); err != nil {
+	if err := h.svc.RemoveZoneFromCatalog(r.Context(), id, tenantID, zoneName); err != nil {
 		h.writeJSONError(w, http.StatusInternalServerError, "Failed to remove zone from catalog", err)
 		return
 	}

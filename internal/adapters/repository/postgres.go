@@ -1648,12 +1648,12 @@ func (r *PostgresRepository) CreateCatalogZone(ctx context.Context, catz *domain
 }
 
 // GetCatalogZone retrieves a catalog zone by ID.
-func (r *PostgresRepository) GetCatalogZone(ctx context.Context, catalogID string) (*domain.CatalogZone, error) {
+func (r *PostgresRepository) GetCatalogZone(ctx context.Context, catalogID string, tenantID string) (*domain.CatalogZone, error) {
 	query := `
 		SELECT id, tenant_id, zone_name, version, serial, created_at, updated_at
-		FROM catalog_zones WHERE id = $1
+		FROM catalog_zones WHERE id = $1 AND tenant_id = $2
 	`
-	row := r.db.QueryRowContext(ctx, query, catalogID)
+	row := r.db.QueryRowContext(ctx, query, catalogID, tenantID)
 	var catz domain.CatalogZone
 	err := row.Scan(&catz.ID, &catz.TenantID, &catz.ZoneName, &catz.Version, &catz.Serial, &catz.CreatedAt, &catz.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1707,9 +1707,9 @@ func (r *PostgresRepository) DeleteCatalogZone(ctx context.Context, catalogID st
 
 // ListZoneCatalogEntries lists all zone entries in a catalog zone.
 // Zone entries are stored as PTR records in the catalog zone.
-func (r *PostgresRepository) ListZoneCatalogEntries(ctx context.Context, catalogID string) ([]domain.ZoneCatalogEntry, error) {
-	// First get the catalog zone to find its name
-	catz, err := r.GetCatalogZone(ctx, catalogID)
+func (r *PostgresRepository) ListZoneCatalogEntries(ctx context.Context, catalogID string, tenantID string) ([]domain.ZoneCatalogEntry, error) {
+	// First get the catalog zone to find its name (tenant-scoped)
+	catz, err := r.GetCatalogZone(ctx, catalogID, tenantID)
 	if err != nil || catz == nil {
 		return nil, err
 	}
@@ -1760,9 +1760,9 @@ func (r *PostgresRepository) ListZoneCatalogEntries(ctx context.Context, catalog
 }
 
 // AddZoneToCatalog adds a zone to a catalog zone's inventory.
-func (r *PostgresRepository) AddZoneToCatalog(ctx context.Context, catalogID string, entry *domain.ZoneCatalogEntry) error {
-	// Get the catalog zone
-	catz, err := r.GetCatalogZone(ctx, catalogID)
+func (r *PostgresRepository) AddZoneToCatalog(ctx context.Context, catalogID string, tenantID string, entry *domain.ZoneCatalogEntry) error {
+	// Get the catalog zone (tenant-scoped)
+	catz, err := r.GetCatalogZone(ctx, catalogID, tenantID)
 	if err != nil || catz == nil {
 		return fmt.Errorf("catalog zone not found")
 	}
@@ -1797,9 +1797,9 @@ func (r *PostgresRepository) AddZoneToCatalog(ctx context.Context, catalogID str
 }
 
 // RemoveZoneFromCatalog removes a zone from a catalog zone's inventory.
-func (r *PostgresRepository) RemoveZoneFromCatalog(ctx context.Context, catalogID string, zoneName string) error {
-	// Get the catalog zone
-	catz, err := r.GetCatalogZone(ctx, catalogID)
+func (r *PostgresRepository) RemoveZoneFromCatalog(ctx context.Context, catalogID string, tenantID string, zoneName string) error {
+	// Get the catalog zone (tenant-scoped)
+	catz, err := r.GetCatalogZone(ctx, catalogID, tenantID)
 	if err != nil || catz == nil {
 		return fmt.Errorf("catalog zone not found")
 	}
@@ -1848,6 +1848,24 @@ func (r *PostgresRepository) DeleteZoneByCatalogName(ctx context.Context, catalo
 	query := `DELETE FROM dns_zones WHERE catalog_zone_name = $1 AND tenant_id = $2`
 	_, err := r.db.ExecContext(ctx, query, catalogZoneName, tenantID)
 	return err
+}
+
+// GetZoneByCatalogName retrieves a zone by its catalog zone name.
+func (r *PostgresRepository) GetZoneByCatalogName(ctx context.Context, catalogZoneName string, tenantID string) (*domain.Zone, error) {
+	query := `
+		SELECT id, tenant_id, name, role, master_server, catalog_zone_name, created_at, updated_at
+		FROM dns_zones WHERE catalog_zone_name = $1 AND tenant_id = $2
+	`
+	row := r.db.QueryRowContext(ctx, query, catalogZoneName, tenantID)
+	var z domain.Zone
+	err := row.Scan(&z.ID, &z.TenantID, &z.Name, &z.Role, &z.MasterServer, &z.CatalogZoneName, &z.CreatedAt, &z.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &z, nil
 }
 
 // Helper function to reverse a domain name for PTR record naming
