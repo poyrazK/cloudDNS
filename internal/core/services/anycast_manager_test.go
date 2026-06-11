@@ -67,12 +67,12 @@ func (m *mockAnycastDNSService) UpdateRecord(_ context.Context, record *domain.R
 }
 
 func (m *mockAnycastDNSService) CreateCatalogZone(_ context.Context, _, _ string) (*domain.CatalogZone, error) { return nil, nil }
-func (m *mockAnycastDNSService) GetCatalogZone(_ context.Context, _ string) (*domain.CatalogZone, error)      { return nil, nil }
-func (m *mockAnycastDNSService) ListCatalogZones(_ context.Context, _ string) ([]domain.CatalogZone, error)  { return nil, nil }
+func (m *mockAnycastDNSService) GetCatalogZone(_ context.Context, _, _ string) (*domain.CatalogZone, error) { return nil, nil }
+func (m *mockAnycastDNSService) ListCatalogZones(_ context.Context, _ string) ([]domain.CatalogZone, error) { return nil, nil }
 func (m *mockAnycastDNSService) DeleteCatalogZone(_ context.Context, _, _ string) error                     { return nil }
-func (m *mockAnycastDNSService) AddZoneToCatalog(_ context.Context, _, _, _, _ string) error                 { return nil }
-func (m *mockAnycastDNSService) RemoveZoneFromCatalog(_ context.Context, _, _ string) error                 { return nil }
-func (m *mockAnycastDNSService) ListZoneCatalogEntries(_ context.Context, _ string) ([]domain.ZoneCatalogEntry, error) {
+func (m *mockAnycastDNSService) AddZoneToCatalog(_ context.Context, _, _, _, _, _ string) error             { return nil }
+func (m *mockAnycastDNSService) RemoveZoneFromCatalog(_ context.Context, _, _, _ string) error             { return nil }
+func (m *mockAnycastDNSService) ListZoneCatalogEntries(_ context.Context, _, _ string) ([]domain.ZoneCatalogEntry, error) {
 	return nil, nil
 }
 func (m *mockAnycastDNSService) PollCatalogZone(_ context.Context, _, _ string) ([]domain.ZoneCatalogEntry, error) { return nil, nil }

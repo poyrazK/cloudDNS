@@ -268,8 +268,8 @@ func (m *MockRepo) CreateCatalogZone(_ context.Context, catz *domain.CatalogZone
 }
 
 // GetCatalogZone implements ports.DNSRepository for testing.
-func (m *MockRepo) GetCatalogZone(_ context.Context, catalogID string) (*domain.CatalogZone, error) {
-	args := m.Called(catalogID)
+func (m *MockRepo) GetCatalogZone(_ context.Context, catalogID string, tenantID string) (*domain.CatalogZone, error) {
+	args := m.Called(catalogID, tenantID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
@@ -295,20 +295,20 @@ func (m *MockRepo) DeleteCatalogZone(_ context.Context, catalogID string, tenant
 }
 
 // ListZoneCatalogEntries implements ports.DNSRepository for testing.
-func (m *MockRepo) ListZoneCatalogEntries(_ context.Context, catalogID string) ([]domain.ZoneCatalogEntry, error) {
-	args := m.Called(catalogID)
+func (m *MockRepo) ListZoneCatalogEntries(_ context.Context, catalogID string, tenantID string) ([]domain.ZoneCatalogEntry, error) {
+	args := m.Called(catalogID, tenantID)
 	return args.Get(0).([]domain.ZoneCatalogEntry), args.Error(1)
 }
 
 // AddZoneToCatalog implements ports.DNSRepository for testing.
-func (m *MockRepo) AddZoneToCatalog(_ context.Context, catalogID string, entry *domain.ZoneCatalogEntry) error {
-	args := m.Called(catalogID, entry)
+func (m *MockRepo) AddZoneToCatalog(_ context.Context, catalogID string, tenantID string, entry *domain.ZoneCatalogEntry) error {
+	args := m.Called(catalogID, tenantID, entry)
 	return args.Error(0)
 }
 
 // RemoveZoneFromCatalog implements ports.DNSRepository for testing.
-func (m *MockRepo) RemoveZoneFromCatalog(_ context.Context, catalogID string, zoneName string) error {
-	args := m.Called(catalogID, zoneName)
+func (m *MockRepo) RemoveZoneFromCatalog(_ context.Context, catalogID string, tenantID string, zoneName string) error {
+	args := m.Called(catalogID, tenantID, zoneName)
 	return args.Error(0)
 }
 
@@ -322,6 +322,15 @@ func (m *MockRepo) CreateZoneFromCatalog(_ context.Context, zone *domain.Zone, r
 func (m *MockRepo) DeleteZoneByCatalogName(_ context.Context, catalogZoneName string, tenantID string) error {
 	args := m.Called(catalogZoneName, tenantID)
 	return args.Error(0)
+}
+
+// GetZoneByCatalogName implements ports.DNSRepository for testing.
+func (m *MockRepo) GetZoneByCatalogName(_ context.Context, catalogZoneName string, tenantID string) (*domain.Zone, error) {
+	args := m.Called(catalogZoneName, tenantID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*domain.Zone), args.Error(1)
 }
 
 // MockDNSService implements ports.DNSService for testing.
@@ -426,7 +435,7 @@ func (m *MockDNSService) CreateCatalogZone(_ context.Context, _ string, _ string
 }
 
 // GetCatalogZone implements ports.DNSService for testing.
-func (m *MockDNSService) GetCatalogZone(_ context.Context, _ string) (*domain.CatalogZone, error) {
+func (m *MockDNSService) GetCatalogZone(_ context.Context, _ string, _ string) (*domain.CatalogZone, error) {
 	args := m.Called()
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -447,19 +456,19 @@ func (m *MockDNSService) DeleteCatalogZone(_ context.Context, _ string, _ string
 }
 
 // AddZoneToCatalog implements ports.DNSService for testing.
-func (m *MockDNSService) AddZoneToCatalog(_ context.Context, _ string, _ string, _ string, _ string) error {
+func (m *MockDNSService) AddZoneToCatalog(_ context.Context, _ string, _ string, _ string, _ string, _ string) error {
 	args := m.Called()
 	return args.Error(0)
 }
 
 // RemoveZoneFromCatalog implements ports.DNSService for testing.
-func (m *MockDNSService) RemoveZoneFromCatalog(_ context.Context, _ string, _ string) error {
+func (m *MockDNSService) RemoveZoneFromCatalog(_ context.Context, _ string, _ string, _ string) error {
 	args := m.Called()
 	return args.Error(0)
 }
 
 // ListZoneCatalogEntries implements ports.DNSService for testing.
-func (m *MockDNSService) ListZoneCatalogEntries(_ context.Context, _ string) ([]domain.ZoneCatalogEntry, error) {
+func (m *MockDNSService) ListZoneCatalogEntries(_ context.Context, _ string, _ string) ([]domain.ZoneCatalogEntry, error) {
 	args := m.Called()
 	return args.Get(0).([]domain.ZoneCatalogEntry), args.Error(1)
 }

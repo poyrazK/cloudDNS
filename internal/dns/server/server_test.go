@@ -689,7 +689,7 @@ func (m *mockServerRepo) Ping(ctx context.Context) error {
 func (m *mockServerRepo) CreateCatalogZone(ctx context.Context, catz *domain.CatalogZone) error {
 	return nil
 }
-func (m *mockServerRepo) GetCatalogZone(ctx context.Context, catalogID string) (*domain.CatalogZone, error) {
+func (m *mockServerRepo) GetCatalogZone(ctx context.Context, catalogID string, tenantID string) (*domain.CatalogZone, error) {
 	return nil, nil
 }
 func (m *mockServerRepo) ListCatalogZones(ctx context.Context, tenantID string) ([]domain.CatalogZone, error) {
@@ -701,13 +701,13 @@ func (m *mockServerRepo) UpdateCatalogZoneVersion(ctx context.Context, catalogID
 func (m *mockServerRepo) DeleteCatalogZone(ctx context.Context, catalogID string, tenantID string) error {
 	return nil
 }
-func (m *mockServerRepo) ListZoneCatalogEntries(ctx context.Context, catalogID string) ([]domain.ZoneCatalogEntry, error) {
+func (m *mockServerRepo) ListZoneCatalogEntries(ctx context.Context, catalogID string, tenantID string) ([]domain.ZoneCatalogEntry, error) {
 	return nil, nil
 }
-func (m *mockServerRepo) AddZoneToCatalog(ctx context.Context, catalogID string, entry *domain.ZoneCatalogEntry) error {
+func (m *mockServerRepo) AddZoneToCatalog(ctx context.Context, catalogID string, tenantID string, entry *domain.ZoneCatalogEntry) error {
 	return nil
 }
-func (m *mockServerRepo) RemoveZoneFromCatalog(ctx context.Context, catalogID string, zoneName string) error {
+func (m *mockServerRepo) RemoveZoneFromCatalog(ctx context.Context, catalogID string, tenantID string, zoneName string) error {
 	return nil
 }
 func (m *mockServerRepo) CreateZoneFromCatalog(ctx context.Context, zone *domain.Zone, records []domain.Record) error {
@@ -715,6 +715,9 @@ func (m *mockServerRepo) CreateZoneFromCatalog(ctx context.Context, zone *domain
 }
 func (m *mockServerRepo) DeleteZoneByCatalogName(ctx context.Context, catalogZoneName string, tenantID string) error {
 	return nil
+}
+func (m *mockServerRepo) GetZoneByCatalogName(ctx context.Context, catalogZoneName string, tenantID string) (*domain.Zone, error) {
+	return nil, nil
 }
 
 func TestHandlePacketLocalHit(t *testing.T) {
