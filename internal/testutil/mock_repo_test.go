@@ -371,3 +371,227 @@ func TestMockRepo_GetCatalogZoneByName_NotFound(t *testing.T) {
 	}
 	m.AssertExpectations(t)
 }
+
+func TestMockRepo_CatalogZoneMethods(t *testing.T) {
+	t.Run("CreateCatalogZone", func(t *testing.T) {
+		m := new(MockRepo)
+		m.On("CreateCatalogZone", mock.Anything).Return(nil).Once()
+		err := m.CreateCatalogZone(context.Background(),&domain.CatalogZone{ID: "catz-1"})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		m.AssertExpectations(t)
+	})
+
+	t.Run("GetCatalogZone", func(t *testing.T) {
+		m := new(MockRepo)
+		m.On("GetCatalogZone", "catz-1", "t1").Return(&domain.CatalogZone{ID: "catz-1"}, nil).Once()
+		catz, err := m.GetCatalogZone(context.Background(), "catz-1", "t1")
+		if err != nil || catz == nil || catz.ID != "catz-1" {
+			t.Errorf("unexpected result: %+v, err: %v", catz, err)
+		}
+		m.AssertExpectations(t)
+	})
+
+	t.Run("GetCatalogZone_NotFound", func(t *testing.T) {
+		m := new(MockRepo)
+		m.On("GetCatalogZone", "nonexistent", "t1").Return(nil, nil).Once()
+		catz, err := m.GetCatalogZone(context.Background(), "nonexistent", "t1")
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if catz != nil {
+			t.Errorf("expected nil, got %+v", catz)
+		}
+		m.AssertExpectations(t)
+	})
+
+	t.Run("ListCatalogZones", func(t *testing.T) {
+		m := new(MockRepo)
+		m.On("ListCatalogZones", "t1").Return([]domain.CatalogZone{{ID: "catz-1"}}, nil).Once()
+		catzs, err := m.ListCatalogZones(context.Background(), "t1")
+		if err != nil || len(catzs) != 1 {
+			t.Errorf("unexpected result: %+v, err: %v", catzs, err)
+		}
+		m.AssertExpectations(t)
+	})
+
+	t.Run("UpdateCatalogZoneVersion", func(t *testing.T) {
+		m := new(MockRepo)
+		m.On("UpdateCatalogZoneVersion", "catz-1", "2", uint32(10)).Return(nil).Once()
+		err := m.UpdateCatalogZoneVersion(context.Background(), "catz-1", "2", 10)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		m.AssertExpectations(t)
+	})
+
+	t.Run("DeleteCatalogZone", func(t *testing.T) {
+		m := new(MockRepo)
+		m.On("DeleteCatalogZone", "catz-1", "t1").Return(nil).Once()
+		err := m.DeleteCatalogZone(context.Background(), "catz-1", "t1")
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		m.AssertExpectations(t)
+	})
+
+	t.Run("ListZoneCatalogEntries", func(t *testing.T) {
+		m := new(MockRepo)
+		entries := []domain.ZoneCatalogEntry{{ZoneName: "zone1.example.com."}}
+		m.On("ListZoneCatalogEntries", "catz-1", "t1").Return(entries, nil).Once()
+		result, err := m.ListZoneCatalogEntries(context.Background(), "catz-1", "t1")
+		if err != nil || len(result) != 1 {
+			t.Errorf("unexpected result: %+v, err: %v", result, err)
+		}
+		m.AssertExpectations(t)
+	})
+
+	t.Run("AddZoneToCatalog", func(t *testing.T) {
+		m := new(MockRepo)
+		entry := &domain.ZoneCatalogEntry{ZoneName: "zone1.example.com."}
+		m.On("AddZoneToCatalog", "catz-1", "t1", entry).Return(nil).Once()
+		err := m.AddZoneToCatalog(context.Background(), "catz-1", "t1", entry)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		m.AssertExpectations(t)
+	})
+
+	t.Run("RemoveZoneFromCatalog", func(t *testing.T) {
+		m := new(MockRepo)
+		m.On("RemoveZoneFromCatalog", "catz-1", "t1", "zone1.example.com.").Return(nil).Once()
+		err := m.RemoveZoneFromCatalog(context.Background(), "catz-1", "t1", "zone1.example.com.")
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		m.AssertExpectations(t)
+	})
+
+	t.Run("CreateZoneFromCatalog", func(t *testing.T) {
+		m := new(MockRepo)
+		m.On("CreateZoneFromCatalog", mock.Anything, mock.Anything).Return(nil).Once()
+		err := m.CreateZoneFromCatalog(context.Background(), &domain.Zone{ID: "z1"}, []domain.Record{})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		m.AssertExpectations(t)
+	})
+
+	t.Run("DeleteZoneByCatalogName", func(t *testing.T) {
+		m := new(MockRepo)
+		m.On("DeleteZoneByCatalogName", "zone1.example.com.", "t1").Return(nil).Once()
+		err := m.DeleteZoneByCatalogName(context.Background(), "zone1.example.com.", "t1")
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		m.AssertExpectations(t)
+	})
+
+	t.Run("GetZoneByCatalogName", func(t *testing.T) {
+		m := new(MockRepo)
+		m.On("GetZoneByCatalogName", "zone1.example.com.", "t1").Return(&domain.Zone{ID: "z1"}, nil).Once()
+		zone, err := m.GetZoneByCatalogName(context.Background(), "zone1.example.com.", "t1")
+		if err != nil || zone == nil || zone.ID != "z1" {
+			t.Errorf("unexpected result: %+v, err: %v", zone, err)
+		}
+		m.AssertExpectations(t)
+	})
+
+	t.Run("GetZoneByCatalogName_NotFound", func(t *testing.T) {
+		m := new(MockRepo)
+		m.On("GetZoneByCatalogName", "nonexistent.example.com.", "t1").Return(nil, nil).Once()
+		zone, err := m.GetZoneByCatalogName(context.Background(), "nonexistent.example.com.", "t1")
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if zone != nil {
+			t.Errorf("expected nil, got %+v", zone)
+		}
+		m.AssertExpectations(t)
+	})
+}
+
+func TestMockDNSService_CatalogMethods(t *testing.T) {
+	t.Run("CreateCatalogZone", func(t *testing.T) {
+		m := new(MockDNSService)
+		m.On("CreateCatalogZone", mock.Anything, mock.Anything, mock.Anything).Return(&domain.CatalogZone{ID: "catz-1"}, nil).Once()
+		catz, err := m.CreateCatalogZone(context.Background(), "catz-1", "t1")
+		if err != nil || catz == nil || catz.ID != "catz-1" {
+			t.Errorf("unexpected result: %+v, err: %v", catz, err)
+		}
+		m.AssertExpectations(t)
+	})
+
+	t.Run("GetCatalogZone", func(t *testing.T) {
+		m := new(MockDNSService)
+		m.On("GetCatalogZone", mock.Anything, mock.Anything, mock.Anything).Return(&domain.CatalogZone{ID: "catz-1"}, nil).Once()
+		catz, err := m.GetCatalogZone(context.Background(), "catz-1", "t1")
+		if err != nil || catz == nil || catz.ID != "catz-1" {
+			t.Errorf("unexpected result: %+v, err: %v", catz, err)
+		}
+		m.AssertExpectations(t)
+	})
+
+	t.Run("ListCatalogZones", func(t *testing.T) {
+		m := new(MockDNSService)
+		m.On("ListCatalogZones", mock.Anything, mock.Anything).Return([]domain.CatalogZone{{ID: "catz-1"}}, nil).Once()
+		catzs, err := m.ListCatalogZones(context.Background(), "t1")
+		if err != nil || len(catzs) != 1 {
+			t.Errorf("unexpected result: %+v, err: %v", catzs, err)
+		}
+		m.AssertExpectations(t)
+	})
+
+	t.Run("DeleteCatalogZone", func(t *testing.T) {
+		m := new(MockDNSService)
+		m.On("DeleteCatalogZone", mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+		err := m.DeleteCatalogZone(context.Background(), "catz-1", "t1")
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		m.AssertExpectations(t)
+	})
+
+	t.Run("AddZoneToCatalog", func(t *testing.T) {
+		m := new(MockDNSService)
+		m.On("AddZoneToCatalog", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+		err := m.AddZoneToCatalog(context.Background(), "catz-1", "t1", "zone1", "tenant", "192.168.1.1")
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		m.AssertExpectations(t)
+	})
+
+	t.Run("RemoveZoneFromCatalog", func(t *testing.T) {
+		m := new(MockDNSService)
+		m.On("RemoveZoneFromCatalog", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+		err := m.RemoveZoneFromCatalog(context.Background(), "catz-1", "t1", "zone1")
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		m.AssertExpectations(t)
+	})
+
+	t.Run("ListZoneCatalogEntries", func(t *testing.T) {
+		m := new(MockDNSService)
+		entries := []domain.ZoneCatalogEntry{{ZoneName: "zone1.example.com."}}
+		m.On("ListZoneCatalogEntries", mock.Anything, mock.Anything, mock.Anything).Return(entries, nil).Once()
+		result, err := m.ListZoneCatalogEntries(context.Background(), "catz-1", "t1")
+		if err != nil || len(result) != 1 {
+			t.Errorf("unexpected result: %+v, err: %v", result, err)
+		}
+		m.AssertExpectations(t)
+	})
+}
+
+func TestMockRepo_GetRecordsByNames(t *testing.T) {
+	m := new(MockRepo)
+	recs := map[string][]domain.Record{"a.example.com.": {{ID: "r1", Name: "a.example.com."}}}
+	m.On("GetRecordsByNames", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(recs, nil).Once()
+	result, err := m.GetRecordsByNames(context.Background(), []string{"a.example.com.", "b.example.com."}, domain.TypeA, "1.1")
+	if err != nil || len(result) != 1 {
+		t.Errorf("unexpected result: %+v, err: %v", result, err)
+	}
+	m.AssertExpectations(t)
+}

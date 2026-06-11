@@ -467,3 +467,78 @@ func extractSSLMode(s string) string {
 	}
 	return ""
 }
+
+func TestParseDNSSECConfig(t *testing.T) {
+	t.Run("NoAnchorsNoMode", func(t *testing.T) {
+		t.Setenv("DNSSEC_MODE", "")
+		// Clear any TRUST_ANCHOR_ vars
+		for _, e := range os.Environ() {
+			if strings.HasPrefix(e, "TRUST_ANCHOR_") {
+				os.Unsetenv(strings.SplitN(e, "=", 2)[0])
+			}
+		}
+		cfg := parseDNSSECConfig()
+		if cfg != nil {
+			t.Errorf("expected nil when no anchors and no mode, got %+v", cfg)
+		}
+	})
+
+	t.Run("ModeOnly", func(t *testing.T) {
+		t.Setenv("DNSSEC_MODE", "strict")
+		for _, e := range os.Environ() {
+			if strings.HasPrefix(e, "TRUST_ANCHOR_") {
+				os.Unsetenv(strings.SplitN(e, "=", 2)[0])
+			}
+		}
+		cfg := parseDNSSECConfig()
+		if cfg == nil {
+			t.Fatal("expected non-nil config")
+		}
+		if cfg.Mode != "strict" {
+			t.Errorf("expected mode 'strict', got %q", cfg.Mode)
+		}
+		if len(cfg.TrustAnchors) != 0 {
+			t.Errorf("expected no anchors, got %d", len(cfg.TrustAnchors))
+		}
+	})
+
+	t.Run("AnchorsOnly", func(t *testing.T) {
+		for _, e := range os.Environ() {
+			if strings.HasPrefix(e, "TRUST_ANCHOR_") {
+				os.Unsetenv(strings.SplitN(e, "=", 2)[0])
+			}
+		}
+		t.Setenv("TRUST_ANCHOR_EXAMPLE.COM", "AQANAA==")
+		t.Setenv("DNSSEC_MODE", "")
+		cfg := parseDNSSECConfig()
+		if cfg == nil {
+			t.Fatal("expected non-nil config")
+		}
+		if len(cfg.TrustAnchors) != 1 {
+			t.Errorf("expected 1 anchor, got %d", len(cfg.TrustAnchors))
+		}
+		if anchor, ok := cfg.TrustAnchors["example.com"]; !ok || anchor != "AQANAA==" {
+			t.Errorf("expected anchor for example.com, got %q", anchor)
+		}
+	})
+
+	t.Run("BothAnchorsAndMode", func(t *testing.T) {
+		for _, e := range os.Environ() {
+			if strings.HasPrefix(e, "TRUST_ANCHOR_") {
+				os.Unsetenv(strings.SplitN(e, "=", 2)[0])
+			}
+		}
+		t.Setenv("DNSSEC_MODE", "ad-bit-only")
+		t.Setenv("TRUST_ANCHOR_TEST.COM", "AQANAA==")
+		cfg := parseDNSSECConfig()
+		if cfg == nil {
+			t.Fatal("expected non-nil config")
+		}
+		if cfg.Mode != "ad-bit-only" {
+			t.Errorf("expected mode 'ad-bit-only', got %q", cfg.Mode)
+		}
+		if _, ok := cfg.TrustAnchors["test.com"]; !ok {
+			t.Error("expected anchor for test.com")
+		}
+	})
+}
