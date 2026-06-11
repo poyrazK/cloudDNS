@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"net"
+	"os/exec"
 	"testing"
 	"time"
 
@@ -488,4 +489,32 @@ func (m *mockCommand) SetStdout(buf *bytes.Buffer) {
 
 func (m *mockCommand) Run() error {
 	return nil
+}
+
+func TestGoCommand_SetStdout(t *testing.T) {
+	var buf bytes.Buffer
+	g := &goCommand{cmd: exec.Command("echo", "test")}
+	g.SetStdout(&buf)
+	if g.stdou == nil {
+		t.Error("expected stdou to be set")
+	}
+	if g.cmd.Stdout == nil {
+		t.Error("expected cmd.Stdout to be set")
+	}
+}
+
+func TestGoCommand_Run(t *testing.T) {
+	g := &goCommand{cmd: exec.Command("true")}
+	err := g.Run()
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestGoCommand_RunError(t *testing.T) {
+	g := &goCommand{cmd: exec.Command("false")}
+	err := g.Run()
+	if err == nil {
+		t.Error("expected error from false command")
+	}
 }
