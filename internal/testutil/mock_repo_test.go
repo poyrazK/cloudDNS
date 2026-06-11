@@ -2,6 +2,7 @@ package testutil
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
@@ -585,6 +586,26 @@ func TestMockDNSService_CatalogMethods(t *testing.T) {
 	})
 }
 
+func TestMockDNSService_UpdateRecord(t *testing.T) {
+	m := new(MockDNSService)
+	m.On("UpdateRecord", mock.Anything).Return(nil).Once()
+	err := m.UpdateRecord(context.Background(), &domain.Record{ID: "r1", ZoneID: "z1"})
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	m.AssertExpectations(t)
+}
+
+func TestMockDNSService_UpdateRecord_Error(t *testing.T) {
+	m := new(MockDNSService)
+	m.On("UpdateRecord", mock.Anything).Return(errors.New("update failed")).Once()
+	err := m.UpdateRecord(context.Background(), &domain.Record{ID: "r2"})
+	if err == nil {
+		t.Error("expected error, got nil")
+	}
+	m.AssertExpectations(t)
+}
+
 func TestMockRepo_GetRecordsByNames(t *testing.T) {
 	m := new(MockRepo)
 	recs := map[string][]domain.Record{"a.example.com.": {{ID: "r1", Name: "a.example.com."}}}
@@ -639,6 +660,34 @@ func TestMockRepo_ListRecordsForZoneStreaming(t *testing.T) {
 	}
 	if result == nil {
 		t.Error("expected non-nil iterator")
+	}
+	m.AssertExpectations(t)
+}
+
+func TestMockRepo_GetDNSKEYs(t *testing.T) {
+	m := new(MockRepo)
+	m.On("GetDNSKEYs", "example.com.").Return([]domain.Record{
+		{ID: "k1", Name: "example.com.", Type: "DNSKEY", Content: "257 3 13 base64key=="},
+	}, nil).Once()
+	recs, err := m.GetDNSKEYs(context.Background(), "example.com.")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if len(recs) != 1 {
+		t.Errorf("expected 1 record, got %d", len(recs))
+	}
+	m.AssertExpectations(t)
+}
+
+func TestMockRepo_GetDNSKEYs_NotFound(t *testing.T) {
+	m := new(MockRepo)
+	m.On("GetDNSKEYs", "nonexistent.com.").Return([]domain.Record{}, nil).Once()
+	recs, err := m.GetDNSKEYs(context.Background(), "nonexistent.com.")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if len(recs) != 0 {
+		t.Errorf("expected 0 records, got %d", len(recs))
 	}
 	m.AssertExpectations(t)
 }
