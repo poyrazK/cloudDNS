@@ -68,6 +68,7 @@ type DNSRepository interface {
 	// Catalog Zones (RFC 9432)
 	CreateCatalogZone(ctx context.Context, catz *domain.CatalogZone) error
 	GetCatalogZone(ctx context.Context, catalogID string, tenantID string) (*domain.CatalogZone, error)
+	GetCatalogZoneByName(ctx context.Context, zoneName string, tenantID string) (*domain.CatalogZone, error)
 	ListCatalogZones(ctx context.Context, tenantID string) ([]domain.CatalogZone, error)
 	UpdateCatalogZoneVersion(ctx context.Context, catalogID string, version string, serial uint32) error
 	DeleteCatalogZone(ctx context.Context, catalogID string, tenantID string) error

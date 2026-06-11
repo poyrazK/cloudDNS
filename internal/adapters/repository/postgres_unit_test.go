@@ -812,8 +812,8 @@ func TestPostgresRepository_Catalog_Unit(t *testing.T) {
 
 		// Second query: zone lookup
 		zoneRows := sqlmock.NewRows([]string{"id"}).AddRow("zone-1")
-		mock.ExpectQuery(`SELECT id FROM dns_zones WHERE name = \$1 AND tenant_id = \(SELECT tenant_id FROM catalog_zones WHERE id = \$2\)`).
-			WithArgs("catalog.example.com.", "catz-1").
+		mock.ExpectQuery(`SELECT id FROM dns_zones WHERE name = \$1 AND tenant_id = \$2`).
+			WithArgs("catalog.example.com.", "t1").
 			WillReturnRows(zoneRows)
 
 		// Third query: PTR records

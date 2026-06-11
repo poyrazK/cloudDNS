@@ -449,6 +449,8 @@ func (s *Server) pollCatalogZone(ctx context.Context, catalogZoneName string, ma
 	tenantID := s.CatalogTenantID
 	if tenantID == "" {
 		tenantID = s.NodeID
+		s.Logger.Warn("CATALOG_TENANT_ID not set, falling back to NodeID for catalog-provisioned zones — this may cause cross-deployment tenant contamination if NodeID is shared",
+			"nodeID", s.NodeID)
 	}
 
 	// Sync each zone from catalog

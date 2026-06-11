@@ -276,6 +276,15 @@ func (m *MockRepo) GetCatalogZone(_ context.Context, catalogID string, tenantID 
 	return args.Get(0).(*domain.CatalogZone), args.Error(1)
 }
 
+// GetCatalogZoneByName implements ports.DNSRepository for testing.
+func (m *MockRepo) GetCatalogZoneByName(_ context.Context, zoneName string, tenantID string) (*domain.CatalogZone, error) {
+	args := m.Called(zoneName, tenantID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*domain.CatalogZone), args.Error(1)
+}
+
 // ListCatalogZones implements ports.DNSRepository for testing.
 func (m *MockRepo) ListCatalogZones(_ context.Context, tenantID string) ([]domain.CatalogZone, error) {
 	args := m.Called(tenantID)

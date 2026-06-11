@@ -81,6 +81,7 @@ func (m *mockDNSSECRepo) Ping(_ context.Context) error                      { re
 
 func (m *mockDNSSECRepo) CreateCatalogZone(_ context.Context, _ *domain.CatalogZone) error              { return nil }
 func (m *mockDNSSECRepo) GetCatalogZone(_ context.Context, _, _ string) (*domain.CatalogZone, error)   { return nil, nil }
+func (m *mockDNSSECRepo) GetCatalogZoneByName(_ context.Context, _, _ string) (*domain.CatalogZone, error) { return nil, nil }
 func (m *mockDNSSECRepo) ListCatalogZones(_ context.Context, _ string) ([]domain.CatalogZone, error)    { return nil, nil }
 func (m *mockDNSSECRepo) UpdateCatalogZoneVersion(_ context.Context, _, _ string, _ uint32) error       { return nil }
 func (m *mockDNSSECRepo) DeleteCatalogZone(_ context.Context, _, _ string) error                        { return nil }

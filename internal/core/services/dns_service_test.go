@@ -311,6 +311,18 @@ func (m *mockRepo) GetCatalogZone(_ context.Context, catalogID string, tenantID 
 	}
 	return nil, nil
 }
+func (m *mockRepo) GetCatalogZoneByName(_ context.Context, zoneName string, tenantID string) (*domain.CatalogZone, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	for _, c := range m.catalogs {
+		if c.ZoneName == zoneName && c.TenantID == tenantID {
+			return &c, nil
+		}
+	}
+	return nil, nil
+}
+
 func (m *mockRepo) ListCatalogZones(_ context.Context, tenantID string) ([]domain.CatalogZone, error) {
 	if m.err != nil {
 		return nil, m.err

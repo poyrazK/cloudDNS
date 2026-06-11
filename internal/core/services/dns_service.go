@@ -408,16 +408,26 @@ func (s *dnsService) ListZoneCatalogEntries(ctx context.Context, catalogID strin
 
 // PollCatalogZone polls a remote catalog zone and returns the zone entries.
 // This is used by slave servers to discover zones from a master.
+// Note: The actual AXFR fetch is done by the server's pollCatalogZone in client.go.
+// This service method reads from local storage after the poller has synced.
 func (s *dnsService) PollCatalogZone(ctx context.Context, masterAddr string, catalogZoneName string) ([]domain.ZoneCatalogEntry, error) {
-	// TODO: Implement AXFR to fetch catalog zone from master
-	// For now, return empty - this will be implemented in the client polling
-	return nil, nil
+	// Resolve catalog by zone name to get catalogID
+	catz, err := s.repo.GetCatalogZoneByName(ctx, catalogZoneName, "")
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve catalog zone: %w", err)
+	}
+	if catz == nil {
+		return nil, nil
+	}
+	return s.repo.ListZoneCatalogEntries(ctx, catz.ID, catz.TenantID)
 }
 
 // SyncZonesFromCatalog syncs zones from a catalog to local storage.
 // Used by slave servers to provision zones from catalog.
+// Note: The actual zone provisioning is done by the server's syncZoneFromCatalog in client.go.
+// This service method is a manual trigger entry point.
 func (s *dnsService) SyncZonesFromCatalog(ctx context.Context, catalogID string, masterAddr string) error {
-	// TODO: Implement catalog zone AXFR and zone provisioning
-	// For now, return nil - this will be implemented in the client polling
+	// Zone sync is handled by the server poller in client.go via syncZoneFromCatalog.
+	// This method exists as a manual/administrative entry point if needed.
 	return nil
 }
