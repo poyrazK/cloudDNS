@@ -1063,6 +1063,40 @@ func TestAddCatalogEntry_Unauthorized(t *testing.T) {
 	}
 }
 
+func TestAddCatalogEntry_InvalidJSON(t *testing.T) {
+	svc := &mockDNSService{}
+	repo := &testutil.MockRepo{}
+	handler := New(svc, repo, slog.Default())
+
+	body := bytes.NewBuffer([]byte(`{invalid json}`))
+	req := httptest.NewRequest("POST", "/catalog-zones/catz-123/entries", body)
+	req = withTenant(req, testTenantID)
+	w := httptest.NewRecorder()
+
+	handler.AddCatalogEntry(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected status 400, got %d. Body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestAddCatalogEntry_ServiceError(t *testing.T) {
+	svc := &mockDNSService{err: errors.New("service error")}
+	repo := &testutil.MockRepo{}
+	handler := New(svc, repo, slog.Default())
+
+	body := bytes.NewBuffer([]byte(`{"zone_name": "zone1.example.com.", "zone_id": "uuid-1"}`))
+	req := httptest.NewRequest("POST", "/catalog-zones/catz-123/entries", body)
+	req = withTenant(req, testTenantID)
+	w := httptest.NewRecorder()
+
+	handler.AddCatalogEntry(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("Expected status 500, got %d. Body: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestRemoveCatalogEntry_Success(t *testing.T) {
 	svc := &mockDNSService{}
 	repo := &testutil.MockRepo{}
