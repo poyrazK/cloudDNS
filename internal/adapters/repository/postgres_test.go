@@ -502,7 +502,7 @@ func TestPostgresRepository_CatalogZones(t *testing.T) {
 	}
 
 	// 1. Test CreateCatalogZone
-	catzID := "catz-0001-0000-0000-000000000001"
+	catzID := "550e8400-e29b-41d4-a716-446655440001"
 	catz1 := &domain.CatalogZone{
 		ID:        catzID,
 		TenantID:  "t1",
@@ -554,9 +554,9 @@ func TestPostgresRepository_CatalogZones(t *testing.T) {
 
 	// 5. Test ListCatalogZones
 	// Create two more for t1
-	catz2 := &domain.CatalogZone{ID: "catz-0002-0000-0000-000000000002", TenantID: "t1", ZoneName: "catalog2.example.com.", Version: "1", Serial: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
-	catz3 := &domain.CatalogZone{ID: "catz-0003-0000-0000-000000000003", TenantID: "t1", ZoneName: "catalog3.example.com.", Version: "1", Serial: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
-	catz4 := &domain.CatalogZone{ID: "catz-0004-0000-0000-000000000004", TenantID: "t2", ZoneName: "catalog.t2.example.com.", Version: "1", Serial: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	catz2 := &domain.CatalogZone{ID: "550e8400-e29b-41d4-a716-446655440002", TenantID: "t1", ZoneName: "catalog2.example.com.", Version: "1", Serial: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	catz3 := &domain.CatalogZone{ID: "550e8400-e29b-41d4-a716-446655440003", TenantID: "t1", ZoneName: "catalog3.example.com.", Version: "1", Serial: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	catz4 := &domain.CatalogZone{ID: "550e8400-e29b-41d4-a716-446655440004", TenantID: "t2", ZoneName: "catalog.t2.example.com.", Version: "1", Serial: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
 	_ = repo.CreateCatalogZone(ctx, catz2)
 	_ = repo.CreateCatalogZone(ctx, catz3)
 	_ = repo.CreateCatalogZone(ctx, catz4)
@@ -602,7 +602,7 @@ func TestPostgresRepository_CatalogZones(t *testing.T) {
 
 	// 7. Test AddZoneToCatalog and ListZoneCatalogEntries
 	// The catalog zone must be provisioned as a regular zone first
-	createZone("zone-for-catz-0001", "catalog.example.com.", "t1")
+	createZone("550e8400-e29b-41d4-a716-446655440005", "catalog.example.com.", "t1")
 
 	entry1 := &domain.ZoneCatalogEntry{ZoneName: "foo.example.com.", ZoneID: "zone-uuid-1", GroupID: "group1"}
 	if err := repo.AddZoneToCatalog(ctx, catzID, "t1", entry1); err != nil {
