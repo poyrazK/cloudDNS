@@ -1171,3 +1171,16 @@ func TestCatalogHandler_InternalError(t *testing.T) {
 		})
 	}
 }
+
+func TestNewWithNilLogger(t *testing.T) {
+	svc :=&mockDNSService{}
+	repo := &testutil.MockRepo{}
+	// Passing nil logger should not panic and should use slog.Default()
+	handler := New(svc, repo, nil)
+	if handler == nil {
+		t.Error("expected non-nil handler")
+	}
+	if handler.logger == nil {
+		t.Error("expected logger to be set to slog.Default()")
+	}
+}
