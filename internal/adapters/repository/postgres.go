@@ -1835,12 +1835,10 @@ func (r *PostgresRepository) RemoveZoneFromCatalog(ctx context.Context, catalogI
 	// Match content that starts with "zoneName:" (exact prefix match, not substring)
 	query := `
 		DELETE FROM dns_records
-		WHERE zone_id = $1 AND type = 'PTR' AND content >= $2 AND content < $3
+		WHERE zone_id = $1 AND type = 'PTR' AND substring(content, 1, length($2)) = $2
 	`
-	// prefix is "zoneName:" and nextPrefix is the lexicographically next string
 	prefix := zoneName + ":"
-	nextPrefix := prefix + "\xff"
-	_, err = r.db.ExecContext(ctx, query, zoneID, prefix, nextPrefix)
+	_, err = r.db.ExecContext(ctx, query, zoneID, prefix)
 	return err
 }
 
