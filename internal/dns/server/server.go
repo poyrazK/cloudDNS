@@ -1230,7 +1230,7 @@ func (s *Server) checkCache(ctx context.Context, req *packet.DNSPacket, cacheKey
 		} else if remainingTTL > l1TTLCap {
 			remainingTTL = l1TTLCap
 		}
-		s.Cache.SetNoCopy(cacheKey, data, remainingTTL)
+		s.Cache.Set(cacheKey, data, remainingTTL)
 		lock.Unlock()
 		_ = sendFn(data)
 		return data
