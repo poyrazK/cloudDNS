@@ -114,7 +114,7 @@ func TestPostgresRepository_Unit(t *testing.T) {
 	t.Run("CreateZone", func(t *testing.T) {
 		zone := &domain.Zone{ID: "z2", Name: "new.test.", TenantID: "t1", Role: "master", MasterServer: ""}
 		mock.ExpectExec(`INSERT INTO dns_zones`).
-			WithArgs(zone.ID, zone.TenantID, zone.Name, zone.VPCID, zone.Description, zone.Role, zone.MasterServer, sqlmock.AnyArg(), sqlmock.AnyArg()).
+			WithArgs(zone.ID, zone.TenantID, zone.Name, zone.VPCID, zone.Description, zone.Role, zone.MasterServer, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
 			WillReturnResult(sqlmock.NewResult(1, 1))
 
 		err := repo.CreateZone(ctx, zone)
