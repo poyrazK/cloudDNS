@@ -520,9 +520,9 @@ func (r *PostgresRepository) ListRecordsForZoneStreaming(ctx context.Context, zo
 
 // CreateZone implements ports.DNSRepository.
 func (r *PostgresRepository) CreateZone(ctx context.Context, zone *domain.Zone) error {
-	query := `INSERT INTO dns_zones (id, tenant_id, name, vpc_id, description, role, master_server, created_at, updated_at) 
-			  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
-	_, err := r.db.ExecContext(ctx, query, zone.ID, zone.TenantID, zone.Name, zone.VPCID, zone.Description, zone.Role, zone.MasterServer, zone.CreatedAt, zone.UpdatedAt)
+	query := `INSERT INTO dns_zones (id, tenant_id, name, vpc_id, description, role, master_server, catalog_zone_name, created_at, updated_at)
+			  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
+	_, err := r.db.ExecContext(ctx, query, zone.ID, zone.TenantID, zone.Name, zone.VPCID, zone.Description, zone.Role, zone.MasterServer, zone.CatalogZoneName, zone.CreatedAt, zone.UpdatedAt)
 	return err
 }
 
@@ -542,9 +542,9 @@ func (r *PostgresRepository) CreateZoneWithRecords(ctx context.Context, zone *do
 	}()
 
 	// 1. Insert Zone
-	zoneQuery := `INSERT INTO dns_zones (id, tenant_id, name, vpc_id, description, role, master_server, created_at, updated_at)
-			      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
-	_, errExec := tx.ExecContext(ctx, zoneQuery, zone.ID, zone.TenantID, zone.Name, zone.VPCID, zone.Description, zone.Role, zone.MasterServer, zone.CreatedAt, zone.UpdatedAt)
+	zoneQuery := `INSERT INTO dns_zones (id, tenant_id, name, vpc_id, description, role, master_server, catalog_zone_name, created_at, updated_at)
+			      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
+	_, errExec := tx.ExecContext(ctx, zoneQuery, zone.ID, zone.TenantID, zone.Name, zone.VPCID, zone.Description, zone.Role, zone.MasterServer, zone.CatalogZoneName, zone.CreatedAt, zone.UpdatedAt)
 	if errExec != nil {
 		return errExec
 	}
