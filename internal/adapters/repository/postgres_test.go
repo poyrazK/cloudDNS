@@ -700,6 +700,52 @@ func TestPostgresRepository_CatalogZones(t *testing.T) {
 	}
 }
 
+func TestPostgresRepository_CatalogZones_CreateZoneFromCatalog_ThenDeleteByCatalogName(t *testing.T) {
+	if testing.Short() || !dockerAvailable() {
+		t.Skip("skipping integration test")
+	}
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+	repo := NewPostgresRepository(db)
+	ctx := context.Background()
+
+	// Create a zone with catalog_zone_name set (simulates zone provisioned from catalog)
+	catalogZoneName := "test-catalog-zone"
+	zone := &domain.Zone{
+		ID:              "zone-from-catz-rollback-test",
+		TenantID:        "t1",
+		Name:            "test.example.com.",
+		Role:            "slave",
+		CatalogZoneName: &catalogZoneName,
+	}
+	if err := repo.CreateZone(ctx, zone); err != nil {
+		t.Fatalf("CreateZone failed: %v", err)
+	}
+
+	// Verify GetZoneByCatalogName finds it
+	got, err := repo.GetZoneByCatalogName(ctx, catalogZoneName, "t1")
+	if err != nil {
+		t.Fatalf("GetZoneByCatalogName failed: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected zone, got nil")
+	}
+	if got.ID != "zone-from-catz-rollback-test" {
+		t.Errorf("expected ID 'zone-from-catz-rollback-test', got %s", got.ID)
+	}
+
+	// Delete via DeleteZoneByCatalogName (simulates rollback after failed AXFR)
+	if err := repo.DeleteZoneByCatalogName(ctx, catalogZoneName, "t1"); err != nil {
+		t.Fatalf("DeleteZoneByCatalogName failed: %v", err)
+	}
+
+	// Verify it's gone
+	gotAfter, _ := repo.GetZoneByCatalogName(ctx, catalogZoneName, "t1")
+	if gotAfter != nil {
+		t.Errorf("expected nil after delete, got %+v", gotAfter)
+	}
+}
+
 func TestPostgresRepositoryEdgeCases(t *testing.T) {
 	if testing.Short() || !dockerAvailable() {
 		t.Skip("skipping edge case test")

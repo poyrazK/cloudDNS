@@ -692,6 +692,9 @@ func (m *mockServerRepo) CreateCatalogZone(ctx context.Context, catz *domain.Cat
 func (m *mockServerRepo) GetCatalogZone(ctx context.Context, catalogID string, tenantID string) (*domain.CatalogZone, error) {
 	return nil, nil
 }
+func (m *mockServerRepo) GetCatalogZoneByName(ctx context.Context, zoneName string, tenantID string) (*domain.CatalogZone, error) {
+	return nil, nil
+}
 func (m *mockServerRepo) ListCatalogZones(ctx context.Context, tenantID string) ([]domain.CatalogZone, error) {
 	return nil, nil
 }
@@ -1684,6 +1687,35 @@ func TestDLQRetryWorker_Shutdown(t *testing.T) {
 		// Pass — exited promptly after context cancel
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("dlqRetryWorker did not exit within 500ms after context cancel")
+	}
+}
+
+func TestCatalogPollerState_Cleanup(t *testing.T) {
+	state := &catalogPollerState{
+		lastSeenSerial: map[string]uint32{
+			"zone1.example.com.": 5,
+			"zone2.example.com.": 3,
+		},
+		lastSeenAt: map[string]time.Time{
+			"zone1.example.com.": time.Now().Add(-25 * time.Hour), // stale (>24h ttl)
+			"zone2.example.com.": time.Now().Add(-1 * time.Hour),  // fresh
+		},
+	}
+
+	state.cleanup(24 * time.Hour)
+
+	// zone1 should be removed (stale), zone2 should remain (fresh)
+	if _, ok := state.lastSeenSerial["zone1.example.com."]; ok {
+		t.Error("expected zone1 to be cleaned up")
+	}
+	if _, ok := state.lastSeenSerial["zone2.example.com."]; !ok {
+		t.Error("expected zone2 to remain")
+	}
+	if _, ok := state.lastSeenAt["zone1.example.com."]; ok {
+		t.Error("expected zone1 lastSeenAt to be cleaned up")
+	}
+	if _, ok := state.lastSeenAt["zone2.example.com."]; !ok {
+		t.Error("expected zone2 lastSeenAt to remain")
 	}
 }
 

@@ -341,3 +341,33 @@ func TestMockDNSService(t *testing.T) {
 	checks := m.HealthCheck(ctx)
 	if len(checks) != 1 || checks["postgres"] != nil { t.Errorf("HealthCheck failed") }
 }
+
+func TestMockRepo_GetCatalogZoneByName(t *testing.T) {
+	m := new(MockRepo)
+	m.On("GetCatalogZoneByName", "catalog.example.com.", "t1").Return(&domain.CatalogZone{
+		ID: "catz-1", TenantID: "t1", ZoneName: "catalog.example.com.", Version: "1", Serial: 1,
+	}, nil).Once()
+
+	catz, err := m.GetCatalogZoneByName(context.Background(), "catalog.example.com.", "t1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if catz == nil || catz.ID != "catz-1" {
+		t.Errorf("unexpected result: %+v", catz)
+	}
+	m.AssertExpectations(t)
+}
+
+func TestMockRepo_GetCatalogZoneByName_NotFound(t *testing.T) {
+	m := new(MockRepo)
+	m.On("GetCatalogZoneByName", "nonexistent.example.com.", "t1").Return(nil, nil).Once()
+
+	catz, err := m.GetCatalogZoneByName(context.Background(), "nonexistent.example.com.", "t1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if catz != nil {
+		t.Errorf("expected nil, got %+v", catz)
+	}
+	m.AssertExpectations(t)
+}

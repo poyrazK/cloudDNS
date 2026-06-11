@@ -726,6 +726,59 @@ func TestPostgresRepository_Catalog_Unit(t *testing.T) {
 		}
 	})
 
+	t.Run("GetCatalogZoneByName", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatalf("failed to open sqlmock: %s", err)
+		}
+		defer db.Close()
+		repo := NewPostgresRepository(db)
+
+		catzRows := sqlmock.NewRows([]string{"id", "tenant_id", "zone_name", "version", "serial", "created_at", "updated_at"}).
+			AddRow("catz-1", "t1", "catalog.example.com.", "1", uint64(1), time.Now(), time.Now())
+		mock.ExpectQuery(`SELECT .* FROM catalog_zones WHERE zone_name = \$1 AND tenant_id = \$2`).
+			WithArgs("catalog.example.com.", "t1").
+			WillReturnRows(catzRows)
+
+		got, err := repo.GetCatalogZoneByName(ctx, "catalog.example.com.", "t1")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got == nil {
+			t.Fatal("expected catalog zone, got nil")
+		}
+		if got.ID != "catz-1" {
+			t.Errorf("expected ID 'catz-1', got %s", got.ID)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("unfulfilled expectations: %s", err)
+		}
+	})
+
+	t.Run("GetCatalogZoneByName_NotFound", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatalf("failed to open sqlmock: %s", err)
+		}
+		defer db.Close()
+		repo := NewPostgresRepository(db)
+
+		mock.ExpectQuery(`SELECT .* FROM catalog_zones WHERE zone_name = \$1 AND tenant_id = \$2`).
+			WithArgs("nonexistent.example.com.", "t1").
+			WillReturnError(sql.ErrNoRows)
+
+		got, err := repo.GetCatalogZoneByName(ctx, "nonexistent.example.com.", "t1")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != nil {
+			t.Errorf("expected nil, got %+v", got)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("unfulfilled expectations: %s", err)
+		}
+	})
+
 	t.Run("ListCatalogZones", func(t *testing.T) {
 		db, mock, err := sqlmock.New()
 		if err != nil {
