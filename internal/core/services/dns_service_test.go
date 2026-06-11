@@ -459,13 +459,39 @@ func TestDNSService_ExtraMethods(t *testing.T) {
 		t.Errorf("UpdateRecordHealth failed: %v", err)
 	}
 
-	// 4. Test HealthCheck (Repo Ping)
+	// 4. Test UpdateRecord
+	rec := &domain.Record{ID: "r1", ZoneID: "z1", TenantID: "t1", Name: "www.example.com.", Type: domain.TypeA, Content: "5.6.7.8", TTL: 300}
+	err = svc.UpdateRecord(ctx, rec)
+	if err != nil {
+		t.Errorf("UpdateRecord failed: %v", err)
+	}
+
+	// 4b. Test UpdateRecord with TTL < 60 (should be set to 60)
+	recLowTTL := &domain.Record{ID: "r2", ZoneID: "z1", TenantID: "t1", Name: "mail.example.com.", Type: domain.TypeA, Content: "5.6.7.8", TTL: 30}
+	err = svc.UpdateRecord(ctx, recLowTTL)
+	if err != nil {
+		t.Errorf("UpdateRecord with low TTL failed: %v", err)
+	}
+	if recLowTTL.TTL != 60 {
+		t.Errorf("Expected TTL 60, got %d", recLowTTL.TTL)
+	}
+
+	// 4c. Test UpdateRecord with repo error
+	repo.err = errors.New("update failed")
+	recErr := &domain.Record{ID: "r3", ZoneID: "z1", TenantID: "t1", Name: "err.example.com.", Type: domain.TypeA, Content: "5.6.7.8", TTL: 300}
+	err = svc.UpdateRecord(ctx, recErr)
+	if err == nil {
+		t.Error("Expected error for UpdateRecord with repo error")
+	}
+	repo.err = nil // reset
+
+	// 5. Test HealthCheck (Repo Ping)
 	checks := svc.HealthCheck(ctx)
 	if err, ok := checks["postgres"]; !ok || err != nil {
 		t.Errorf("HealthCheck failed: %v", err)
 	}
 
-	// 5. Test Error paths
+	// 6. Test Error paths
 	repo.err = errors.New("db error")
 	_, err = svc.ListAuditLogs(ctx, "t1")
 	if err == nil {
