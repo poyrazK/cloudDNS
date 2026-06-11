@@ -367,6 +367,11 @@ func (s *Server) StartCatalogPoller(ctx context.Context, catalogZones []string, 
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 
+	// Cleanup stale entries every half-ttl (24h default -> cleanup every 12h)
+	cleanupTicker := time.NewTicker(pollInterval / 2)
+	defer cleanupTicker.Stop()
+	ttl := 24 * time.Hour
+
 	// Poll immediately on startup
 	for _, catalogZoneName := range catalogZones {
 		if err := s.pollCatalogZone(ctx, catalogZoneName, masterAddr); err != nil {
@@ -379,6 +384,8 @@ func (s *Server) StartCatalogPoller(ctx context.Context, catalogZones []string, 
 		case <-ctx.Done():
 			s.Logger.Info("catalog poller shutting down")
 			return
+		case <-cleanupTicker.C:
+			s.catalogState.cleanup(ttl)
 		case <-ticker.C:
 			for _, catalogZoneName := range catalogZones {
 				if err := s.pollCatalogZone(ctx, catalogZoneName, masterAddr); err != nil {
@@ -423,9 +430,10 @@ func (s *Server) pollCatalogZone(ctx context.Context, catalogZoneName string, ma
 			return nil
 		}
 
-		// Update last seen serial
+		// Update last seen serial and timestamp
 		s.catalogState.mu.Lock()
 		s.catalogState.lastSeenSerial[catalogZoneName] = currentSerial
+		s.catalogState.lastSeenAt[catalogZoneName] = time.Now()
 		s.catalogState.mu.Unlock()
 	}
 
@@ -437,9 +445,15 @@ func (s *Server) pollCatalogZone(ctx context.Context, catalogZoneName string, ma
 
 	s.Logger.Info("received catalog zone entries", "zone", catalogZoneName, "count", len(entries))
 
+	// Determine tenant ID for catalog-provisioned zones
+	tenantID := s.CatalogTenantID
+	if tenantID == "" {
+		tenantID = s.NodeID
+	}
+
 	// Sync each zone from catalog
 	for _, entry := range entries {
-		if err := s.syncZoneFromCatalog(ctx, &entry, masterAddr, s.NodeID); err != nil {
+		if err := s.syncZoneFromCatalog(ctx, &entry, masterAddr, tenantID); err != nil {
 			s.Logger.Error("failed to sync zone from catalog", "zone", entry.ZoneName, "error", err)
 		}
 	}
@@ -447,165 +461,14 @@ func (s *Server) pollCatalogZone(ctx context.Context, catalogZoneName string, ma
 	return nil
 }
 
-// fetchCatalogEntries performs AXFR on the catalog zone and extracts zone entries.
-func (s *Server) fetchCatalogEntries(ctx context.Context, catalogZoneName string, masterAddr string) ([]domain.ZoneCatalogEntry, error) {
+// fetchAXFRPackets performs a complete AXFR transfer and returns all response packets.
+// This is the shared AXFR implementation used by both catalog and zone fetching.
+func (s *Server) fetchAXFRPackets(ctx context.Context, zoneName string, masterAddr string) ([]packet.DNSPacket, error) {
 	if _, _, err := net.SplitHostPort(masterAddr); err != nil {
 		masterAddr = net.JoinHostPort(masterAddr, "53")
 	}
 
-	s.Logger.Debug("performing AXFR for catalog zone", "zone", catalogZoneName, "master", masterAddr)
-
-	conn, err := net.DialTimeout("tcp", masterAddr, 10*time.Second)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to master: %w", err)
-	}
-	defer func() {
-		if errClose := conn.Close(); errClose != nil {
-			s.Logger.Warn("failed to close AXFR connection", "error", errClose)
-		}
-	}()
-
-	// Construct AXFR query
-	req := packet.NewDNSPacket()
-	req.Header.ID = generateTransactionID()
-	req.Header.RecursionDesired = false
-	req.Questions = append(req.Questions, packet.DNSQuestion{
-		Name:   catalogZoneName,
-		QType:  packet.AXFR,
-		QClass: 1,
-	})
-
-	buffer := packet.NewBytePacketBuffer()
-	if err := req.Write(buffer); err != nil {
-		return nil, err
-	}
-
-	// Write length-prefixed query
-	data := buffer.Buf[:buffer.Position()]
-	prefix := []byte{byte((len(data) >> 8) & 0xFF), byte(len(data) & 0xFF)}
-	if _, err := conn.Write(append(prefix, data...)); err != nil {
-		return nil, err
-	}
-
-	var entries []domain.ZoneCatalogEntry
-	soaCount := 0
-
-	for {
-		// Read 2-byte length
-		lenBuf := make([]byte, 2)
-		if _, err := io.ReadFull(conn, lenBuf); err != nil {
-			if err == io.EOF {
-				break
-			}
-			return nil, err
-		}
-		pLen := int(lenBuf[0])<<8 | int(lenBuf[1])
-
-		// Read packet
-		pData := make([]byte, pLen)
-		if _, err := io.ReadFull(conn, pData); err != nil {
-			return nil, err
-		}
-
-		resBuffer := packet.NewBytePacketBuffer()
-		resBuffer.Load(pData)
-
-		resp := packet.NewDNSPacket()
-		if err := resp.FromBuffer(resBuffer); err != nil {
-			return nil, err
-		}
-
-		if resp.Header.ResCode != packet.RcodeNoError {
-			return nil, fmt.Errorf("master returned error: %d", resp.Header.ResCode)
-		}
-
-		for _, ans := range resp.Answers {
-			if ans.Type == packet.SOA {
-				soaCount++
-			}
-
-			// Extract zone entries from PTR records
-			// Per RFC 9432, zones are stored as PTR records in the catalog zone
-			if ans.Type == packet.PTR {
-				// Content format: "zone_name:zone_id[:group_id]"
-				parts := strings.SplitN(ans.Host, ":", 3)
-				if len(parts) >= 2 {
-					entry := domain.ZoneCatalogEntry{
-						ZoneName: parts[0],
-						ZoneID:   parts[1],
-					}
-					if len(parts) == 3 {
-						entry.GroupID = parts[2]
-					}
-					entries = append(entries, entry)
-					s.Logger.Debug("found catalog entry", "zone", entry.ZoneName, "id", entry.ZoneID)
-				}
-			}
-		}
-
-		// AXFR ends when the second SOA is received
-		if soaCount >= 2 {
-			break
-		}
-	}
-
-	return entries, nil
-}
-
-// syncZoneFromCatalog provisions a single zone from a catalog entry.
-func (s *Server) syncZoneFromCatalog(ctx context.Context, entry *domain.ZoneCatalogEntry, masterAddr string, tenantID string) error {
-	// 1. Check if zone already exists by catalog zone name
-	zones, err := s.Repo.ListZones(ctx, tenantID)
-	if err != nil {
-		return fmt.Errorf("failed to list zones: %w", err)
-	}
-	for _, z := range zones {
-		if z.CatalogZoneName != nil && *z.CatalogZoneName == entry.ZoneName {
-			s.Logger.Debug("zone already exists from catalog", "zone", entry.ZoneName)
-			return nil
-		}
-	}
-
-	// 2. Create zone record with catalog metadata
-	zone := &domain.Zone{
-		ID:              entry.ZoneID,
-		TenantID:        tenantID,
-		Name:            entry.ZoneName,
-		Role:            "slave",
-		MasterServer:    masterAddr,
-		CatalogZoneName: &entry.ZoneName,
-		CreatedAt:       time.Now(),
-		UpdatedAt:       time.Now(),
-	}
-	if err := s.Repo.CreateZone(ctx, zone); err != nil {
-		return fmt.Errorf("failed to create zone: %w", err)
-	}
-
-	// 3. AXFR zone data from master
-	records, err := s.fetchZoneRecords(ctx, entry.ZoneName, masterAddr, entry.ZoneID)
-	if err != nil {
-		s.Logger.Warn("failed to fetch zone records via AXFR, zone created without records", "zone", entry.ZoneName, "error", err)
-		return nil
-	}
-
-	// 4. Batch create records
-	if len(records) > 0 {
-		if err := s.Repo.BatchCreateRecords(ctx, records); err != nil {
-			return fmt.Errorf("failed to create zone records: %w", err)
-		}
-	}
-
-	s.Logger.Info("provisioned zone from catalog", "zone", entry.ZoneName, "records", len(records))
-	return nil
-}
-
-// fetchZoneRecords performs AXFR on a regular zone and returns the records.
-func (s *Server) fetchZoneRecords(ctx context.Context, zoneName string, masterAddr string, zoneID string) ([]domain.Record, error) {
-	if _, _, err := net.SplitHostPort(masterAddr); err != nil {
-		masterAddr = net.JoinHostPort(masterAddr, "53")
-	}
-
-	s.Logger.Debug("performing AXFR for zone", "zone", zoneName, "master", masterAddr)
+	s.Logger.Debug("performing AXFR", "zone", zoneName, "master", masterAddr)
 
 	conn, err := net.DialTimeout("tcp", masterAddr, 10*time.Second)
 	if err != nil {
@@ -632,18 +495,16 @@ func (s *Server) fetchZoneRecords(ctx context.Context, zoneName string, masterAd
 		return nil, err
 	}
 
-	// Write length-prefixed query
 	data := buffer.Buf[:buffer.Position()]
 	prefix := []byte{byte((len(data) >> 8) & 0xFF), byte(len(data) & 0xFF)}
 	if _, err := conn.Write(append(prefix, data...)); err != nil {
 		return nil, err
 	}
 
-	var records []domain.Record
+	var packets []packet.DNSPacket
 	soaCount := 0
 
 	for {
-		// Read 2-byte length
 		lenBuf := make([]byte, 2)
 		if _, err := io.ReadFull(conn, lenBuf); err != nil {
 			if err == io.EOF {
@@ -653,7 +514,6 @@ func (s *Server) fetchZoneRecords(ctx context.Context, zoneName string, masterAd
 		}
 		pLen := int(lenBuf[0])<<8 | int(lenBuf[1])
 
-		// Read packet
 		pData := make([]byte, pLen)
 		if _, err := io.ReadFull(conn, pData); err != nil {
 			return nil, err
@@ -675,19 +535,115 @@ func (s *Server) fetchZoneRecords(ctx context.Context, zoneName string, masterAd
 			if ans.Type == packet.SOA {
 				soaCount++
 			}
+		}
 
+		packets = append(packets, *resp)
+
+		if soaCount >= 2 {
+			break
+		}
+	}
+
+	return packets, nil
+}
+
+// fetchCatalogEntries performs AXFR on the catalog zone and extracts zone entries.
+func (s *Server) fetchCatalogEntries(ctx context.Context, catalogZoneName string, masterAddr string) ([]domain.ZoneCatalogEntry, error) {
+	packets, err := s.fetchAXFRPackets(ctx, catalogZoneName, masterAddr)
+	if err != nil {
+		return nil, err
+	}
+
+	var entries []domain.ZoneCatalogEntry
+	for _, resp := range packets {
+		for _, ans := range resp.Answers {
+			if ans.Type == packet.PTR {
+				// Content format: "zone_name:zone_id[:group_id]"
+				parts := strings.SplitN(ans.Host, ":", 3)
+				if len(parts) >= 2 {
+					entry := domain.ZoneCatalogEntry{
+						ZoneName: parts[0],
+						ZoneID:   parts[1],
+					}
+					if len(parts) == 3 {
+						entry.GroupID = parts[2]
+					}
+					entries = append(entries, entry)
+					s.Logger.Debug("found catalog entry", "zone", entry.ZoneName, "id", entry.ZoneID)
+				}
+			}
+		}
+	}
+
+	return entries, nil
+}
+
+// syncZoneFromCatalog provisions a single zone from a catalog entry.
+func (s *Server) syncZoneFromCatalog(ctx context.Context, entry *domain.ZoneCatalogEntry, masterAddr string, tenantID string) error {
+	// 1. Check if zone already exists by catalog zone name (targeted query, not O(n) scan)
+	existing, err := s.Repo.GetZoneByCatalogName(ctx, entry.ZoneName, tenantID)
+	if err != nil {
+		return fmt.Errorf("failed to check zone existence: %w", err)
+	}
+	if existing != nil {
+		s.Logger.Debug("zone already exists from catalog", "zone", entry.ZoneName)
+		return nil
+	}
+
+	// 2. Create zone record with catalog metadata
+	zone := &domain.Zone{
+		ID:              entry.ZoneID,
+		TenantID:        tenantID,
+		Name:            entry.ZoneName,
+		Role:            "slave",
+		MasterServer:    masterAddr,
+		CatalogZoneName: &entry.ZoneName,
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
+	}
+	if err := s.Repo.CreateZone(ctx, zone); err != nil {
+		return fmt.Errorf("failed to create zone: %w", err)
+	}
+
+	// 3. AXFR zone data from master
+	records, err := s.fetchZoneRecords(ctx, entry.ZoneName, masterAddr, entry.ZoneID, tenantID)
+	if err != nil {
+		s.Logger.Error("failed to fetch zone records via AXFR, rolling back zone creation", "zone", entry.ZoneName, "error", err)
+		// Rollback: delete the zone we just created since it has no records
+		if delErr := s.Repo.DeleteZone(ctx, entry.ZoneID, tenantID); delErr != nil {
+			s.Logger.Error("failed to rollback zone creation", "zone", entry.ZoneName, "delete_error", delErr)
+		}
+		return fmt.Errorf("failed to fetch zone records via AXFR: %w", err)
+	}
+
+	// 4. Batch create records
+	if len(records) > 0 {
+		if err := s.Repo.BatchCreateRecords(ctx, records); err != nil {
+			return fmt.Errorf("failed to create zone records: %w", err)
+		}
+	}
+
+	s.Logger.Info("provisioned zone from catalog", "zone", entry.ZoneName, "records", len(records))
+	return nil
+}
+
+// fetchZoneRecords performs AXFR on a regular zone and returns the records.
+func (s *Server) fetchZoneRecords(ctx context.Context, zoneName string, masterAddr string, zoneID string, tenantID string) ([]domain.Record, error) {
+	packets, err := s.fetchAXFRPackets(ctx, zoneName, masterAddr)
+	if err != nil {
+		return nil, err
+	}
+
+	var records []domain.Record
+	for _, resp := range packets {
+		for _, ans := range resp.Answers {
 			dRec, err := repository.ConvertPacketRecordToDomain(ans, zoneID)
 			if err != nil {
 				s.Logger.Warn("failed to convert packet record", "error", err)
 				continue
 			}
-			dRec.TenantID = s.NodeID // Use NodeID as tenant proxy for catalog-provisioned zones
+			dRec.TenantID = tenantID
 			records = append(records, dRec)
-		}
-
-		// AXFR ends when the second SOA is received
-		if soaCount >= 2 {
-			break
 		}
 	}
 
