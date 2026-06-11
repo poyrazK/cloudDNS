@@ -98,6 +98,9 @@ CREATE INDEX IF NOT EXISTS idx_dns_zones_name_reverse ON dns_zones (REVERSE(name
 -- Covers zone_id + LOWER(name) + type pattern used by DeleteRecordsByNameAndType
 CREATE INDEX IF NOT EXISTS idx_dns_records_zone_name_type ON dns_records(zone_id, LOWER(name), type);
 
+-- Unique constraint for catalog zone PTR records (used by AddZoneToCatalog ON CONFLICT)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dns_records_zone_name_type_content ON dns_records(zone_id, LOWER(name), type, content);
+
 -- Covers zone_id + LOWER(name) pattern used by DeleteRecordsByName
 CREATE INDEX IF NOT EXISTS idx_dns_records_zone_name ON dns_records(zone_id, LOWER(name));
 
