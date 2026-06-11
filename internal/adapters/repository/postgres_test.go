@@ -650,7 +650,7 @@ func TestPostgresRepository_CatalogZones(t *testing.T) {
 
 	// 9. Test GetZoneByCatalogName
 	catalogZoneName := "my-catalog-zone"
-	zoneWithCatalogName := &domain.Zone{ID: "zone-with-catz-name", TenantID: "t1", Name: "real.example.com.", CatalogZoneName: &catalogZoneName}
+	zoneWithCatalogName := &domain.Zone{ID: "550e8400-e29b-41d4-a716-446655440098", TenantID: "t1", Name: "real.example.com.", CatalogZoneName: &catalogZoneName}
 	if err := repo.CreateZone(ctx, zoneWithCatalogName); err != nil {
 		t.Fatalf("CreateZone with catalog_zone_name failed: %v", err)
 	}
@@ -661,16 +661,16 @@ func TestPostgresRepository_CatalogZones(t *testing.T) {
 	if gotZone == nil {
 		t.Fatalf("GetZoneByCatalogName returned nil")
 	}
-	if gotZone.ID != "zone-with-catz-name" {
-		t.Errorf("expected zone id 'zone-with-catz-name', got %s", gotZone.ID)
+	if gotZone.ID != "550e8400-e29b-41d4-a716-446655440098" {
+		t.Errorf("expected zone id '550e8400-e29b-41d4-a716-446655440098', got %s", gotZone.ID)
 	}
 
 	// 10. Test CreateZoneFromCatalog
-	newZone := &domain.Zone{ID: "zone-from-catz", TenantID: "t1", Name: "provisioned.example.com.", Role: "slave", MasterServer: "10.0.0.1:53"}
+	newZone := &domain.Zone{ID: "550e8400-e29b-41d4-a716-446655440100", TenantID: "t1", Name: "provisioned.example.com.", Role: "slave", MasterServer: "10.0.0.1:53"}
 	records := []domain.Record{
-		{ID: "rec-001", ZoneID: "zone-from-catz", Name: "provisioned.example.com.", Type: domain.TypeSOA, Content: "ns1.example.com. admin.example.com. 1 3600 600 1209600 300", TTL: 300},
-		{ID: "rec-002", ZoneID: "zone-from-catz", Name: "provisioned.example.com.", Type: domain.TypeNS, Content: "ns1.example.com.", TTL: 300},
-		{ID: "rec-003", ZoneID: "zone-from-catz", Name: "www.provisioned.example.com.", Type: domain.TypeA, Content: "1.2.3.4", TTL: 60},
+		{ID: "550e8400-e29b-41d4-a716-446655440101", ZoneID: "550e8400-e29b-41d4-a716-446655440100", Name: "provisioned.example.com.", Type: domain.TypeSOA, Content: "ns1.example.com. admin.example.com. 1 3600 600 1209600 300", TTL: 300},
+		{ID: "550e8400-e29b-41d4-a716-446655440102", ZoneID: "550e8400-e29b-41d4-a716-446655440100", Name: "provisioned.example.com.", Type: domain.TypeNS, Content: "ns1.example.com.", TTL: 300},
+		{ID: "550e8400-e29b-41d4-a716-446655440103", ZoneID: "550e8400-e29b-41d4-a716-446655440100", Name: "www.provisioned.example.com.", Type: domain.TypeA, Content: "1.2.3.4", TTL: 60},
 	}
 	if err := repo.CreateZoneFromCatalog(ctx, newZone, records); err != nil {
 		t.Fatalf("CreateZoneFromCatalog failed: %v", err)
@@ -681,7 +681,7 @@ func TestPostgresRepository_CatalogZones(t *testing.T) {
 		t.Errorf("GetZone returned nil for provisioned zone")
 	}
 	// Verify records were created
-	gotRecs, _ := repo.ListRecordsForZone(ctx, "zone-from-catz", "t1")
+	gotRecs, _ := repo.ListRecordsForZone(ctx, "550e8400-e29b-41d4-a716-446655440100", "t1")
 	if len(gotRecs) != 3 {
 		t.Errorf("expected 3 records for provisioned zone, got %d", len(gotRecs))
 	}
@@ -712,7 +712,7 @@ func TestPostgresRepository_CatalogZones_CreateZoneFromCatalog_ThenDeleteByCatal
 	// Create a zone with catalog_zone_name set (simulates zone provisioned from catalog)
 	catalogZoneName := "test-catalog-zone"
 	zone := &domain.Zone{
-		ID:              "zone-from-catz-rollback-test",
+		ID:              "550e8400-e29b-41d4-a716-446655440099",
 		TenantID:        "t1",
 		Name:            "test.example.com.",
 		Role:            "slave",
@@ -730,8 +730,8 @@ func TestPostgresRepository_CatalogZones_CreateZoneFromCatalog_ThenDeleteByCatal
 	if got == nil {
 		t.Fatal("expected zone, got nil")
 	}
-	if got.ID != "zone-from-catz-rollback-test" {
-		t.Errorf("expected ID 'zone-from-catz-rollback-test', got %s", got.ID)
+	if got.ID != "550e8400-e29b-41d4-a716-446655440099" {
+		t.Errorf("expected ID '550e8400-e29b-41d4-a716-446655440099', got %s", got.ID)
 	}
 
 	// Delete via DeleteZoneByCatalogName (simulates rollback after failed AXFR)
