@@ -480,6 +480,30 @@ func TestPostgresRepository_Extra_Unit(t *testing.T) {
 		}
 	})
 
+	t.Run("GetRecordsByNames", func(t *testing.T) {
+		db, mock, _ := sqlmock.New()
+		defer db.Close()
+		repo := NewPostgresRepository(db)
+
+		rows := sqlmock.NewRows([]string{"id", "zone_id", "name", "type", "content", "ttl", "priority", "weight", "port", "network", "hc_type", "hc_target", "status"}).
+			AddRow("r1", "z1", "a.example.com.", "A", "1.2.3.4", 300, nil, nil, nil, nil, "NONE", nil, "UNKNOWN").
+			AddRow("r2", "z1", "b.example.com.", "A", "5.6.7.8", 300, nil, nil, nil, nil, "NONE", nil, "UNKNOWN")
+		mock.ExpectQuery(`SELECT .* FROM dns_records r .* WHERE name IN`).
+			WithArgs("10.0.0.1", "a.example.com.", "b.example.com.", "A").
+			WillReturnRows(rows)
+
+		result, err := repo.GetRecordsByNames(ctx, []string{"a.example.com.", "b.example.com."}, domain.TypeA, "10.0.0.1")
+		if err != nil {
+			t.Errorf("GetRecordsByNames failed: %v", err)
+		}
+		if len(result) != 2 {
+			t.Errorf("expected 2 result sets, got %d", len(result))
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("unfulfilled expectations: %s", err)
+		}
+	})
+
 	t.Run("APIKeys", func(t *testing.T) {
 		db, mock, _ := sqlmock.New()
 		defer db.Close()
