@@ -953,10 +953,10 @@ func TestPostgresRepository_Catalog_Unit(t *testing.T) {
 			WithArgs("catalog.example.com.").
 			WillReturnRows(zoneRows)
 
-		// Delete with lexicographic range
-		// prefix = "foo.example.com.:"  nextPrefix = "foo.example.com.:\xff"
-		mock.ExpectExec(`DELETE FROM dns_records WHERE zone_id = \$1 AND type = 'PTR' AND content >= \$2 AND content < \$3`).
-			WithArgs("zone-1", "foo.example.com.:", "foo.example.com.:\xff").
+		// Delete with substring prefix match
+		// prefix = "foo.example.com.:"
+		mock.ExpectExec(`DELETE FROM dns_records WHERE zone_id = \$1 AND type = 'PTR' AND substring\(content, 1, length\(\$2\)\) = \$2`).
+			WithArgs("zone-1", "foo.example.com.:").
 			WillReturnResult(sqlmock.NewResult(1, 1))
 
 		err = repo.RemoveZoneFromCatalog(ctx, "catz-1", "t1", "foo.example.com.")
