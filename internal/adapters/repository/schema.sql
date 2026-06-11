@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 CREATE TABLE IF NOT EXISTS dns_zones (
     id UUID PRIMARY KEY,
     tenant_id TEXT NOT NULL,
@@ -130,9 +129,6 @@ CREATE TABLE IF NOT EXISTS api_keys (
     role TEXT NOT NULL DEFAULT 'admin',
     active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-=======
-created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
->>>>>>> 30a7dd1 (feat: add database schema and domain types for Catalog Zones (RFC 9432))
     expires_at TIMESTAMPTZ,
     CONSTRAINT role_check CHECK (role IN ('admin', 'writer', 'reader'))
 );
