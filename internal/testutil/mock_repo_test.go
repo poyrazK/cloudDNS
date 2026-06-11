@@ -595,3 +595,50 @@ func TestMockRepo_GetRecordsByNames(t *testing.T) {
 	}
 	m.AssertExpectations(t)
 }
+
+func TestMockRepo_GetZoneLongestMatch(t *testing.T) {
+	m := new(MockRepo)
+	m.On("GetZoneLongestMatch", "www.example.com.").Return(&domain.Zone{ID: "z1", Name: "example.com."}, nil).Once()
+	zone, err := m.GetZoneLongestMatch(context.Background(), "www.example.com.")
+	if err != nil || zone == nil || zone.ID != "z1" {
+		t.Errorf("unexpected result: %+v, err: %v", zone, err)
+	}
+	m.AssertExpectations(t)
+}
+
+func TestMockRepo_GetZoneLongestMatch_NotFound(t *testing.T) {
+	m := new(MockRepo)
+	m.On("GetZoneLongestMatch", "unknown.example.com.").Return(nil, nil).Once()
+	zone, err := m.GetZoneLongestMatch(context.Background(), "unknown.example.com.")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if zone != nil {
+		t.Errorf("expected nil, got %+v", zone)
+	}
+	m.AssertExpectations(t)
+}
+
+func TestMockRepo_UpdateRecord(t *testing.T) {
+	m := new(MockRepo)
+	m.On("UpdateRecord", mock.Anything).Return(nil).Once()
+	err := m.UpdateRecord(context.Background(), &domain.Record{ID: "r1"})
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	m.AssertExpectations(t)
+}
+
+func TestMockRepo_ListRecordsForZoneStreaming(t *testing.T) {
+	m := new(MockRepo)
+	iter :=&mockRecordIterator{records: []domain.Record{{ID: "r1"}}, index: 0}
+	m.On("ListRecordsForZoneStreaming", mock.Anything, mock.Anything, mock.Anything).Return(iter, nil).Once()
+	result, err := m.ListRecordsForZoneStreaming(context.Background(), "z1", "t1")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Error("expected non-nil iterator")
+	}
+	m.AssertExpectations(t)
+}
