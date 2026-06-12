@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"net"
+	"os"
 	"os/exec"
 	"testing"
 	"time"
@@ -299,6 +300,14 @@ func TestSeedDatabase_Errors(t *testing.T) {
 func TestRunSeed_ConnectionError(t *testing.T) {
 	// Force a connection error in runSeed by using a bad DSN
 	t.Setenv("DATABASE_URL", "host=/invalid/path/socket")
+	runSeed(1)
+}
+
+func TestRunSeed_DefaultURL(t *testing.T) {
+	// Test when DATABASE_URL is not set (uses default)
+	os.Unsetenv("DATABASE_URL")
+	// This will try to connect to localhost with default credentials
+	// We expect it to fail with connection error since there's no local DB
 	runSeed(1)
 }
 
