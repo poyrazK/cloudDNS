@@ -1,6 +1,7 @@
 package server
 
 import (
+	crand "crypto/rand"
 	"context"
 	"net"
 	"testing"
@@ -97,3 +98,125 @@ func TestDNSCookies_RFC7873(t *testing.T) {
 
 	// 3. Subsequent query with the same cookie should be accepted (verified manually by coverage or looking at logs)
 }
+
+func TestValidateCookie(t *testing.T) {
+	srv := NewServer(":0", &mockServerRepo{}, nil)
+	srv.CookieSecret = make([]byte, 32)
+	_, _ = crand.Read(srv.CookieSecret)
+
+	tests := []struct {
+		name       string
+		clientIP   string
+		wantValid  bool
+	}{
+		{
+			name:      "valid cookie",
+			clientIP:  "192.168.1.1",
+			wantValid: true,
+		},
+		{
+			name:      "different IP",
+			clientIP:  "10.0.0.1",
+			wantValid: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Generate a valid client cookie
+			clientCookie := make([]byte, 8)
+			_, _ = crand.Read(clientCookie)
+
+			// Generate server cookie with the correct IP
+			serverCookie := srv.generateServerCookie(clientCookie, tt.clientIP)
+
+			// Validate should pass for correct IP
+			valid := srv.validateCookie(clientCookie, serverCookie, tt.clientIP)
+			if !valid {
+				t.Errorf("validateCookie() = false, want true for IP %s", tt.clientIP)
+			}
+
+			// Validate should fail for different IP
+			invalidIP := "10.10.10.10"
+			valid = srv.validateCookie(clientCookie, serverCookie, invalidIP)
+			if valid {
+				t.Errorf("validateCookie() = true, want false for IP %s", invalidIP)
+			}
+		})
+	}
+}
+
+func TestValidateCookie_InvalidInputs(t *testing.T) {
+	srv := NewServer(":0", &mockServerRepo{}, nil)
+	srv.CookieSecret = make([]byte, 32)
+	_, _ = crand.Read(srv.CookieSecret)
+
+	tests := []struct {
+		name        string
+		clientC     []byte
+		serverC     []byte
+		clientIP    string
+	}{
+		{
+			name:     "wrong client cookie length",
+			clientC:  []byte{1, 2, 3},  // 3 bytes, not 8
+			serverC:  make([]byte, 16),
+			clientIP: "192.168.1.1",
+		},
+		{
+			name:     "wrong server cookie length",
+			clientC:  make([]byte, 8),
+			serverC:  []byte{1, 2, 3},  // 3 bytes, not 16
+			clientIP: "192.168.1.1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			valid := srv.validateCookie(tt.clientC, tt.serverC, tt.clientIP)
+			if valid {
+				t.Errorf("validateCookie() = true, want false for %s", tt.name)
+			}
+		})
+	}
+}
+
+func TestValidateCookie_NoSecret(t *testing.T) {
+	srv := NewServer(":0", &mockServerRepo{}, nil)
+	// CookieSecret is nil/empty by default
+
+	clientCookie := make([]byte, 8)
+	serverCookie := make([]byte, 16)
+
+	valid := srv.validateCookie(clientCookie, serverCookie, "192.168.1.1")
+	if valid {
+		t.Errorf("validateCookie() = true, want false when no CookieSecret")
+	}
+}
+
+func TestGenerateServerCookie(t *testing.T) {
+	srv := NewServer(":0", &mockServerRepo{}, nil)
+	srv.CookieSecret = make([]byte, 32)
+	_, _ = crand.Read(srv.CookieSecret)
+
+	clientCookie := []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}
+
+	tests := []struct {
+		name     string
+		clientIP string
+	}{
+		{"IPv4", "192.168.1.1"},
+		{"IPv6", "::1"},
+		{"empty IP", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			serverCookie := srv.generateServerCookie(clientCookie, tt.clientIP)
+			if len(serverCookie) != 16 {
+				t.Errorf("generateServerCookie() returned %d bytes, want 16", len(serverCookie))
+			}
+		})
+	}
+}
+
