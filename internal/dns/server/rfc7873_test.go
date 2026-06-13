@@ -193,3 +193,30 @@ func TestValidateCookie_NoSecret(t *testing.T) {
 		t.Errorf("validateCookie() = true, want false when no CookieSecret")
 	}
 }
+
+func TestGenerateServerCookie(t *testing.T) {
+	srv := NewServer(":0", &mockServerRepo{}, nil)
+	srv.CookieSecret = make([]byte, 32)
+	_, _ = crand.Read(srv.CookieSecret)
+
+	clientCookie := []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}
+
+	tests := []struct {
+		name     string
+		clientIP string
+	}{
+		{"IPv4", "192.168.1.1"},
+		{"IPv6", "::1"},
+		{"empty IP", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			serverCookie := srv.generateServerCookie(clientCookie, tt.clientIP)
+			if len(serverCookie) != 16 {
+				t.Errorf("generateServerCookie() returned %d bytes, want 16", len(serverCookie))
+			}
+		})
+	}
+}
+
