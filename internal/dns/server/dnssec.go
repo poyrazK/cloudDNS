@@ -26,6 +26,17 @@ func (s *Server) generateServerCookie(clientCookie []byte, clientIP string) []by
 	return h.Sum(nil)[:16] // Return 16 bytes of server cookie
 }
 
+// validateCookie validates a DNS cookie per RFC 7873/9013.
+// It regenerates the expected server cookie using the presenting clientIP
+// and compares it with the received serverCookie using constant-time comparison.
+func (s *Server) validateCookie(clientCookie, serverCookie []byte, clientIP string) bool {
+	if len(s.CookieSecret) == 0 || len(clientCookie) != 8 || len(serverCookie) != 16 {
+		return false
+	}
+	expected := s.generateServerCookie(clientCookie, clientIP)
+	return hmac.Equal(expected, serverCookie)
+}
+
 // padResponse pads a DNS response to a multiple of blockSize for privacy (RFC 9276).
 func (s *Server) padResponse(response *packet.DNSPacket, blockSize int) {
 	// Find OPT record

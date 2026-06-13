@@ -842,8 +842,27 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, srcAddr interfac
 	// EDNS0 processing
 	clientOPT, maxSize, dnssecOK, nsidRequested, clientCookie, paddingRequested := s.processEDNS0(request)
 
+	// Validate cookie if present (RFC 7873) — cookie is 24 bytes (8 client + 16 server)
+	if len(clientCookie) == 24 {
+		if !s.validateCookie(clientCookie[:8], clientCookie[8:], clientIP) {
+			s.Logger.Warn("cookie validation failed, possible replay", "clientIP", clientIP)
+			// Return BADCOOKIE error response
+			errResp := packet.NewDNSPacket()
+			errResp.Header.ID = request.Header.ID
+			errResp.Header.Response = true
+			errResp.Header.ResCode = 16 // BADCOOKIE
+			errResp.Questions = append(errResp.Questions, q)
+			buf := packet.GetBuffer()
+			_ = errResp.Write(buf)
+			respBytes := buf.Buf[:buf.Position()]
+			packet.PutBuffer(buf)
+			_ = sendFn(respBytes)
+			return nil
+		}
+	}
+
 	// Build response skeleton
-	response := s.newResponseSkeleton(request, q, clientOPT, dnssecOK, nsidRequested, clientCookie)
+	response := s.newResponseSkeleton(request, q, clientOPT, dnssecOK, nsidRequested, clientCookie, clientIP)
 	source := "local"
 
 	// Guard against nil repository
@@ -1151,7 +1170,7 @@ func (s *Server) processEDNS0(req *packet.DNSPacket) (*packet.DNSRecord, int, bo
 }
 
 // newResponseSkeleton creates the response packet with header fields set.
-func (s *Server) newResponseSkeleton(req *packet.DNSPacket, q packet.DNSQuestion, clientOPT *packet.DNSRecord, dnssecOK, nsidRequested bool, clientCookie []byte) *packet.DNSPacket {
+func (s *Server) newResponseSkeleton(req *packet.DNSPacket, q packet.DNSQuestion, clientOPT *packet.DNSRecord, dnssecOK, nsidRequested bool, clientCookie []byte, clientIP string) *packet.DNSPacket {
 	response := packet.NewDNSPacket()
 	response.Header.ID = req.Header.ID
 	response.Header.Response = true
@@ -1173,7 +1192,7 @@ func (s *Server) newResponseSkeleton(req *packet.DNSPacket, q packet.DNSQuestion
 			opt.SetOption(packet.EdnsOptionNSID, []byte(s.NodeID))
 		}
 		if len(clientCookie) == 8 {
-			serverCookie := s.generateServerCookie(clientCookie[:8], "")
+			serverCookie := s.generateServerCookie(clientCookie[:8], clientIP)
 			opt.SetOption(packet.EdnsOptionCookie, append(clientCookie[:8], serverCookie...))
 		}
 		response.Resources = append(response.Resources, opt)
