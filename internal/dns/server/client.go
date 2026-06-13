@@ -13,6 +13,43 @@ import (
 	"github.com/poyrazK/cloudDNS/internal/dns/packet"
 )
 
+// TCPConnFactory creates TCP connections. Allows mocking for tests.
+type TCPConnFactory interface {
+	DialTimeout(network, addr string, timeout time.Duration) (net.Conn, error)
+}
+
+// defaultTCPFactory uses real net.DialTimeout calls.
+type defaultTCPFactory struct{}
+
+func (d *defaultTCPFactory) DialTimeout(network, addr string, timeout time.Duration) (net.Conn, error) {
+	return net.DialTimeout(network, addr, timeout)
+}
+
+// Ticker produces time signals at regular intervals. Allows mocking for tests.
+type Ticker interface {
+	Stop()
+	C() <-chan time.Time
+}
+
+// TickerFactory creates Ticker instances.
+type TickerFactory interface {
+	NewTicker(d time.Duration) Ticker
+}
+
+// realTickerFactory creates real time.Ticker instances.
+type realTickerFactory struct{}
+
+func (r *realTickerFactory) NewTicker(d time.Duration) Ticker {
+	return &realTicker{ticker: time.NewTicker(d)}
+}
+
+type realTicker struct {
+	ticker *time.Ticker
+}
+
+func (r *realTicker) Stop() { r.ticker.Stop() }
+func (r *realTicker) C() <-chan time.Time { return r.ticker.C }
+
 // refreshZone initiates a zone refresh for a slave zone by querying the master for SOA.
 func (s *Server) refreshZone(ctx context.Context, zone *domain.Zone) {
 	if zone.MasterServer == "" {
@@ -83,7 +120,7 @@ func (s *Server) refreshZone(ctx context.Context, zone *domain.Zone) {
 
 // performIXFR performs an incremental zone transfer from the master server.
 func (s *Server) performIXFR(ctx context.Context, zone *domain.Zone, masterAddr string, localSerial uint32) error {
-	conn, err := net.DialTimeout("tcp", masterAddr, 10*time.Second)
+	conn, err := s.tcpFactory.DialTimeout("tcp", masterAddr, 10*time.Second)
 	if err != nil {
 		return err
 	}
@@ -263,7 +300,7 @@ func (s *Server) performIXFR(ctx context.Context, zone *domain.Zone, masterAddr 
 func (s *Server) performAXFR(ctx context.Context, zone *domain.Zone, masterAddr string) error {
 	s.Logger.Info("starting AXFR", "zone", zone.Name, "master", masterAddr)
 
-	conn, err := net.DialTimeout("tcp", masterAddr, 10*time.Second)
+	conn, err := s.tcpFactory.DialTimeout("tcp", masterAddr, 10*time.Second)
 	if err != nil {
 		return err
 	}
@@ -364,11 +401,11 @@ func (s *Server) StartCatalogPoller(ctx context.Context, catalogZones []string, 
 
 	s.Logger.Info("starting catalog zone poller", "zones", catalogZones, "master", masterAddr, "interval", pollInterval)
 
-	ticker := time.NewTicker(pollInterval)
+	ticker := s.tickerFactory.NewTicker(pollInterval)
 	defer ticker.Stop()
 
 	// Cleanup stale entries every half-ttl (24h default -> cleanup every 12h)
-	cleanupTicker := time.NewTicker(pollInterval / 2)
+	cleanupTicker := s.tickerFactory.NewTicker(pollInterval / 2)
 	defer cleanupTicker.Stop()
 	ttl := 24 * time.Hour
 
@@ -384,9 +421,9 @@ func (s *Server) StartCatalogPoller(ctx context.Context, catalogZones []string, 
 		case <-ctx.Done():
 			s.Logger.Info("catalog poller shutting down")
 			return
-		case <-cleanupTicker.C:
+		case <-cleanupTicker.C():
 			s.catalogState.cleanup(ttl)
-		case <-ticker.C:
+		case <-ticker.C():
 			for _, catalogZoneName := range catalogZones {
 				if err := s.pollCatalogZone(ctx, catalogZoneName, masterAddr); err != nil {
 					s.Logger.Error("failed to poll catalog zone", "zone", catalogZoneName, "error", err)
@@ -472,7 +509,7 @@ func (s *Server) fetchAXFRPackets(_ context.Context, zoneName string, masterAddr
 
 	s.Logger.Debug("performing AXFR", "zone", zoneName, "master", masterAddr)
 
-	conn, err := net.DialTimeout("tcp", masterAddr, 10*time.Second)
+	conn, err := s.tcpFactory.DialTimeout("tcp", masterAddr, 10*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to master: %w", err)
 	}

@@ -108,6 +108,11 @@ type Server struct {
 	// catalogState tracks the last-seen serial for each catalog zone to avoid unnecessary re-syncs
 	catalogState *catalogPollerState
 
+	// tcpFactory creates TCP connections for zone transfers. Defaults to real connections.
+	tcpFactory TCPConnFactory
+	// tickerFactory creates Ticker instances for periodic polling. Defaults to real tickers.
+	tickerFactory TickerFactory
+
 	// inflightCache prevents thundering herd: tracks keys currently being fetched from L2.
 	// Key -> *inflightEntry (done channel closed when fetch completes).
 	inflightCache sync.Map
@@ -201,6 +206,8 @@ func NewServer(addr string, repo ports.DNSRepository, logger *slog.Logger) *Serv
 		CatalogMasterAddr:    catalogMasterAddr,
 		CatalogPollInterval:  catalogPollInterval,
 		CatalogTenantID:      catalogTenantID,
+		tcpFactory:           &defaultTCPFactory{},
+		tickerFactory:        &realTickerFactory{},
 	}
 	s.lifecycleCtx, s.cancel = context.WithCancel(context.Background())
 	s.done = make(chan struct{})

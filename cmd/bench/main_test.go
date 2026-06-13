@@ -527,3 +527,27 @@ func TestGoCommand_RunError(t *testing.T) {
 		t.Error("expected error from false command")
 	}
 }
+
+func TestRunScaleTest_MockedSleepAndFile(t *testing.T) {
+	// Save original functions
+	origSleep := sleepFn
+	origRead := readFileFn
+	defer func() {
+		sleepFn = origSleep
+		readFileFn = origRead
+	}()
+
+	// Mock sleep to be instant
+	sleepFn = func(d time.Duration) {}
+
+	// Mock file read to return empty schema
+	readFileFn = func(name string) ([]byte, error) {
+		return []byte{}, nil
+	}
+
+	// Set invalid DB to trigger early return after schema load
+	t.Setenv("DATABASE_URL", "host=/invalid/path")
+	
+	// This should now run without blocking on sleep
+	runScaleTest(1, 1)
+}
