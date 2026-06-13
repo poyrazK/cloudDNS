@@ -337,27 +337,27 @@ func (s *Server) handleIXFR(ctx context.Context, conn net.Conn, request *packet.
 		}
 	}
 
+	// If original IXFR had TSIG, require TSIG on fallback AXFR too
+	if request.TSIGStart != -1 {
+		tsig := request.Resources[len(request.Resources)-1]
+		key, ok := s.TsigKeys[tsig.Name]
+		if !ok {
+			s.Logger.Debug("AXFR fallback failed: unknown TSIG key", "key", tsig.Name, "zone", q.Name)
+			s.sendTCPError(conn, request.Header.ID, 5) // NotAuth
+			return
+		}
+		if errVerify := request.VerifyTSIG(rawData, request.TSIGStart, key.Secret); errVerify != nil {
+			s.Logger.Warn("AXFR fallback failed: TSIG verification failed", "error", errVerify, "zone", q.Name)
+			s.sendTCPError(conn, request.Header.ID, 5) // NotAuth
+			return
+		}
+	}
+
 	if err != nil {
 		s.Logger.Warn("IXFR chain query failed, falling back to AXFR", "zone", zone.Name, "error", err)
 	} else if !historyValid {
 		s.Logger.Info("IXFR history gap detected, falling back to AXFR",
 			"zone", zone.Name, "client_serial", clientSerial)
-
-		// If original IXFR had TSIG, require TSIG on fallback AXFR too
-		if request.TSIGStart != -1 {
-			tsig := request.Resources[len(request.Resources)-1]
-			key, ok := s.TsigKeys[tsig.Name]
-			if !ok {
-				s.Logger.Debug("AXFR fallback failed: unknown TSIG key", "key", tsig.Name, "zone", q.Name)
-				s.sendTCPError(conn, request.Header.ID, 5) // NotAuth
-				return
-			}
-			if errVerify := request.VerifyTSIG(rawData, request.TSIGStart, key.Secret); errVerify != nil {
-				s.Logger.Warn("AXFR fallback failed: TSIG verification failed", "error", errVerify, "zone", q.Name)
-				s.sendTCPError(conn, request.Header.ID, 5) // NotAuth
-				return
-			}
-		}
 
 		// RFC 1995: If IXFR is not possible, fall back to AXFR sequence using streaming
 		iter, errIter := s.Repo.ListRecordsForZoneStreaming(ctx, zone.ID, zone.TenantID)
