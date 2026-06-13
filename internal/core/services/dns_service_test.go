@@ -316,7 +316,8 @@ func (m *mockRepo) GetCatalogZoneByName(_ context.Context, zoneName string, tena
 		return nil, m.err
 	}
 	for _, c := range m.catalogs {
-		if c.ZoneName == zoneName && c.TenantID == tenantID {
+		// Empty tenantID matches any tenant (for catalog zone lookup)
+		if c.ZoneName == zoneName && (tenantID == "" || c.TenantID == tenantID) {
 			return &c, nil
 		}
 	}
@@ -1059,3 +1060,62 @@ func TestCatalogZoneService_ErrorPaths(t *testing.T) {
 	}
 }
 
+
+func TestPollCatalogZone_Success(t *testing.T) {
+	repo := &mockRepo{
+		catalogs: []domain.CatalogZone{
+			{ID: "catz-1", TenantID: "t1", ZoneName: "catalog.example.com."},
+		},
+		catalogEntries: []domain.ZoneCatalogEntry{
+			{ZoneName: "zone1.example.com.", ZoneID: "uuid-1"},
+			{ZoneName: "zone2.example.com.", ZoneID: "uuid-2"},
+		},
+	}
+	svc := NewDNSService(repo, nil)
+	ctx := context.Background()
+
+	entries, err := svc.PollCatalogZone(ctx, "t1", "catalog.example.com.")
+	if err != nil {
+		t.Fatalf("PollCatalogZone failed: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Errorf("expected 2 entries, got %d", len(entries))
+	}
+}
+
+func TestPollCatalogZone_NotFound(t *testing.T) {
+	repo := &mockRepo{}
+	svc := NewDNSService(repo, nil)
+	ctx := context.Background()
+
+	entries, err := svc.PollCatalogZone(ctx, "t1", "nonexistent.example.com.")
+	if err != nil {
+		t.Fatalf("PollCatalogZone failed unexpectedly: %v", err)
+	}
+	if entries != nil {
+		t.Errorf("expected nil entries for nonexistent catalog, got %+v", entries)
+	}
+}
+
+func TestPollCatalogZone_Error(t *testing.T) {
+	repo := &mockRepo{err: errors.New("db error")}
+	svc := NewDNSService(repo, nil)
+	ctx := context.Background()
+
+	_, err := svc.PollCatalogZone(ctx, "t1", "catalog.example.com.")
+	if err == nil {
+		t.Error("expected error from repo")
+	}
+}
+
+func TestSyncZonesFromCatalog(t *testing.T) {
+	repo := &mockRepo{}
+	svc := NewDNSService(repo, nil)
+	ctx := context.Background()
+
+	// SyncZonesFromCatalog is a no-op stub - it just returns nil
+	err := svc.SyncZonesFromCatalog(ctx, "t1", "catalog.example.com.")
+	if err != nil {
+		t.Errorf("SyncZonesFromCatalog failed: %v", err)
+	}
+}
