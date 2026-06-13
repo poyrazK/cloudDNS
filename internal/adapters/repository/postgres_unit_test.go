@@ -504,6 +504,20 @@ func TestPostgresRepository_Extra_Unit(t *testing.T) {
 		}
 	})
 
+	t.Run("GetRecordsByNames_EmptyNames", func(t *testing.T) {
+		db, _, _ := sqlmock.New()
+		defer db.Close()
+		repo := NewPostgresRepository(db)
+
+		result, err := repo.GetRecordsByNames(ctx, []string{}, domain.TypeA, "10.0.0.1")
+		if err != nil {
+			t.Errorf("GetRecordsByNames with empty names failed: %v", err)
+		}
+		if result != nil {
+			t.Errorf("expected nil result for empty names, got %+v", result)
+		}
+	})
+
 	t.Run("APIKeys", func(t *testing.T) {
 		db, mock, _ := sqlmock.New()
 		defer db.Close()
