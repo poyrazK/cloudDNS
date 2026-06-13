@@ -71,10 +71,24 @@ func TestHandleIXFR_NoAuthority(t *testing.T) {
 
 type mockConn struct {
 	net.Conn
+	localAddr  net.Addr
+	remoteAddr net.Addr
 }
 
-func (m *mockConn) Write(b []byte) (int, error) { return len(b), nil }
-func (m *mockConn) Close() error                { return nil }
+func (m *mockConn) Write(b []byte) (int, error)     { return len(b), nil }
+func (m *mockConn) Close() error                    { return nil }
+func (m *mockConn) RemoteAddr() net.Addr            {
+	if m.remoteAddr != nil {
+		return m.remoteAddr
+	}
+	return &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 12345}
+}
+func (m *mockConn) LocalAddr() net.Addr             {
+	if m.localAddr != nil {
+		return m.localAddr
+	}
+	return &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 54321}
+}
 
 // TestHandlePacket_NoQuestions verifies that a DNS packet with no questions
 // returns a FORMERR response as per RFC standards.
@@ -98,5 +112,67 @@ func TestHandlePacket_NoQuestions(t *testing.T) {
 	}, "udp")
 	if err != nil {
 		t.Fatalf("handlePacket failed: %v", err)
+	}
+}
+
+// TestHandleAXFR_RateLimited verifies that AXFR returns SERVFAIL when rate limited.
+func TestHandleAXFR_RateLimited(t *testing.T) {
+	repo := &mockServerRepo{
+		zones: []domain.Zone{{ID: "z1", Name: "test."}},
+		records: []domain.Record{
+			{ZoneID: "z1", Name: "test.", Type: domain.TypeSOA, Content: "ns1. ns2. 1 2 3 4 5"},
+		},
+	}
+	srv := NewServer(":0", repo, nil)
+	// Replace limiter with one that denies all
+	srv.limiter = newRateLimiter(0, 0, 1000)
+
+	req := packet.NewDNSPacket()
+	req.Header.ID = 1234
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "test.", QType: packet.AXFR})
+
+	conn := &mockTCPConn{}
+	srv.handleAXFR(context.Background(), conn, req, nil, nil)
+
+	if len(conn.captured) != 1 {
+		t.Fatalf("Expected 1 response, got %d", len(conn.captured))
+	}
+	res := packet.NewDNSPacket()
+	pb := packet.NewBytePacketBuffer()
+	pb.Load(conn.captured[0])
+	_ = res.FromBuffer(pb)
+	if res.Header.ResCode != 2 { // SERVFAIL
+		t.Errorf("Expected SERVFAIL (2), got %d", res.Header.ResCode)
+	}
+}
+
+// TestHandleIXFR_RateLimited verifies that IXFR returns SERVFAIL when rate limited.
+func TestHandleIXFR_RateLimited(t *testing.T) {
+	repo := &mockServerRepo{
+		zones: []domain.Zone{{ID: "z1", Name: "test."}},
+		records: []domain.Record{
+			{ZoneID: "z1", Name: "test.", Type: domain.TypeSOA, Content: "ns1. ns2. 1 2 3 4 5"},
+		},
+	}
+	srv := NewServer(":0", repo, nil)
+	// Replace limiter with one that denies all
+	srv.limiter = newRateLimiter(0, 0, 1000)
+
+	req := packet.NewDNSPacket()
+	req.Header.ID = 1234
+	req.Questions = append(req.Questions, packet.DNSQuestion{Name: "test.", QType: packet.IXFR})
+
+	conn := &mockTCPConn{}
+	srv.handleIXFR(context.Background(), conn, req, nil, nil)
+
+	if len(conn.captured) != 1 {
+		t.Fatalf("Expected 1 response, got %d", len(conn.captured))
+	}
+	res := packet.NewDNSPacket()
+	pb := packet.NewBytePacketBuffer()
+	pb.Load(conn.captured[0])
+	_ = res.FromBuffer(pb)
+	if res.Header.ResCode != 2 { // SERVFAIL
+		t.Errorf("Expected SERVFAIL (2), got %d", res.Header.ResCode)
 	}
 }

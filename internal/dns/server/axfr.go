@@ -16,6 +16,13 @@ import (
 // handleAXFR processes a DNS zone transfer (AXFR) request over TCP.
 func (s *Server) handleAXFR(ctx context.Context, conn net.Conn, request *packet.DNSPacket, rawData []byte, buffer *packet.BytePacketBuffer) {
 	defer packet.PutBuffer(buffer)
+
+	// Rate limit check — AXFR/IXFR bypass handlePacket where limiter lives
+	clientIP := extractClientIP(conn.RemoteAddr())
+	if !s.limiter.Allow(clientIP) {
+		s.sendTCPError(conn, request.Header.ID, 2) // SERVFAIL
+		return
+	}
 	q := request.Questions[0]
 	if !strings.HasSuffix(q.Name, ".") {
 		q.Name += "."
@@ -182,6 +189,13 @@ func (s *Server) sendTCPError(conn net.Conn, id uint16, rcode uint8) {
 // handleIXFR processes an incremental zone transfer (IXFR) request over TCP.
 func (s *Server) handleIXFR(ctx context.Context, conn net.Conn, request *packet.DNSPacket, rawData []byte, buffer *packet.BytePacketBuffer) {
 	defer packet.PutBuffer(buffer)
+
+	// Rate limit check — AXFR/IXFR bypass handlePacket where limiter lives
+	clientIP := extractClientIP(conn.RemoteAddr())
+	if !s.limiter.Allow(clientIP) {
+		s.sendTCPError(conn, request.Header.ID, 2) // SERVFAIL
+		return
+	}
 	q := request.Questions[0]
 	if !strings.HasSuffix(q.Name, ".") {
 		q.Name += "."
@@ -320,6 +334,22 @@ func (s *Server) handleIXFR(ctx context.Context, conn net.Conn, request *packet.
 	if historyValid && len(chunks) > 0 {
 		if chunks[len(chunks)-1].Serial != currentSerial {
 			historyValid = false
+		}
+	}
+
+	// If original IXFR had TSIG, require TSIG on fallback AXFR too
+	if request.TSIGStart != -1 {
+		tsig := request.Resources[len(request.Resources)-1]
+		key, ok := s.TsigKeys[tsig.Name]
+		if !ok {
+			s.Logger.Debug("AXFR fallback failed: unknown TSIG key", "key", tsig.Name, "zone", q.Name)
+			s.sendTCPError(conn, request.Header.ID, 5) // NotAuth
+			return
+		}
+		if errVerify := request.VerifyTSIG(rawData, request.TSIGStart, key.Secret); errVerify != nil {
+			s.Logger.Warn("AXFR fallback failed: TSIG verification failed", "error", errVerify, "zone", q.Name)
+			s.sendTCPError(conn, request.Header.ID, 5) // NotAuth
+			return
 		}
 	}
 
