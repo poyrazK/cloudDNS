@@ -284,3 +284,64 @@ func TestStartCatalogPoller_ImmediateCancel(t *testing.T) {
 	// Should return immediately without hanging
 	srv.StartCatalogPoller(ctx, []string{"catalog.test."}, "127.0.0.1:1", time.Hour)
 }
+
+func TestFetchCatalogEntries_Empty(t *testing.T) {
+	repo := &mockServerRepo{}
+	srv := NewServer(":0", repo, nil)
+	srv.tcpFactory = &mockTCPFactory{dialErr: errors.New("no connection")}
+
+	_, err := srv.fetchCatalogEntries(context.Background(), "catalog.test.", "127.0.0.1:1")
+	if err == nil {
+		t.Errorf("Expected error from TCP factory")
+	}
+}
+
+
+
+func TestFetchZoneRecords_DialError(t *testing.T) {
+	repo := &mockServerRepo{}
+	srv := NewServer(":0", repo, nil)
+	srv.tcpFactory = &mockTCPFactory{dialErr: errors.New("connection refused")}
+
+	_, err := srv.fetchZoneRecords(context.Background(), "test.", "127.0.0.1:1", "z1", "tenant1")
+	if err == nil {
+		t.Errorf("Expected dial error")
+	}
+}
+
+func TestPollCatalogZone_CZTRError(t *testing.T) {
+	repo := &mockServerRepo{}
+	srv := NewServer(":0", repo, nil)
+
+	// Make queryFn return error (master doesn't support CZTR)
+	srv.queryFn = func(server string, name string, qType packet.QueryType) (*packet.DNSPacket, error) {
+		return nil, errors.New("network error")
+	}
+
+	err := srv.pollCatalogZone(context.Background(), "catalog.test.", "127.0.0.1:1")
+	if err != nil {
+		t.Errorf("Expected nil for CZTR error (graceful skip), got %v", err)
+	}
+}
+
+func TestPollCatalogZone_EmptyCZTR(t *testing.T) {
+	repo := &mockServerRepo{}
+	srv := NewServer(":0", repo, nil)
+
+	// Return empty CZTR response (slave mode not supported)
+	srv.queryFn = func(server string, name string, qType packet.QueryType) (*packet.DNSPacket, error) {
+		resp := packet.NewDNSPacket()
+		resp.Header.Response = true
+		// No answers - slave mode not supported
+		return resp, nil
+	}
+
+	err := srv.pollCatalogZone(context.Background(), "catalog.test.", "127.0.0.1:1")
+	if err != nil {
+		t.Errorf("Expected nil for empty CZTR (graceful skip), got %v", err)
+	}
+}
+
+func strPtr(s string) *string {
+	return &s
+}
