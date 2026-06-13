@@ -97,6 +97,50 @@ func TestRevokeKey_Error(t *testing.T) {
 	mockRepo.AssertExpectations(t)
 }
 
+func TestRun_UnknownSubcommand(t *testing.T) {
+	mockRepo := new(testutil.MockRepo)
+	err := run([]string{"apikey", "unknown"}, io.Discard, mockRepo)
+	if err == nil {
+		t.Error("expected error for unknown subcommand")
+	}
+	if !strings.Contains(err.Error(), "unknown subcommand") {
+		t.Errorf("expected 'unknown subcommand' error, got: %v", err)
+	}
+}
+
+func TestRun_InvalidRole(t *testing.T) {
+	mockRepo := new(testutil.MockRepo)
+	err := run([]string{"apikey", "create", "-role", "invalid"}, io.Discard, mockRepo)
+	if err == nil {
+		t.Error("expected error for invalid role")
+	}
+	if !strings.Contains(err.Error(), "invalid role") {
+		t.Errorf("expected 'invalid role' error, got: %v", err)
+	}
+}
+
+func TestRun_InvalidDays(t *testing.T) {
+	mockRepo := new(testutil.MockRepo)
+	err := run([]string{"apikey", "create", "-days", "0"}, io.Discard, mockRepo)
+	if err == nil {
+		t.Error("expected error for invalid days")
+	}
+	if !strings.Contains(err.Error(), "invalid days") {
+		t.Errorf("expected 'invalid days' error, got: %v", err)
+	}
+}
+
+func TestRun_TooFewArgs(t *testing.T) {
+	mockRepo := new(testutil.MockRepo)
+	err := run([]string{"apikey"}, io.Discard, mockRepo)
+	if err == nil {
+		t.Error("expected error for too few args")
+	}
+	if !strings.Contains(err.Error(), "expected") {
+		t.Errorf("expected 'expected' error, got: %v", err)
+	}
+}
+
 func TestRunCommand(t *testing.T) {
 	mockRepo := new(testutil.MockRepo)
 	out := &bytes.Buffer{}
