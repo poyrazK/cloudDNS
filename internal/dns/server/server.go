@@ -81,6 +81,13 @@ type Server struct {
 	TLSConfig *tls.Config
 	DoQAddr  string // DNS-over-QUIC listen address (default ":853")
 
+	// Catalog Zone Polling (RFC 9432 slave-side)
+	CatalogPollingEnabled bool
+	CatalogZones         []string // catalog zone names to poll
+	CatalogMasterAddr    string   // master server address (host:port)
+	CatalogPollInterval  time.Duration
+	CatalogTenantID      string   // tenant ID for catalog-provisioned zones
+
 	// ServerConfig holds timeout and timing values.
 	ServerConfig *config.ServerConfig
 
@@ -98,6 +105,14 @@ type Server struct {
 	done         chan struct{}
 	wg           sync.WaitGroup
 
+	// catalogState tracks the last-seen serial for each catalog zone to avoid unnecessary re-syncs
+	catalogState *catalogPollerState
+
+	// tcpFactory creates TCP connections for zone transfers. Defaults to real connections.
+	tcpFactory TCPConnFactory
+	// tickerFactory creates Ticker instances for periodic polling. Defaults to real tickers.
+	tickerFactory TickerFactory
+
 	// inflightCache prevents thundering herd: tracks keys currently being fetched from L2.
 	// Key -> *inflightEntry (done channel closed when fetch completes).
 	inflightCache sync.Map
@@ -107,6 +122,41 @@ type Server struct {
 
 	// querySingleflight ensures only one goroutine performs DB query per cache key.
 	querySingleflight singleflight.Group
+}
+
+// catalogPollerState tracks catalog zone polling state for efficient change detection.
+type catalogPollerState struct {
+	mu             sync.RWMutex
+	lastSeenSerial map[string]uint32    // catalogZoneName -> serial
+	lastSeenAt     map[string]time.Time // catalogZoneName -> last update time (for TTL eviction)
+}
+
+// cleanup removes stale entries older than ttl from the catalog state.
+func (s *catalogPollerState) cleanup(ttl time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cutoff := time.Now().Add(-ttl)
+	for name, t := range s.lastSeenAt {
+		if t.Before(cutoff) {
+			delete(s.lastSeenSerial, name)
+			delete(s.lastSeenAt, name)
+		}
+	}
+}
+
+// parseCatalogZones parses a comma-separated list of zone names.
+func parseCatalogZones(env string) []string {
+	if env == "" {
+		return nil
+	}
+	var zones []string
+	for _, z := range strings.Split(env, ",") {
+		z = strings.TrimSpace(z)
+		if z != "" {
+			zones = append(zones, z)
+		}
+	}
+	return zones
 }
 
 // NewServer creates a new DNS server instance.
@@ -127,17 +177,37 @@ func NewServer(addr string, repo ports.DNSRepository, logger *slog.Logger) *Serv
 
 	recursion := os.Getenv("RECURSION_ENABLED") == "true"
 
+	// Catalog polling configuration (RFC 9432 slave-side)
+	catalogPollingEnabled := os.Getenv("CATALOG_POLLING_ENABLED") == "true"
+	catalogZones := parseCatalogZones(os.Getenv("CATALOG_ZONES"))
+	catalogMasterAddr := os.Getenv("CATALOG_MASTER_ADDR")
+	catalogPollInterval := 5 * time.Minute
+	if interval := os.Getenv("CATALOG_POLL_INTERVAL"); interval != "" {
+		if d, err := time.ParseDuration(interval); err == nil {
+			catalogPollInterval = d
+		}
+	}
+	catalogTenantID := os.Getenv("CATALOG_TENANT_ID")
+
 	s := &Server{
-		Addr:             addr,
-		Repo:             repo,
-		WorkerCount:      runtime.NumCPU() * 32, // High concurrency tuning
-		udpQueue:         make(chan udpTask, 50000),
-		Logger:           logger,
-		limiter:          newRateLimiter(500000, 200000, 1000000),
-		TsigKeys:         make(map[string]TsigKey),
-		NodeID:           nodeID,
-		RecursionEnabled: recursion,
-		CookieSecret:     make([]byte, 32),
+		Addr:                 addr,
+		Repo:                 repo,
+		WorkerCount:          runtime.NumCPU() * 32, // High concurrency tuning
+		udpQueue:             make(chan udpTask, 50000),
+		Logger:               logger,
+		limiter:              newRateLimiter(500000, 200000, 1000000),
+		TsigKeys:             make(map[string]TsigKey),
+		NodeID:               nodeID,
+		RecursionEnabled:     recursion,
+		CookieSecret:         make([]byte, 32),
+		catalogState:         &catalogPollerState{lastSeenSerial: make(map[string]uint32), lastSeenAt: make(map[string]time.Time)},
+		CatalogPollingEnabled: catalogPollingEnabled,
+		CatalogZones:         catalogZones,
+		CatalogMasterAddr:    catalogMasterAddr,
+		CatalogPollInterval:  catalogPollInterval,
+		CatalogTenantID:      catalogTenantID,
+		tcpFactory:           &defaultTCPFactory{},
+		tickerFactory:        &realTickerFactory{},
 	}
 	s.lifecycleCtx, s.cancel = context.WithCancel(context.Background())
 	s.done = make(chan struct{})
@@ -471,6 +541,25 @@ func (s *Server) Run(ctx context.Context) error {
 			defer s.wg.Done()
 			s.dlqRetryWorker(ctx, s.done)
 		}()
+	}
+
+	// Start catalog zone poller if configured (RFC 9432 slave-side)
+	if s.CatalogPollingEnabled && len(s.CatalogZones) > 0 {
+		if s.CatalogMasterAddr == "" {
+			s.Logger.Warn("catalog polling enabled but CATALOG_MASTER_ADDR not set, skipping")
+		} else {
+			s.Logger.Info("starting catalog zone poller",
+				"zones", s.CatalogZones,
+				"master", s.CatalogMasterAddr,
+				"interval", s.CatalogPollInterval,
+				"tenant", s.CatalogTenantID,
+			)
+			s.wg.Add(1)
+			go func() {
+				defer s.wg.Done()
+				s.StartCatalogPoller(s.lifecycleCtx, s.CatalogZones, s.CatalogMasterAddr, s.CatalogPollInterval)
+			}()
+		}
 	}
 
 	lc := net.ListenConfig{

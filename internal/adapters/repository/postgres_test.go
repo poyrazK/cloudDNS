@@ -95,7 +95,7 @@ func setupTestDB(t *testing.T) (*sql.DB, func()) {
 	}
 	return testDB, func() {
 		// Surface failures to reset the DB
-		if _, err := testDB.Exec("TRUNCATE dns_records, dns_zones, audit_logs, dns_zone_changes, api_keys, dnssec_keys CASCADE"); err != nil {
+		if _, err := testDB.Exec("TRUNCATE dns_records, dns_zones, audit_logs, dns_zone_changes, api_keys, dnssec_keys, catalog_zones CASCADE"); err != nil {
 			panic(fmt.Sprintf("failed to truncate test database: %v", err))
 		}
 	}
@@ -482,6 +482,268 @@ func dockerAvailable() bool {
 	}
 	cmd := exec.Command("docker", "info")
 	return cmd.Run() == nil
+}
+
+func TestPostgresRepository_CatalogZones(t *testing.T) {
+	if testing.Short() || !dockerAvailable() {
+		t.Skip("skipping integration test")
+	}
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+	repo := NewPostgresRepository(db)
+	ctx := context.Background()
+
+	// Helper to create a zone (used to provision catalog zones)
+	createZone := func(id, name, tenantID string) {
+		zone := &domain.Zone{ID: id, Name: name, TenantID: tenantID}
+		if err := repo.CreateZone(ctx, zone); err != nil {
+			t.Fatalf("CreateZone failed for %s: %v", name, err)
+		}
+	}
+
+	// 1. Test CreateCatalogZone
+	catzID := "550e8400-e29b-41d4-a716-446655440001"
+	catz1 := &domain.CatalogZone{
+		ID:        catzID,
+		TenantID:  "t1",
+		ZoneName:  "catalog.example.com.",
+		Version:   "1",
+		Serial:    1,
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
+	}
+	if err := repo.CreateCatalogZone(ctx, catz1); err != nil {
+		t.Fatalf("CreateCatalogZone failed: %v", err)
+	}
+
+	// 2. Test GetCatalogZone — correct tenant
+	got, err := repo.GetCatalogZone(ctx, catzID, "t1")
+	if err != nil {
+		t.Fatalf("GetCatalogZone failed: %v", err)
+	}
+	if got == nil || got.ID != catzID {
+		t.Errorf("GetCatalogZone returned nil or wrong ID: %+v", got)
+	}
+	if got != nil && got.ZoneName != "catalog.example.com." {
+		t.Errorf("expected zone_name 'catalog.example.com.', got %s", got.ZoneName)
+	}
+	if got != nil && got.Version != "1" {
+		t.Errorf("expected version '1', got %s", got.Version)
+	}
+	if got != nil && got.Serial != 1 {
+		t.Errorf("expected serial 1, got %d", got.Serial)
+	}
+
+	// 3. Test GetCatalogZone — wrong tenant returns nil
+	gotWrongTenant, errWrong := repo.GetCatalogZone(ctx, catzID, "t2")
+	if errWrong != nil {
+		t.Fatalf("GetCatalogZone with wrong tenant returned error: %v", errWrong)
+	}
+	if gotWrongTenant != nil {
+		t.Errorf("expected nil for wrong tenant, got %+v", gotWrongTenant)
+	}
+
+	// 4. Test GetCatalogZone — non-existent returns nil
+	gotMissing, errMissing := repo.GetCatalogZone(ctx, "00000000-0000-0000-0000-000000000000", "t1")
+	if errMissing != nil {
+		t.Fatalf("GetCatalogZone for non-existent returned error: %v", errMissing)
+	}
+	if gotMissing != nil {
+		t.Errorf("expected nil for non-existent ID, got %+v", gotMissing)
+	}
+
+	// 5. Test ListCatalogZones
+	// Create two more for t1
+	catz2 := &domain.CatalogZone{ID: "550e8400-e29b-41d4-a716-446655440002", TenantID: "t1", ZoneName: "catalog2.example.com.", Version: "1", Serial: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	catz3 := &domain.CatalogZone{ID: "550e8400-e29b-41d4-a716-446655440003", TenantID: "t1", ZoneName: "catalog3.example.com.", Version: "1", Serial: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	catz4 := &domain.CatalogZone{ID: "550e8400-e29b-41d4-a716-446655440004", TenantID: "t2", ZoneName: "catalog.t2.example.com.", Version: "1", Serial: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	_ = repo.CreateCatalogZone(ctx, catz2)
+	_ = repo.CreateCatalogZone(ctx, catz3)
+	_ = repo.CreateCatalogZone(ctx, catz4)
+
+	t1Catalogs, errListT1 := repo.ListCatalogZones(ctx, "t1")
+	if errListT1 != nil {
+		t.Fatalf("ListCatalogZones(t1) failed: %v", errListT1)
+	}
+	if len(t1Catalogs) != 3 {
+		t.Errorf("expected 3 catalogs for t1, got %d", len(t1Catalogs))
+	}
+
+	t2Catalogs, errListT2 := repo.ListCatalogZones(ctx, "t2")
+	if errListT2 != nil {
+		t.Fatalf("ListCatalogZones(t2) failed: %v", errListT2)
+	}
+	if len(t2Catalogs) != 1 {
+		t.Errorf("expected 1 catalog for t2, got %d", len(t2Catalogs))
+	}
+
+	emptyCatalogs, errEmpty := repo.ListCatalogZones(ctx, "nonexistent")
+	if errEmpty != nil {
+		t.Fatalf("ListCatalogZones for nonexistent tenant failed: %v", errEmpty)
+	}
+	if len(emptyCatalogs) != 0 {
+		t.Errorf("expected 0 catalogs for nonexistent tenant, got %d", len(emptyCatalogs))
+	}
+
+	// 6. Test UpdateCatalogZoneVersion
+	if err := repo.UpdateCatalogZoneVersion(ctx, catzID, "2", 2); err != nil {
+		t.Fatalf("UpdateCatalogZoneVersion failed: %v", err)
+	}
+	gotUpdated, _ := repo.GetCatalogZone(ctx, catzID, "t1")
+	if gotUpdated == nil {
+		t.Fatalf("GetCatalogZone after update returned nil")
+	}
+	if gotUpdated.Version != "2" {
+		t.Errorf("expected version '2', got %s", gotUpdated.Version)
+	}
+	if gotUpdated.Serial != 2 {
+		t.Errorf("expected serial 2, got %d", gotUpdated.Serial)
+	}
+
+	// 7. Test AddZoneToCatalog and ListZoneCatalogEntries
+	// The catalog zone must be provisioned as a regular zone first
+	createZone("550e8400-e29b-41d4-a716-446655440005", "catalog.example.com.", "t1")
+
+	entry1 := &domain.ZoneCatalogEntry{ZoneName: "foo.example.com.", ZoneID: "zone-uuid-1", GroupID: "group1"}
+	if err := repo.AddZoneToCatalog(ctx, catzID, "t1", entry1); err != nil {
+		t.Fatalf("AddZoneToCatalog failed: %v", err)
+	}
+
+	entries, errListEntries := repo.ListZoneCatalogEntries(ctx, catzID, "t1")
+	if errListEntries != nil {
+		t.Fatalf("ListZoneCatalogEntries failed: %v", errListEntries)
+	}
+	if len(entries) != 1 {
+		t.Errorf("expected 1 entry, got %d", len(entries))
+	}
+	if len(entries) > 0 {
+		if entries[0].ZoneName != "foo.example.com." {
+			t.Errorf("expected zone_name 'foo.example.com.', got %s", entries[0].ZoneName)
+		}
+		if entries[0].ZoneID != "zone-uuid-1" {
+			t.Errorf("expected zone_id 'zone-uuid-1', got %s", entries[0].ZoneID)
+		}
+		if entries[0].GroupID != "group1" {
+			t.Errorf("expected group_id 'group1', got %s", entries[0].GroupID)
+		}
+	}
+
+	// 8. Test lexicographic range: add "foobar" then remove "foo"
+	entryFoo := &domain.ZoneCatalogEntry{ZoneName: "foobar.example.com.", ZoneID: "zone-uuid-foobar", GroupID: ""}
+	if err := repo.AddZoneToCatalog(ctx, catzID, "t1", entryFoo); err != nil {
+		t.Fatalf("AddZoneToCatalog for foobar failed: %v", err)
+	}
+
+	// Remove foo.example.com.
+	if err := repo.RemoveZoneFromCatalog(ctx, catzID, "t1", "foo.example.com."); err != nil {
+		t.Fatalf("RemoveZoneFromCatalog failed: %v", err)
+	}
+
+	// Verify: foobar should still be there, foo should be gone
+	remaining, _ := repo.ListZoneCatalogEntries(ctx, catzID, "t1")
+	if len(remaining) != 1 {
+		t.Errorf("expected 1 remaining entry (foobar only), got %d", len(remaining))
+	}
+	if len(remaining) > 0 && remaining[0].ZoneName != "foobar.example.com." {
+		t.Errorf("expected remaining entry to be 'foobar.example.com.', got %s", remaining[0].ZoneName)
+	}
+
+	// 9. Test GetZoneByCatalogName
+	catalogZoneName := "my-catalog-zone"
+	zoneWithCatalogName := &domain.Zone{ID: "550e8400-e29b-41d4-a716-446655440098", TenantID: "t1", Name: "real.example.com.", CatalogZoneName: &catalogZoneName}
+	if err := repo.CreateZone(ctx, zoneWithCatalogName); err != nil {
+		t.Fatalf("CreateZone with catalog_zone_name failed: %v", err)
+	}
+	gotZone, errGZCN := repo.GetZoneByCatalogName(ctx, catalogZoneName, "t1")
+	if errGZCN != nil {
+		t.Fatalf("GetZoneByCatalogName failed: %v", errGZCN)
+	}
+	if gotZone == nil {
+		t.Fatalf("GetZoneByCatalogName returned nil")
+	}
+	if gotZone.ID != "550e8400-e29b-41d4-a716-446655440098" {
+		t.Errorf("expected zone id '550e8400-e29b-41d4-a716-446655440098', got %s", gotZone.ID)
+	}
+
+	// 10. Test CreateZoneFromCatalog
+	newZone := &domain.Zone{ID: "550e8400-e29b-41d4-a716-446655440100", TenantID: "t1", Name: "provisioned.example.com.", Role: "slave", MasterServer: "10.0.0.1:53"}
+	records := []domain.Record{
+		{ID: "550e8400-e29b-41d4-a716-446655440101", ZoneID: "550e8400-e29b-41d4-a716-446655440100", Name: "provisioned.example.com.", Type: domain.TypeSOA, Content: "ns1.example.com. admin.example.com. 1 3600 600 1209600 300", TTL: 300},
+		{ID: "550e8400-e29b-41d4-a716-446655440102", ZoneID: "550e8400-e29b-41d4-a716-446655440100", Name: "provisioned.example.com.", Type: domain.TypeNS, Content: "ns1.example.com.", TTL: 300},
+		{ID: "550e8400-e29b-41d4-a716-446655440103", ZoneID: "550e8400-e29b-41d4-a716-446655440100", Name: "www.provisioned.example.com.", Type: domain.TypeA, Content: "1.2.3.4", TTL: 60},
+	}
+	if err := repo.CreateZoneFromCatalog(ctx, newZone, records); err != nil {
+		t.Fatalf("CreateZoneFromCatalog failed: %v", err)
+	}
+	// Verify zone was created
+	gotNewZone, _ := repo.GetZone(ctx, "provisioned.example.com.")
+	if gotNewZone == nil {
+		t.Errorf("GetZone returned nil for provisioned zone")
+	}
+	// Verify records were created
+	gotRecs, _ := repo.ListRecordsForZone(ctx, "550e8400-e29b-41d4-a716-446655440100", "t1")
+	if len(gotRecs) != 3 {
+		t.Errorf("expected 3 records for provisioned zone, got %d", len(gotRecs))
+	}
+
+	// 11. Test DeleteCatalogZone
+	if err := repo.DeleteCatalogZone(ctx, catzID, "t1"); err != nil {
+		t.Fatalf("DeleteCatalogZone failed: %v", err)
+	}
+	gotAfterDelete, _ := repo.GetCatalogZone(ctx, catzID, "t1")
+	if gotAfterDelete != nil {
+		t.Errorf("expected nil after delete, got %+v", gotAfterDelete)
+	}
+	remainingAfterDelete, _ := repo.ListCatalogZones(ctx, "t1")
+	if len(remainingAfterDelete) != 2 {
+		t.Errorf("expected 2 remaining catalogs after delete, got %d", len(remainingAfterDelete))
+	}
+}
+
+func TestPostgresRepository_CatalogZones_CreateZoneFromCatalog_ThenDeleteByCatalogName(t *testing.T) {
+	if testing.Short() || !dockerAvailable() {
+		t.Skip("skipping integration test")
+	}
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+	repo := NewPostgresRepository(db)
+	ctx := context.Background()
+
+	// Create a zone with catalog_zone_name set (simulates zone provisioned from catalog)
+	catalogZoneName := "test-catalog-zone"
+	zone := &domain.Zone{
+		ID:              "550e8400-e29b-41d4-a716-446655440099",
+		TenantID:        "t1",
+		Name:            "test.example.com.",
+		Role:            "slave",
+		CatalogZoneName: &catalogZoneName,
+	}
+	if err := repo.CreateZone(ctx, zone); err != nil {
+		t.Fatalf("CreateZone failed: %v", err)
+	}
+
+	// Verify GetZoneByCatalogName finds it
+	got, err := repo.GetZoneByCatalogName(ctx, catalogZoneName, "t1")
+	if err != nil {
+		t.Fatalf("GetZoneByCatalogName failed: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected zone, got nil")
+	}
+	if got.ID != "550e8400-e29b-41d4-a716-446655440099" {
+		t.Errorf("expected ID '550e8400-e29b-41d4-a716-446655440099', got %s", got.ID)
+	}
+
+	// Delete via DeleteZoneByCatalogName (simulates rollback after failed AXFR)
+	if err := repo.DeleteZoneByCatalogName(ctx, catalogZoneName, "t1"); err != nil {
+		t.Fatalf("DeleteZoneByCatalogName failed: %v", err)
+	}
+
+	// Verify it's gone
+	gotAfter, _ := repo.GetZoneByCatalogName(ctx, catalogZoneName, "t1")
+	if gotAfter != nil {
+		t.Errorf("expected nil after delete, got %+v", gotAfter)
+	}
 }
 
 func TestPostgresRepositoryEdgeCases(t *testing.T) {

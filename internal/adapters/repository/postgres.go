@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
 	"github.com/poyrazK/cloudDNS/internal/core/ports"
 	"github.com/poyrazK/cloudDNS/internal/dns/packet"
@@ -519,9 +520,9 @@ func (r *PostgresRepository) ListRecordsForZoneStreaming(ctx context.Context, zo
 
 // CreateZone implements ports.DNSRepository.
 func (r *PostgresRepository) CreateZone(ctx context.Context, zone *domain.Zone) error {
-	query := `INSERT INTO dns_zones (id, tenant_id, name, vpc_id, description, role, master_server, created_at, updated_at) 
-			  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
-	_, err := r.db.ExecContext(ctx, query, zone.ID, zone.TenantID, zone.Name, zone.VPCID, zone.Description, zone.Role, zone.MasterServer, zone.CreatedAt, zone.UpdatedAt)
+	query := `INSERT INTO dns_zones (id, tenant_id, name, vpc_id, description, role, master_server, catalog_zone_name, created_at, updated_at)
+			  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
+	_, err := r.db.ExecContext(ctx, query, zone.ID, zone.TenantID, zone.Name, zone.VPCID, zone.Description, zone.Role, zone.MasterServer, zone.CatalogZoneName, zone.CreatedAt, zone.UpdatedAt)
 	return err
 }
 
@@ -541,9 +542,9 @@ func (r *PostgresRepository) CreateZoneWithRecords(ctx context.Context, zone *do
 	}()
 
 	// 1. Insert Zone
-	zoneQuery := `INSERT INTO dns_zones (id, tenant_id, name, vpc_id, description, role, master_server, created_at, updated_at)
-			      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
-	_, errExec := tx.ExecContext(ctx, zoneQuery, zone.ID, zone.TenantID, zone.Name, zone.VPCID, zone.Description, zone.Role, zone.MasterServer, zone.CreatedAt, zone.UpdatedAt)
+	zoneQuery := `INSERT INTO dns_zones (id, tenant_id, name, vpc_id, description, role, master_server, catalog_zone_name, created_at, updated_at)
+			      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
+	_, errExec := tx.ExecContext(ctx, zoneQuery, zone.ID, zone.TenantID, zone.Name, zone.VPCID, zone.Description, zone.Role, zone.MasterServer, zone.CatalogZoneName, zone.CreatedAt, zone.UpdatedAt)
 	if errExec != nil {
 		return errExec
 	}
@@ -1633,4 +1634,266 @@ func ConvertDomainToPacketRecord(rec domain.Record) (packet.DNSRecord, error) {
 	}
 
 	return pRec, nil
+}
+
+// CreateCatalogZone creates a new catalog zone.
+func (r *PostgresRepository) CreateCatalogZone(ctx context.Context, catz *domain.CatalogZone) error {
+	query := `
+		INSERT INTO catalog_zones (id, tenant_id, zone_name, version, serial, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`
+	_, err := r.db.ExecContext(ctx, query,
+		catz.ID, catz.TenantID, catz.ZoneName, catz.Version, catz.Serial, catz.CreatedAt, catz.UpdatedAt)
+	return err
+}
+
+// GetCatalogZone retrieves a catalog zone by ID.
+func (r *PostgresRepository) GetCatalogZone(ctx context.Context, catalogID string, tenantID string) (*domain.CatalogZone, error) {
+	query := `
+		SELECT id, tenant_id, zone_name, version, serial, created_at, updated_at
+		FROM catalog_zones WHERE id = $1 AND tenant_id = $2
+	`
+	row := r.db.QueryRowContext(ctx, query, catalogID, tenantID)
+	var catz domain.CatalogZone
+	err := row.Scan(&catz.ID, &catz.TenantID, &catz.ZoneName, &catz.Version, &catz.Serial, &catz.CreatedAt, &catz.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &catz, nil
+}
+
+// GetCatalogZoneByName retrieves a catalog zone by its zone name.
+func (r *PostgresRepository) GetCatalogZoneByName(ctx context.Context, zoneName string, tenantID string) (*domain.CatalogZone, error) {
+	query := `
+		SELECT id, tenant_id, zone_name, version, serial, created_at, updated_at
+		FROM catalog_zones WHERE zone_name = $1 AND tenant_id = $2
+	`
+	row := r.db.QueryRowContext(ctx, query, zoneName, tenantID)
+	var catz domain.CatalogZone
+	err := row.Scan(&catz.ID, &catz.TenantID, &catz.ZoneName, &catz.Version, &catz.Serial, &catz.CreatedAt, &catz.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &catz, nil
+}
+
+// ListCatalogZones lists all catalog zones for a tenant.
+func (r *PostgresRepository) ListCatalogZones(ctx context.Context, tenantID string) ([]domain.CatalogZone, error) {
+	query := `
+		SELECT id, tenant_id, zone_name, version, serial, created_at, updated_at
+		FROM catalog_zones WHERE tenant_id = $1 ORDER BY created_at DESC
+	`
+	rows, err := r.db.QueryContext(ctx, query, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var catalogZones []domain.CatalogZone
+	for rows.Next() {
+		var catz domain.CatalogZone
+		if err := rows.Scan(&catz.ID, &catz.TenantID, &catz.ZoneName, &catz.Version, &catz.Serial, &catz.CreatedAt, &catz.UpdatedAt); err != nil {
+			return nil, err
+		}
+		catalogZones = append(catalogZones, catz)
+	}
+	return catalogZones, rows.Err()
+}
+
+// UpdateCatalogZoneVersion updates the version and serial of a catalog zone.
+func (r *PostgresRepository) UpdateCatalogZoneVersion(ctx context.Context, catalogID string, version string, serial uint32) error {
+	query := `
+		UPDATE catalog_zones SET version = $1, serial = $2, updated_at = CURRENT_TIMESTAMP
+		WHERE id = $3
+	`
+	_, err := r.db.ExecContext(ctx, query, version, serial, catalogID)
+	return err
+}
+
+// DeleteCatalogZone deletes a catalog zone.
+func (r *PostgresRepository) DeleteCatalogZone(ctx context.Context, catalogID string, tenantID string) error {
+	query := `DELETE FROM catalog_zones WHERE id = $1 AND tenant_id = $2`
+	_, err := r.db.ExecContext(ctx, query, catalogID, tenantID)
+	return err
+}
+
+// ListZoneCatalogEntries lists all zone entries in a catalog zone.
+// Zone entries are stored as PTR records in the catalog zone.
+func (r *PostgresRepository) ListZoneCatalogEntries(ctx context.Context, catalogID string, tenantID string) ([]domain.ZoneCatalogEntry, error) {
+	// First get the catalog zone to find its name (tenant-scoped)
+	catz, err := r.GetCatalogZone(ctx, catalogID, tenantID)
+	if err != nil || catz == nil {
+		return nil, err
+	}
+
+	// Get the zone ID for the catalog zone
+	zoneQuery := `SELECT id FROM dns_zones WHERE name = $1 AND tenant_id = $2`
+	var zoneID string
+	err = r.db.QueryRowContext(ctx, zoneQuery, catz.ZoneName, catz.TenantID).Scan(&zoneID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// Query catalog entries - stored as PTR records with content format "zone_name:zone_id[:group_id]"
+	ptrQuery := `
+		SELECT name, content FROM dns_records
+		WHERE zone_id = $1 AND type = 'PTR'
+	`
+	rows, err := r.db.QueryContext(ctx, ptrQuery, zoneID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var entries []domain.ZoneCatalogEntry
+	for rows.Next() {
+		var name, content string
+		if err := rows.Scan(&name, &content); err != nil {
+			return nil, err
+		}
+		// PTR name is the reversed zone name for catalog lookup
+		// Content format: "zone_name:zone_id[:group_id]"
+		parts := strings.SplitN(content, ":", 3)
+		if len(parts) >= 2 {
+			entry := domain.ZoneCatalogEntry{
+				ZoneName: parts[0],
+				ZoneID:   parts[1],
+			}
+			if len(parts) == 3 {
+				entry.GroupID = parts[2]
+			}
+			entries = append(entries, entry)
+		}
+	}
+	return entries, rows.Err()
+}
+
+// AddZoneToCatalog adds a zone to a catalog zone's inventory.
+func (r *PostgresRepository) AddZoneToCatalog(ctx context.Context, catalogID string, tenantID string, entry *domain.ZoneCatalogEntry) error {
+	// Get the catalog zone (tenant-scoped)
+	catz, err := r.GetCatalogZone(ctx, catalogID, tenantID)
+	if err != nil || catz == nil {
+		return fmt.Errorf("catalog zone not found")
+	}
+
+	// Get the zone ID for the catalog zone
+	zoneQuery := `SELECT id FROM dns_zones WHERE name = $1`
+	var zoneID string
+	err = r.db.QueryRowContext(ctx, zoneQuery, catz.ZoneName).Scan(&zoneID)
+	if err != nil {
+		return fmt.Errorf("catalog zone not provisioned: %w", err)
+	}
+
+	// Create PTR record for the zone entry
+	// Name: reversed zone name, Content: zone_name:zone_id[:group_id]
+	ptrContent := entry.ZoneName + ":" + entry.ZoneID
+	if entry.GroupID != "" {
+		ptrContent += ":" + entry.GroupID
+	}
+
+	// Generate unique name for PTR (reversed zone name for uniqueness)
+	// e.g., "example.com." -> "com.example."
+	reversedName := reverseDomainName(entry.ZoneName)
+
+	recordID := uuid.New().String()
+	query := `
+		INSERT INTO dns_records (id, zone_id, name, type, content, ttl, created_at, updated_at)
+		VALUES ($1, $2, $3, 'PTR', $4, 3600, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		ON CONFLICT (zone_id, LOWER(name), type, content) DO NOTHING
+	`
+	_, err = r.db.ExecContext(ctx, query, recordID, zoneID, reversedName, ptrContent)
+	return err
+}
+
+// RemoveZoneFromCatalog removes a zone from a catalog zone's inventory.
+func (r *PostgresRepository) RemoveZoneFromCatalog(ctx context.Context, catalogID string, tenantID string, zoneName string) error {
+	// Get the catalog zone (tenant-scoped)
+	catz, err := r.GetCatalogZone(ctx, catalogID, tenantID)
+	if err != nil || catz == nil {
+		return fmt.Errorf("catalog zone not found")
+	}
+
+	// Get the zone ID for the catalog zone
+	zoneQuery := `SELECT id FROM dns_zones WHERE name = $1`
+	var zoneID string
+	err = r.db.QueryRowContext(ctx, zoneQuery, catz.ZoneName).Scan(&zoneID)
+	if err != nil {
+		return fmt.Errorf("catalog zone not provisioned: %w", err)
+	}
+
+	// Find and delete the PTR record matching this zone
+	// Content format: "zone_name:zone_id[:group_id]" - use lexicographic range to avoid LIKE issues
+	// Match content that starts with "zoneName:" (exact prefix match, not substring)
+	query := `
+		DELETE FROM dns_records
+		WHERE zone_id = $1 AND type = 'PTR' AND substring(content, 1, length($2)) = $2
+	`
+	prefix := zoneName + ":"
+	_, err = r.db.ExecContext(ctx, query, zoneID, prefix)
+	return err
+}
+
+// CreateZoneFromCatalog creates a zone on the slave from catalog entry data.
+func (r *PostgresRepository) CreateZoneFromCatalog(ctx context.Context, zone *domain.Zone, records []domain.Record) error {
+	// Create the zone
+	if err := r.CreateZone(ctx, zone); err != nil {
+		return err
+	}
+
+	// Create the zone's records
+	if len(records) > 0 {
+		if err := r.BatchCreateRecords(ctx, records); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// DeleteZoneByCatalogName deletes a zone by its catalog zone name.
+func (r *PostgresRepository) DeleteZoneByCatalogName(ctx context.Context, catalogZoneName string, tenantID string) error {
+	query := `DELETE FROM dns_zones WHERE catalog_zone_name = $1 AND tenant_id = $2`
+	_, err := r.db.ExecContext(ctx, query, catalogZoneName, tenantID)
+	return err
+}
+
+// GetZoneByCatalogName retrieves a zone by its catalog zone name.
+func (r *PostgresRepository) GetZoneByCatalogName(ctx context.Context, catalogZoneName string, tenantID string) (*domain.Zone, error) {
+	query := `
+		SELECT id, tenant_id, name, role, master_server, catalog_zone_name, created_at, updated_at
+		FROM dns_zones WHERE catalog_zone_name = $1 AND tenant_id = $2
+	`
+	row := r.db.QueryRowContext(ctx, query, catalogZoneName, tenantID)
+	var z domain.Zone
+	var catalogZoneNamePtr *string
+	err := row.Scan(&z.ID, &z.TenantID, &z.Name, &z.Role, &z.MasterServer, &catalogZoneNamePtr, &z.CreatedAt, &z.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	z.CatalogZoneName = catalogZoneNamePtr
+	return &z, nil
+}
+
+// Helper function to reverse a domain name for PTR record naming
+func reverseDomainName(name string) string {
+	// Remove trailing dot if present
+	name = strings.TrimSuffix(name, ".")
+	// Split by dot and reverse
+	parts := strings.Split(name, ".")
+	for i, j := 0, len(parts)-1; i < j; i, j = i+1, j-1 {
+		parts[i], parts[j] = parts[j], parts[i]
+	}
+	return strings.Join(parts, ".") + "."
 }

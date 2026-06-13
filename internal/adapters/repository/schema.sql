@@ -98,6 +98,9 @@ CREATE INDEX IF NOT EXISTS idx_dns_zones_name_reverse ON dns_zones (REVERSE(name
 -- Covers zone_id + LOWER(name) + type pattern used by DeleteRecordsByNameAndType
 CREATE INDEX IF NOT EXISTS idx_dns_records_zone_name_type ON dns_records(zone_id, LOWER(name), type);
 
+-- Unique constraint for catalog zone PTR records (used by AddZoneToCatalog ON CONFLICT)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dns_records_zone_name_type_content ON dns_records(zone_id, LOWER(name), type, content);
+
 -- Covers zone_id + LOWER(name) pattern used by DeleteRecordsByName
 CREATE INDEX IF NOT EXISTS idx_dns_records_zone_name ON dns_records(zone_id, LOWER(name));
 
@@ -141,3 +144,24 @@ ALTER TABLE dns_records ALTER COLUMN name TYPE citext;
 
 -- Migrate dns_zones.name to citext for case-insensitive zone lookups
 ALTER TABLE dns_zones ALTER COLUMN name TYPE citext;
+
+-- Catalog Zones (RFC 9432)
+CREATE TABLE IF NOT EXISTS catalog_zones (
+    id UUID PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    zone_name TEXT NOT NULL UNIQUE,
+    version TEXT NOT NULL DEFAULT '1',
+    serial BIGINT NOT NULL DEFAULT 1,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Index for catalog zone lookup by tenant
+CREATE INDEX IF NOT EXISTS idx_catalog_zones_tenant_id ON catalog_zones(tenant_id);
+
+-- Add catalog relationship to dns_zones
+ALTER TABLE dns_zones ADD COLUMN IF NOT EXISTS catalog_id UUID REFERENCES catalog_zones(id);
+ALTER TABLE dns_zones ADD COLUMN IF NOT EXISTS catalog_zone_name TEXT;
+
+-- Index for dns_zones catalog_zone_name lookups (used by GetZoneByCatalogName)
+CREATE INDEX IF NOT EXISTS idx_dns_zones_catalog_zone_name ON dns_zones(catalog_zone_name) WHERE catalog_zone_name IS NOT NULL;

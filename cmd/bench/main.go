@@ -30,6 +30,12 @@ import (
 	"github.com/poyrazK/cloudDNS/internal/dns/server"
 )
 
+// sleepFn and readFileFn are injectable for testing.
+var (
+	sleepFn    = time.Sleep
+	readFileFn = os.ReadFile
+)
+
 type Stats struct {
 	TotalQueries  uint64
 	Success       uint64
@@ -295,7 +301,7 @@ func runScaleTest(count int, concurrency int) {
 	}
 	defer func() { _ = db.Close() }()
 
-	schema, errRead := os.ReadFile("internal/adapters/repository/schema.sql")
+	schema, errRead := readFileFn("internal/adapters/repository/schema.sql")
 	if errRead != nil {
 		fmt.Printf("Failed to read schema file: %v\n", errRead)
 		return
@@ -348,7 +354,7 @@ func runScaleTest(count int, concurrency int) {
 		}
 	}()
 
-	time.Sleep(1 * time.Second)
+	sleepFn(1 * time.Second)
 
 	// 4. Benchmark
 	fmt.Printf("\nExecuting Internet-Scale Benchmark\n")

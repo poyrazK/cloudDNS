@@ -6,6 +6,8 @@ import (
 	"errors"
 	"flag"
 	"net"
+	"os"
+	"os/exec"
 	"testing"
 	"time"
 
@@ -301,6 +303,14 @@ func TestRunSeed_ConnectionError(t *testing.T) {
 	runSeed(1)
 }
 
+func TestRunSeed_DefaultURL(t *testing.T) {
+	// Test when DATABASE_URL is not set (uses default)
+	os.Unsetenv("DATABASE_URL")
+	// This will try to connect to localhost with default credentials
+	// We expect it to fail with connection error since there's no local DB
+	runSeed(1)
+}
+
 func TestRunScaleTest_MoreErrors(t *testing.T) {
 	t.Run("BadDSN", func(t *testing.T) {
 		t.Setenv("DATABASE_URL", "host=/invalid/path/socket")
@@ -488,4 +498,56 @@ func (m *mockCommand) SetStdout(buf *bytes.Buffer) {
 
 func (m *mockCommand) Run() error {
 	return nil
+}
+
+func TestGoCommand_SetStdout(t *testing.T) {
+	var buf bytes.Buffer
+	g := &goCommand{cmd: exec.Command("echo", "test")}
+	g.SetStdout(&buf)
+	if g.stdou == nil {
+		t.Error("expected stdou to be set")
+	}
+	if g.cmd.Stdout == nil {
+		t.Error("expected cmd.Stdout to be set")
+	}
+}
+
+func TestGoCommand_Run(t *testing.T) {
+	g := &goCommand{cmd: exec.Command("true")}
+	err := g.Run()
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestGoCommand_RunError(t *testing.T) {
+	g := &goCommand{cmd: exec.Command("false")}
+	err := g.Run()
+	if err == nil {
+		t.Error("expected error from false command")
+	}
+}
+
+func TestRunScaleTest_MockedSleepAndFile(t *testing.T) {
+	// Save original functions
+	origSleep := sleepFn
+	origRead := readFileFn
+	defer func() {
+		sleepFn = origSleep
+		readFileFn = origRead
+	}()
+
+	// Mock sleep to be instant
+	sleepFn = func(d time.Duration) {}
+
+	// Mock file read to return empty schema
+	readFileFn = func(name string) ([]byte, error) {
+		return []byte{}, nil
+	}
+
+	// Set invalid DB to trigger early return after schema load
+	t.Setenv("DATABASE_URL", "host=/invalid/path")
+	
+	// This should now run without blocking on sleep
+	runScaleTest(1, 1)
 }

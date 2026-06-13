@@ -79,6 +79,23 @@ func (m *mockDNSSECRepo) GetAuditLogs(_ context.Context, _ string) ([]domain.Aud
 func (m *mockDNSSECRepo) DeleteAPIKey(_ context.Context, _, _ string) error { return nil }
 func (m *mockDNSSECRepo) Ping(_ context.Context) error                      { return nil }
 
+func (m *mockDNSSECRepo) CreateCatalogZone(_ context.Context, _ *domain.CatalogZone) error              { return nil }
+func (m *mockDNSSECRepo) GetCatalogZone(_ context.Context, _, _ string) (*domain.CatalogZone, error)   { return nil, nil }
+func (m *mockDNSSECRepo) GetCatalogZoneByName(_ context.Context, _, _ string) (*domain.CatalogZone, error) { return nil, nil }
+func (m *mockDNSSECRepo) ListCatalogZones(_ context.Context, _ string) ([]domain.CatalogZone, error)    { return nil, nil }
+func (m *mockDNSSECRepo) UpdateCatalogZoneVersion(_ context.Context, _, _ string, _ uint32) error       { return nil }
+func (m *mockDNSSECRepo) DeleteCatalogZone(_ context.Context, _, _ string) error                        { return nil }
+func (m *mockDNSSECRepo) ListZoneCatalogEntries(_ context.Context, _, _ string) ([]domain.ZoneCatalogEntry, error) {
+	return nil, nil
+}
+func (m *mockDNSSECRepo) AddZoneToCatalog(_ context.Context, _, _ string, _ *domain.ZoneCatalogEntry) error { return nil }
+func (m *mockDNSSECRepo) RemoveZoneFromCatalog(_ context.Context, _, _, _ string) error                    { return nil }
+func (m *mockDNSSECRepo) CreateZoneFromCatalog(_ context.Context, _ *domain.Zone, _ []domain.Record) error {
+	return nil
+}
+func (m *mockDNSSECRepo) DeleteZoneByCatalogName(_ context.Context, _, _ string) error { return nil }
+func (m *mockDNSSECRepo) GetZoneByCatalogName(_ context.Context, _, _ string) (*domain.Zone, error) { return nil, nil }
+
 func (m *mockDNSSECRepo) UpdateRecordHealth(_ context.Context, _ string, _ domain.HealthStatus, _ string) error {
 	return nil
 }

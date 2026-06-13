@@ -30,6 +30,10 @@ const (
 	TypeCAA RecordType = "CAA"
 	// TypeHTTPS represents an HTTPS record (RFC 9460).
 	TypeHTTPS RecordType = "HTTPS"
+	// TypeCATZ represents a Catalog Zone version record (RFC 9432).
+	TypeCATZ RecordType = "CATZ"
+	// TypeCZTR represents a Catalog Zone Transfer Response record (RFC 9432).
+	TypeCZTR RecordType = "CZTR"
 )
 
 // HealthCheckType represents the method used to verify endpoint health.
@@ -65,8 +69,30 @@ type Zone struct {
 	Description  string    `json:"description"`
 	Role         string    `json:"role,omitempty"`          // "master" or "slave"
 	MasterServer string    `json:"master_server,omitempty"` // IP/hostname of master (for slaves)
+	CatalogID        *string  `json:"catalog_id,omitempty"`        // Parent catalog zone ID
+	CatalogZoneName  *string  `json:"catalog_zone_name,omitempty"` // Name in catalog (for catalog zones)
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+// CatalogZone represents a catalog zone (RFC 9432) containing zone inventory.
+type CatalogZone struct {
+	ID string    `json:"id"`
+	TenantID  string    `json:"tenant_id"`
+	ZoneName  string    `json:"zone_name"` // e.g., "catalog.example.com."
+	Version   string    `json:"version"`   // CATZ version string
+	Serial    uint32    `json:"serial"`    // SOA serial for change detection
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// ZoneCatalogEntry represents a zone's inventory entry in a catalog zone.
+// Stored as PTR records in the catalog zone per RFC 9432.
+type ZoneCatalogEntry struct {
+	ZoneName     string    `json:"zone_name"`     // e.g., "example.com."
+	ZoneID       string    `json:"zone_id"`       // Reference to dns_zones.id
+	GroupID      string    `json:"group_id,omitempty"` // Optional grouping
+	LastTransfer time.Time `json:"last_transfer"` // Last successful AXFR/IXFR
 }
 
 // Record represents a DNS resource record within a zone.

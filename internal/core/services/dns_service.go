@@ -325,3 +325,109 @@ func (s *dnsService) HealthCheck(ctx context.Context) map[string]error {
 	}
 	return res
 }
+
+// CreateCatalogZone creates a new catalog zone (RFC 9432).
+func (s *dnsService) CreateCatalogZone(ctx context.Context, tenantID string, zoneName string) (*domain.CatalogZone, error) {
+	catz := &domain.CatalogZone{
+		ID:        uuid.New().String(),
+		TenantID:  tenantID,
+		ZoneName:  zoneName,
+		Version:   "1",
+		Serial:    1,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	if err := s.repo.CreateCatalogZone(ctx, catz); err != nil {
+		return nil, fmt.Errorf("failed to create catalog zone: %w", err)
+	}
+	return catz, nil
+}
+
+// GetCatalogZone retrieves a catalog zone by ID.
+func (s *dnsService) GetCatalogZone(ctx context.Context, catalogID string, tenantID string) (*domain.CatalogZone, error) {
+	return s.repo.GetCatalogZone(ctx, catalogID, tenantID)
+}
+
+// ListCatalogZones lists all catalog zones for a tenant.
+func (s *dnsService) ListCatalogZones(ctx context.Context, tenantID string) ([]domain.CatalogZone, error) {
+	return s.repo.ListCatalogZones(ctx, tenantID)
+}
+
+// DeleteCatalogZone deletes a catalog zone.
+func (s *dnsService) DeleteCatalogZone(ctx context.Context, catalogID string, tenantID string) error {
+	return s.repo.DeleteCatalogZone(ctx, catalogID, tenantID)
+}
+
+// AddZoneToCatalog adds a zone to a catalog zone's inventory (RFC 9432).
+func (s *dnsService) AddZoneToCatalog(ctx context.Context, catalogID string, tenantID string, zoneName string, zoneID string, groupID string) error {
+	entry := &domain.ZoneCatalogEntry{
+		ZoneName: zoneName,
+		ZoneID:   zoneID,
+		GroupID:  groupID,
+	}
+	if err := s.repo.AddZoneToCatalog(ctx, catalogID, tenantID, entry); err != nil {
+		return fmt.Errorf("failed to add zone to catalog: %w", err)
+	}
+
+	// Increment catalog serial to signal change
+	catz, err := s.repo.GetCatalogZone(ctx, catalogID, tenantID)
+	if err != nil || catz == nil {
+		return err
+	}
+	newSerial := catz.Serial + 1
+	if err := s.repo.UpdateCatalogZoneVersion(ctx, catalogID, catz.Version, newSerial); err != nil {
+		return fmt.Errorf("failed to update catalog version: %w", err)
+	}
+
+	return nil
+}
+
+// RemoveZoneFromCatalog removes a zone from a catalog zone's inventory (RFC 9432).
+func (s *dnsService) RemoveZoneFromCatalog(ctx context.Context, catalogID string, tenantID string, zoneName string) error {
+	if err := s.repo.RemoveZoneFromCatalog(ctx, catalogID, tenantID, zoneName); err != nil {
+		return fmt.Errorf("failed to remove zone from catalog: %w", err)
+	}
+
+	// Increment catalog serial to signal change
+	catz, err := s.repo.GetCatalogZone(ctx, catalogID, tenantID)
+	if err != nil || catz == nil {
+		return err
+	}
+	newSerial := catz.Serial + 1
+	if err := s.repo.UpdateCatalogZoneVersion(ctx, catalogID, catz.Version, newSerial); err != nil {
+		return fmt.Errorf("failed to update catalog version: %w", err)
+	}
+
+	return nil
+}
+
+// ListZoneCatalogEntries lists all zone entries in a catalog zone.
+func (s *dnsService) ListZoneCatalogEntries(ctx context.Context, catalogID string, tenantID string) ([]domain.ZoneCatalogEntry, error) {
+	return s.repo.ListZoneCatalogEntries(ctx, catalogID, tenantID)
+}
+
+// PollCatalogZone polls a remote catalog zone and returns the zone entries.
+// This is used by slave servers to discover zones from a master.
+// Note: The actual AXFR fetch is done by the server's pollCatalogZone in client.go.
+// This service method reads from local storage after the poller has synced.
+func (s *dnsService) PollCatalogZone(ctx context.Context, _ string, catalogZoneName string) ([]domain.ZoneCatalogEntry, error) {
+	// Resolve catalog by zone name to get catalogID
+	catz, err := s.repo.GetCatalogZoneByName(ctx, catalogZoneName, "")
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve catalog zone: %w", err)
+	}
+	if catz == nil {
+		return nil, nil
+	}
+	return s.repo.ListZoneCatalogEntries(ctx, catz.ID, catz.TenantID)
+}
+
+// SyncZonesFromCatalog syncs zones from a catalog to local storage.
+// Used by slave servers to provision zones from catalog.
+// Note: The actual zone provisioning is done by the server's syncZoneFromCatalog in client.go.
+// This service method is a manual trigger entry point.
+func (s *dnsService) SyncZonesFromCatalog(context.Context, string, string) error {
+	// Zone sync is handled by the server poller in client.go via syncZoneFromCatalog.
+	// This method exists as a manual/administrative entry point if needed.
+	return nil
+}

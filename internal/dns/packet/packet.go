@@ -63,6 +63,10 @@ const (
 	NSEC3      QueryType = 50
 	// NSEC3PARAM represents NSEC3 parameters (RFC 5155).
 	NSEC3PARAM QueryType = 51
+	// CATZ represents a Catalog Zone version record (RFC 9432).
+	CATZ QueryType = 53
+	// CZTR represents a Catalog Zone Transfer Response record (RFC 9432).
+	CZTR QueryType = 54
 	// AXFR represents a request for a full zone transfer.
 	AXFR       QueryType = 252
 	// IXFR represents a request for an incremental zone transfer.
@@ -599,6 +603,17 @@ func (r *DNSRecord) Read(buffer *BytePacketBuffer) error {
 		if errReadSalt != nil { return errReadSalt }
 		if r.Salt, err = buffer.ReadRange(buffer.Position(), int(saltLen)); err != nil { return err }
 		if errStep := buffer.Step(int(saltLen)); errStep != nil { return errStep }
+	case CATZ:
+		// CATZ RDATA is a version string (text)
+		txtLen, errReadTxt := buffer.Read()
+		if errReadTxt != nil { return errReadTxt }
+		txtData, errRangeTxt := buffer.ReadRange(buffer.Position(), int(txtLen))
+		if errRangeTxt != nil { return errRangeTxt }
+		r.Txt = string(txtData)
+		if errStep := buffer.Step(int(txtLen)); errStep != nil { return errStep }
+	case CZTR:
+		// CZTR is an empty indicator record (no RDATA content)
+		// Nothing to read
 	case DS:
 		if r.KeyTag, err = buffer.Readu16(); err != nil { return err }
 		if r.Algorithm, err = buffer.Read(); err != nil { return err }
@@ -984,6 +999,14 @@ func (r *DNSRecord) Write(buffer *BytePacketBuffer) (int, error) {
 		if err := buffer.Seek(lenPos); err != nil { return 0, err }
 		if err := buffer.Writeu16(uint16(currPos - (lenPos + 2))); err != nil { return 0, err } // #nosec G115
 		if err := buffer.Seek(currPos); err != nil { return 0, err }
+	case CATZ:
+		// CATZ RDATA is a version string (text)
+		if err := buffer.Writeu16(uint16(len(r.Txt) + 1)); err != nil { return 0, err } // #nosec G115
+		if err := buffer.Write(byte(len(r.Txt))); err != nil { return 0, err } // #nosec G115
+		if err := buffer.WriteRange(buffer.Position(), []byte(r.Txt)); err != nil { return 0, err }
+	case CZTR:
+		// CZTR is an empty indicator record (no RDATA content)
+		if err := buffer.Writeu16(0); err != nil { return 0, err }
 	default:
 		// RFC 2136: Delete RRset (ANY/ANY) or record (NONE/type) has RDLENGTH = 0
 		if len(r.Data) == 0 && (r.Class == 255 || r.Class == 254) {

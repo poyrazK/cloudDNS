@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -11,6 +12,37 @@ import (
 	"github.com/poyrazK/cloudDNS/internal/core/domain"
 	"github.com/poyrazK/cloudDNS/internal/dns/packet"
 )
+
+// mockTCPFactory is a test double for TCPConnFactory.
+type mockTCPFactory struct {
+	dialErr error
+}
+
+func (m *mockTCPFactory) DialTimeout(network, addr string, timeout time.Duration) (net.Conn, error) {
+	if m.dialErr != nil {
+		return nil, m.dialErr
+	}
+	return nil, errors.New("mock TCP factory not configured for real connections")
+}
+
+// mockTicker is a test double for Ticker.
+type mockTicker struct {
+	c chan time.Time
+}
+
+func (m *mockTicker) Stop() {}
+func (m *mockTicker) C() <-chan time.Time {
+	return m.c
+}
+
+// mockTickerFactory creates mockTicker instances.
+type mockTickerFactory struct {
+	ticker *mockTicker
+}
+
+func (m *mockTickerFactory) NewTicker(d time.Duration) Ticker {
+	return m.ticker
+}
 
 func TestRefreshZone(t *testing.T) {
 	repo := &mockServerRepo{}
@@ -182,4 +214,134 @@ func TestRefreshZone_HostnameMaster(t *testing.T) {
 	zone := &domain.Zone{Name: zoneName, MasterServer: "localhost"}
 	srv.refreshZone(context.Background(), zone)
 	// refreshZone is void - the test verifies queryFn receives the correct server address
+}
+
+func TestPerformIXFR_DialError(t *testing.T) {
+	repo := &mockServerRepo{}
+	srv := NewServer(":0", repo, nil)
+	srv.tcpFactory = &mockTCPFactory{dialErr: errors.New("connection refused")}
+
+	zone := &domain.Zone{ID: "z1", Name: "ixfr.test."}
+	err := srv.performIXFR(context.Background(), zone, "127.0.0.1:1", 100)
+	if err == nil {
+		t.Errorf("Expected dial error")
+	}
+}
+
+func TestPerformAXFR_DialError(t *testing.T) {
+	repo := &mockServerRepo{}
+	srv := NewServer(":0", repo, nil)
+	srv.tcpFactory = &mockTCPFactory{dialErr: errors.New("connection refused")}
+
+	zone := &domain.Zone{ID: "z1", Name: "axfr.test."}
+	err := srv.performAXFR(context.Background(), zone, "127.0.0.1:1")
+	if err == nil {
+		t.Errorf("Expected dial error")
+	}
+}
+
+func TestFetchAXFRPackets_DialError(t *testing.T) {
+	repo := &mockServerRepo{}
+	srv := NewServer(":0", repo, nil)
+	srv.tcpFactory = &mockTCPFactory{dialErr: errors.New("connection refused")}
+
+	_, err := srv.fetchAXFRPackets(context.Background(), "test.", "127.0.0.1:1")
+	if err == nil {
+		t.Errorf("Expected dial error")
+	}
+}
+
+func TestStartCatalogPoller_Ticker(t *testing.T) {
+	repo := &mockServerRepo{}
+	srv := NewServer(":0", repo, nil)
+
+	// Create a mock ticker that we can control
+	mockTick := &mockTicker{c: make(chan time.Time, 1)}
+	srv.tickerFactory = &mockTickerFactory{ticker: mockTick}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Start the poller - it should return when context is cancelled
+	go srv.StartCatalogPoller(ctx, []string{"catalog.test."}, "127.0.0.1:1", time.Hour)
+
+	// Cancel after a short delay
+	time.Sleep(10 * time.Millisecond)
+	cancel()
+
+	// The function should return without hanging
+}
+
+func TestStartCatalogPoller_ImmediateCancel(t *testing.T) {
+	repo := &mockServerRepo{}
+	srv := NewServer(":0", repo, nil)
+
+	mockTick := &mockTicker{c: make(chan time.Time, 1)}
+	srv.tickerFactory = &mockTickerFactory{ticker: mockTick}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	// Should return immediately without hanging
+	srv.StartCatalogPoller(ctx, []string{"catalog.test."}, "127.0.0.1:1", time.Hour)
+}
+
+func TestFetchCatalogEntries_Empty(t *testing.T) {
+	repo := &mockServerRepo{}
+	srv := NewServer(":0", repo, nil)
+	srv.tcpFactory = &mockTCPFactory{dialErr: errors.New("no connection")}
+
+	_, err := srv.fetchCatalogEntries(context.Background(), "catalog.test.", "127.0.0.1:1")
+	if err == nil {
+		t.Errorf("Expected error from TCP factory")
+	}
+}
+
+
+
+func TestFetchZoneRecords_DialError(t *testing.T) {
+	repo := &mockServerRepo{}
+	srv := NewServer(":0", repo, nil)
+	srv.tcpFactory = &mockTCPFactory{dialErr: errors.New("connection refused")}
+
+	_, err := srv.fetchZoneRecords(context.Background(), "test.", "127.0.0.1:1", "z1", "tenant1")
+	if err == nil {
+		t.Errorf("Expected dial error")
+	}
+}
+
+func TestPollCatalogZone_CZTRError(t *testing.T) {
+	repo := &mockServerRepo{}
+	srv := NewServer(":0", repo, nil)
+
+	// Make queryFn return error (master doesn't support CZTR)
+	srv.queryFn = func(server string, name string, qType packet.QueryType) (*packet.DNSPacket, error) {
+		return nil, errors.New("network error")
+	}
+
+	err := srv.pollCatalogZone(context.Background(), "catalog.test.", "127.0.0.1:1")
+	if err != nil {
+		t.Errorf("Expected nil for CZTR error (graceful skip), got %v", err)
+	}
+}
+
+func TestPollCatalogZone_EmptyCZTR(t *testing.T) {
+	repo := &mockServerRepo{}
+	srv := NewServer(":0", repo, nil)
+
+	// Return empty CZTR response (slave mode not supported)
+	srv.queryFn = func(server string, name string, qType packet.QueryType) (*packet.DNSPacket, error) {
+		resp := packet.NewDNSPacket()
+		resp.Header.Response = true
+		// No answers - slave mode not supported
+		return resp, nil
+	}
+
+	err := srv.pollCatalogZone(context.Background(), "catalog.test.", "127.0.0.1:1")
+	if err != nil {
+		t.Errorf("Expected nil for empty CZTR (graceful skip), got %v", err)
+	}
+}
+
+func strPtr(s string) *string {
+	return &s
 }

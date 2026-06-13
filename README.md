@@ -41,6 +41,7 @@ cloudDNS is a high-performance, authoritative, and recursive DNS server built fr
 *   **EDNS(0) & Truncation (RFC 6891)**: Extended payload support with automatic TCP fallback.
 *   **TSIG (RFC 2845)**: HMAC-authenticated transactions for secure updates and transfers.
 *   **CHAOS Class Support**: Node identity resolution (`id.server.`, `hostname.bind.`) for NSID-ready deployments.
+*   **Catalog Zones (RFC 9432)**: Zone metadata catalog supporting zone provisioning, membership management, and slave-side polling with automatic AXFR-based synchronization.
 
 ### Architecture & Management
 *   **Hexagonal Architecture**: Clean separation of concerns (Domain -> Ports -> Adapters).

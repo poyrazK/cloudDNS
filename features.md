@@ -34,6 +34,7 @@ Built-in orchestration for global Anycast networks using BGP.
 *   **Dynamic Updates (RFC 2136)**: Standardized dynamic record management.
 *   **IXFR (Incremental Zone Transfer)**: RFC 1995 compliant synchronization using transactional delta logging, with intelligent AXFR fallback.
 *   **DNS64 (RFC 6147)**: Synthesizes AAAA records from A records for IPv6-only clients communicating with IPv4-only servers.
+*   **Catalog Zones (RFC 9432)**: Zone metadata catalog with CRUD API for catalog management, membership add/remove operations, and slave-side polling with automatic AXFR-based zone provisioning from a master server.
 
 ## 6. Management & Security
 *   **Hexagonal Architecture**: Strict separation between core logic and infrastructure adapters.
